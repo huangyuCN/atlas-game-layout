@@ -1,0 +1,22 @@
+// 匹配事件（nats 事件总线消息，无 service）：
+// 成局/失败事件由 matcher 发布，gateway（推送）与 game（状态回写）订阅。
+syntax = "proto3";
+
+package matcher.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1";
+
+// MatchStartedEvent 匹配成功（battle 已创建）。
+message MatchStartedEvent {
+  string match_id = 1;
+  string battle_id = 2;
+  repeated string player_ids = 3;
+  string battle_endpoint = 4;
+}
+
+// MatchFailedEvent 匹配失败（超时/取消）。
+message MatchFailedEvent {
+  string match_id = 1;
+  repeated string player_ids = 2;
+  string reason = 3;
+}

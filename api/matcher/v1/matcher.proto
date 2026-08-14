@@ -1,0 +1,58 @@
+// matcher 服务协议：入队/取消（game 玩家 actor 经 grpc 调用）。
+syntax = "proto3";
+
+package matcher.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1";
+
+import "api/common/v1/common.proto";
+import "google/api/annotations.proto";
+
+// QueueMatchRequest 入队：玩家属性快照 ticket（纯撮合，matcher 不查库）。
+message QueueMatchRequest {
+  string player_id = 1;
+  common.v1.PlayerSummary player = 2;
+  string ruleset = 3;
+}
+
+message QueueMatchReply {
+  string match_id = 1;
+}
+
+message CancelMatchRequest {
+  string player_id = 1;
+}
+
+message CancelMatchReply {}
+
+// QueryMatchRequest 查询玩家当前匹配状态。
+message QueryMatchRequest {
+  string player_id = 1;
+}
+
+// QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
+message QueryMatchReply {
+  string state = 1;
+  string match_id = 2;
+}
+
+// Matcher 是撮合服务。
+service Matcher {
+  rpc QueueMatch (QueueMatchRequest) returns (QueueMatchReply) {
+    option (google.api.http) = {
+      post: "/v1/matcher/queue"
+      body: "*"
+    };
+  }
+  rpc CancelMatch (CancelMatchRequest) returns (CancelMatchReply) {
+    option (google.api.http) = {
+      post: "/v1/matcher/cancel"
+      body: "*"
+    };
+  }
+  rpc QueryMatch (QueryMatchRequest) returns (QueryMatchReply) {
+    option (google.api.http) = {
+      get: "/v1/matcher/query/{player_id}"
+    };
+  }
+}

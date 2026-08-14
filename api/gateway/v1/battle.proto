@@ -1,0 +1,60 @@
+// gateway 战斗通道协议（kcp/udp/ws 传输）：
+// 加入战斗与帧输入上行；帧广播/战斗结束/开局通知为服务端推送消息。
+// 帧数据复用 Atlas api/lockstep 的 LockstepInput/LockstepFrame。
+syntax = "proto3";
+
+package gateway.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1";
+
+import "api/lockstep/lockstep.proto";
+
+// JoinBattleRequest 加入战斗（战斗通道 token 绑定后调用）。
+message JoinBattleRequest {
+  string battle_id = 1;
+}
+
+// JoinBattleReply 加入回执：携带会话元信息、当前帧与快照，支持断线重连恢复。
+message JoinBattleReply {
+  bool ok = 1;
+  string error_reason = 2;
+  atlas.game.lockstep.SessionMeta meta = 3;   // 会话元信息
+  uint64 current_frame = 4;                   // 当前帧号
+  atlas.game.lockstep.SnapshotMeta snapshot = 5;  // 最新快照（重连恢复）
+}
+
+// SendFrameInputRequest 帧输入上行（客户端 → gateway → battle）。
+message SendFrameInputRequest {
+  string battle_id = 1;
+  atlas.game.lockstep.LockstepInput input = 2;
+}
+
+message SendFrameInputReply {}
+
+// FrameBroadcast 服务端推送：帧广播下行。
+message FrameBroadcast {
+  string battle_id = 1;
+  atlas.game.lockstep.LockstepFrame frame = 2;
+}
+
+// MatchStartedNotify 服务端推送：匹配成功开局通知（含 battle 实例地址）。
+message MatchStartedNotify {
+  string match_id = 1;
+  string battle_id = 2;
+  repeated string player_ids = 3;
+  string endpoint = 4;
+}
+
+// BattleEndNotify 服务端推送：战斗结束通知。
+message BattleEndNotify {
+  string battle_id = 1;
+  string winner_player_id = 2;
+}
+
+// GatewayBattle 是战斗通道协议（客户端 → 服务端 rpc）。
+service GatewayBattle {
+  rpc JoinBattle (JoinBattleRequest) returns (JoinBattleReply);
+  rpc SendFrameInput (SendFrameInputRequest) returns (SendFrameInputReply);
+  // SyncFrames 补帧：断线重连后按帧区间拉取缺失帧（复用 lockstep 协议）。
+  rpc SyncFrames (atlas.game.lockstep.SyncFrameRequest) returns (atlas.game.lockstep.SyncFrameReply);
+}

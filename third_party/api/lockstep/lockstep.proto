@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package atlas.game.lockstep;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/huangyuCN/atlas/api/lockstep;locksteppb";
+
+// ---------------- 基础枚举与元信息 ----------------
+
+enum LockstepMode {
+  LOCKSTEP_MODE_UNSPECIFIED = 0;
+  LOCKSTEP_MODE_SERVER_AUTHORITATIVE = 1;
+  LOCKSTEP_MODE_P2P = 2;
+}
+
+message SessionMeta {
+  string   session_id          = 1;
+  uint32   max_players         = 2;
+  uint32   max_spectators      = 3;
+  uint32   tick_millis         = 4;
+  uint32   input_delay_frames  = 5;
+  uint32   max_rollback_frames = 6;
+  LockstepMode mode            = 7;
+}
+
+// ---------------- 输入、帧、快照 ----------------
+
+message LockstepInput {
+  uint64  frame_id   = 1;
+  string  player_id  = 2;
+  bytes   payload    = 3;
+  bool    predicted  = 4;
+  int64   client_send_time_unix_nano = 5;
+}
+
+message FrameInputs {
+  uint64 frame_id = 1;
+  repeated LockstepInput inputs = 2;
+}
+
+message SnapshotMeta {
+  uint64 frame_id = 1;
+  bytes  state_hash = 2;
+  uint64 size_bytes = 3;
+  string storage_key = 4;
+}
+
+message LockstepFrame {
+  uint64 frame_id = 1;
+  repeated LockstepInput inputs = 2;
+  bytes  state_hash = 3;
+  google.protobuf.Timestamp server_time = 4;
+  SnapshotMeta snapshot = 5;
+}
+
+// ---------------- Session 生命周期 & 输入/同步 ----------------
+
+message CreateSessionRequest {
+  SessionMeta meta = 1;
+}
+message CreateSessionReply {
+  SessionMeta meta = 1;
+}
+
+message DestroySessionRequest {
+  string session_id = 1;
+}
+message DestroySessionReply {}
+
+message JoinSessionRequest {
+  string session_id = 1;
+  string player_id  = 2;
+}
+message JoinSessionReply {
+  SessionMeta  meta          = 1;
+  uint64       current_frame = 2;
+  SnapshotMeta snapshot      = 3;
+}
+
+message LeaveSessionRequest {
+  string session_id = 1;
+  string player_id  = 2;
+}
+message LeaveSessionReply {}
+
+message PushInputRequest {
+  string       session_id = 1;
+  LockstepInput input     = 2;
+}
+message PushInputReply {
+  uint64 accepted_frame_id = 1;
+}
+
+message SyncFrameRequest {
+  string session_id   = 1;
+  uint64 from_frame_id = 2;
+  uint32 limit         = 3;
+}
+message SyncFrameReply {
+  repeated LockstepFrame frames = 1;
+  uint64 confirmed_frame_id = 2;
+}
+
+// ---------------- 观战 & 回放 ----------------
+
+message SpectateRequest {
+  string session_id   = 1;
+  uint64 from_frame_id = 2;
+}
+
+message ReplayRequest {
+  string session_id   = 1;
+  uint64 from_frame_id = 2;
+  uint64 to_frame_id   = 3;
+}
+
+message ReplayFrame {
+  LockstepFrame frame = 1;
+}
+
+// ---------------- 反作弊/数据分析扫描 ----------------
+
+message ScanInputsRequest {
+  string session_id = 1;
+  string player_id  = 2;   // 为空表示不过滤
+  uint64 from_frame_id = 3;
+  uint64 to_frame_id   = 4;
+  int64  from_time_unix_nano = 5;
+  int64  to_time_unix_nano   = 6;
+  uint32 max_records = 7;
+}
+
+message InputRecord {
+  string        session_id = 1;
+  LockstepInput input      = 2;
+}
+
+message ScanInputsReply {
+  repeated InputRecord records = 1;
+}
+
+// ---------------- Service ----------------
+
+service Lockstep {
+  rpc CreateSession (CreateSessionRequest) returns (CreateSessionReply);
+  rpc DestroySession (DestroySessionRequest) returns (DestroySessionReply);
+
+  rpc JoinSession (JoinSessionRequest) returns (JoinSessionReply);
+  rpc LeaveSession (LeaveSessionRequest) returns (LeaveSessionReply);
+
+  rpc PushInput (PushInputRequest) returns (PushInputReply);
+  rpc SyncFrame (SyncFrameRequest) returns (SyncFrameReply);
+
+  rpc Spectate (SpectateRequest) returns (stream LockstepFrame);
+  rpc Replay (ReplayRequest) returns (stream ReplayFrame);
+
+  rpc ScanInputs (ScanInputsRequest) returns (ScanInputsReply);
+}

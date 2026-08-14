@@ -1,0 +1,53 @@
+// gateway 客户端协议（业务通道：tcp/ws 传输）：注册/登录/心跳与挤下线通知。
+syntax = "proto3";
+
+package gateway.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1";
+
+import "api/common/v1/common.proto";
+
+// RegisterRequest 注册：账号不存在则创建玩家。
+message RegisterRequest {
+  string account = 1;
+  string password = 2;
+  string nickname = 3;
+}
+
+message RegisterReply {
+  string player_id = 1;
+}
+
+// LoginRequest 登录：账号存在则建立会话。
+message LoginRequest {
+  string account = 1;
+  string password = 2;
+}
+
+// LoginReply 登录回执：token 用于战斗通道绑定与后续鉴权。
+message LoginReply {
+  string player_id = 1;
+  string token = 2;
+  common.v1.PlayerSummary player = 3;
+}
+
+// Ping/Pong 心跳保活。
+message Ping {
+  int64 ts = 1;
+}
+
+message Pong {
+  int64 ts = 1;
+}
+
+// KickedNotify 服务端推送：被挤下线（旧连接断开前收到）。
+message KickedNotify {
+  string reason = 1;
+}
+
+// GatewayAuth 是网关认证服务（业务通道协议）。
+service GatewayAuth {
+  rpc Register (RegisterRequest) returns (RegisterReply);
+  rpc Login (LoginRequest) returns (LoginReply);
+  rpc Heartbeat (Ping) returns (Pong);
+}

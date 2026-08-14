@@ -1,0 +1,13 @@
+// 公共消息：跨服务共享的数据结构。
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/common/v1;commonv1";
+
+// PlayerSummary 是玩家摘要（登录回执、匹配票、推送等场景复用）。
+message PlayerSummary {
+  string player_id = 1;
+  string nickname = 2;
+  int32 level = 3;
+}

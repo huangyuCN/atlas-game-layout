@@ -1,0 +1,35 @@
+// 业务错误码：经 protoc-gen-atlas-errors 生成 Is/Err/Code/Reason 辅助函数。
+syntax = "proto3";
+
+package error.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/error/v1;errorv1";
+
+import "errors/errors.proto";
+
+enum ErrorReason {
+  option (atlas.errors.default_code) = 400;
+
+  None = 0;
+
+  // 注册/登录
+  PlayerNotFound = 1001 [(atlas.errors.code) = 404];      // 玩家不存在，请先注册
+  PlayerAlreadyExists = 1002 [(atlas.errors.code) = 409]; // 玩家已存在
+  InvalidToken = 1003 [(atlas.errors.code) = 401];        // 会话令牌无效
+  KickedOffline = 1004 [(atlas.errors.code) = 401];       // 被挤下线
+  TokenExpired = 1005 [(atlas.errors.code) = 401];        // 会话令牌过期
+  SessionNotFound = 1006 [(atlas.errors.code) = 404];     // 会话不存在
+  PlayerNotOnline = 1007 [(atlas.errors.code) = 404];     // 玩家不在线
+
+  // 匹配
+  AlreadyInMatch = 2001 [(atlas.errors.code) = 409]; // 已在匹配中
+  MatchNotFound = 2002 [(atlas.errors.code) = 404];  // 匹配不存在
+
+  // 战斗
+  BattleNotFound = 3001 [(atlas.errors.code) = 404]; // 战斗不存在
+  BattleFull = 3002 [(atlas.errors.code) = 409];     // 战斗已满
+  BattleEnded = 3003 [(atlas.errors.code) = 409];    // 战斗已结束
+
+  // 通用
+  Internal = 9001 [(atlas.errors.code) = 500]; // 服务内部错误
+}

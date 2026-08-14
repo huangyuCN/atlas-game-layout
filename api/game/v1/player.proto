@@ -1,0 +1,77 @@
+// game 服务协议：grpc 服务（gateway/管理调用）与 actor 消息载体
+// （注册/登录经 actor 远程路由 + 懒激活投递到 PlayerActor）。
+syntax = "proto3";
+
+package game.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
+
+import "api/common/v1/common.proto";
+import "google/api/annotations.proto";
+
+// LoginActorReq 是 PlayerActor 的登录/注册消息（actor Ask 载荷）。
+message LoginActorReq {
+  string account = 1;
+  string token = 2;
+  string gateway_instance = 3;
+}
+
+message LoginActorReply {
+  bool ok = 1;
+  string error_reason = 2;
+  common.v1.PlayerSummary player = 3;
+}
+
+// GetPlayerRequest/Reply 玩家信息查询。
+message GetPlayerRequest {
+  string player_id = 1;
+}
+
+message GetPlayerReply {
+  common.v1.PlayerSummary player = 1;
+}
+
+// BackpackItem 背包条目（示例业务：M5 背包 handler 使用）。
+message BackpackItem {
+  uint32 item_id = 1;
+  uint32 count = 2;
+}
+
+// GetBackpackRequest/Reply 背包查询。
+message GetBackpackRequest {
+  string player_id = 1;
+}
+
+message GetBackpackReply {
+  repeated BackpackItem items = 1;
+}
+
+// GrantItemRequest/Reply 发道具（管理/活动渠道）。
+message GrantItemRequest {
+  string player_id = 1;
+  uint32 item_id = 2;
+  uint32 count = 3;
+  string reason = 4;  // 发放原因（审计）
+}
+
+message GrantItemReply {}
+
+// Player 是玩家业务 grpc 服务。
+service Player {
+  rpc GetPlayer (GetPlayerRequest) returns (GetPlayerReply) {
+    option (google.api.http) = {
+      get: "/v1/players/{player_id}"
+    };
+  }
+  rpc GetBackpack (GetBackpackRequest) returns (GetBackpackReply) {
+    option (google.api.http) = {
+      get: "/v1/players/{player_id}/backpack"
+    };
+  }
+  rpc GrantItem (GrantItemRequest) returns (GrantItemReply) {
+    option (google.api.http) = {
+      post: "/v1/players/{player_id}/items"
+      body: "*"
+    };
+  }
+}

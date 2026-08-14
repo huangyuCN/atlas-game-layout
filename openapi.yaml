@@ -1,0 +1,340 @@
+# Generated with protoc-gen-openapi
+# https://github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi
+
+openapi: 3.0.3
+info:
+    title: ""
+    version: 0.0.1
+paths:
+    /v1/battles:
+        post:
+            tags:
+                - Battle
+            operationId: Battle_CreateBattle
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateBattleRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateBattleReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/battles/{battleId}:
+        get:
+            tags:
+                - Battle
+            operationId: Battle_GetBattle
+            parameters:
+                - name: battleId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetBattleReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/matcher/cancel:
+        post:
+            tags:
+                - Matcher
+            operationId: Matcher_CancelMatch
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CancelMatchRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CancelMatchReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/matcher/query/{playerId}:
+        get:
+            tags:
+                - Matcher
+            operationId: Matcher_QueryMatch
+            parameters:
+                - name: playerId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QueryMatchReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/matcher/queue:
+        post:
+            tags:
+                - Matcher
+            operationId: Matcher_QueueMatch
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/QueueMatchRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QueueMatchReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/players/{playerId}:
+        get:
+            tags:
+                - Player
+            operationId: Player_GetPlayer
+            parameters:
+                - name: playerId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetPlayerReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/players/{playerId}/backpack:
+        get:
+            tags:
+                - Player
+            operationId: Player_GetBackpack
+            parameters:
+                - name: playerId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetBackpackReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/players/{playerId}/items:
+        post:
+            tags:
+                - Player
+            operationId: Player_GrantItem
+            parameters:
+                - name: playerId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GrantItemRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GrantItemReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+components:
+    schemas:
+        BackpackItem:
+            type: object
+            properties:
+                itemId:
+                    type: integer
+                    format: uint32
+                count:
+                    type: integer
+                    format: uint32
+            description: BackpackItem 背包条目（示例业务：M5 背包 handler 使用）。
+        CancelMatchReply:
+            type: object
+            properties: {}
+        CancelMatchRequest:
+            type: object
+            properties:
+                playerId:
+                    type: string
+        CreateBattleReply:
+            type: object
+            properties:
+                battleId:
+                    type: string
+        CreateBattleRequest:
+            type: object
+            properties:
+                matchId:
+                    type: string
+                playerIds:
+                    type: array
+                    items:
+                        type: string
+            description: CreateBattleRequest 开局：matcher 成局后调用。
+        GetBackpackReply:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/BackpackItem'
+        GetBattleReply:
+            type: object
+            properties:
+                state:
+                    type: string
+        GetPlayerReply:
+            type: object
+            properties:
+                player:
+                    $ref: '#/components/schemas/PlayerSummary'
+        GoogleProtobufAny:
+            type: object
+            properties:
+                '@type':
+                    type: string
+                    description: The type of the serialized message.
+            additionalProperties: true
+            description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
+        GrantItemReply:
+            type: object
+            properties: {}
+        GrantItemRequest:
+            type: object
+            properties:
+                playerId:
+                    type: string
+                itemId:
+                    type: integer
+                    format: uint32
+                count:
+                    type: integer
+                    format: uint32
+                reason:
+                    type: string
+            description: GrantItemRequest/Reply 发道具（管理/活动渠道）。
+        PlayerSummary:
+            type: object
+            properties:
+                playerId:
+                    type: string
+                nickname:
+                    type: string
+                level:
+                    type: integer
+                    format: int32
+            description: PlayerSummary 是玩家摘要（登录回执、匹配票、推送等场景复用）。
+        QueryMatchReply:
+            type: object
+            properties:
+                state:
+                    type: string
+                matchId:
+                    type: string
+            description: QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
+        QueueMatchReply:
+            type: object
+            properties:
+                matchId:
+                    type: string
+        QueueMatchRequest:
+            type: object
+            properties:
+                playerId:
+                    type: string
+                player:
+                    $ref: '#/components/schemas/PlayerSummary'
+                ruleset:
+                    type: string
+            description: QueueMatchRequest 入队：玩家属性快照 ticket（纯撮合，matcher 不查库）。
+        Status:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    description: The status code, which should be an enum value of [google.rpc.Code][google.rpc.Code].
+                    format: int32
+                message:
+                    type: string
+                    description: A developer-facing error message, which should be in English. Any user-facing error message should be localized and sent in the [google.rpc.Status.details][google.rpc.Status.details] field, or localized by the client.
+                details:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GoogleProtobufAny'
+                    description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
+            description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+tags:
+    - name: Battle
+      description: Battle 是战斗管理服务。
+    - name: Matcher
+      description: Matcher 是撮合服务。
+    - name: Player
+      description: Player 是玩家业务 grpc 服务。

@@ -1,0 +1,57 @@
+// battle 服务协议：开局/查询（matcher 经 grpc 调用）与
+// 战斗结算事件（nats 事件总线消息，game 订阅回写玩家数据）。
+syntax = "proto3";
+
+package battle.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1";
+
+import "google/api/annotations.proto";
+
+// CreateBattleRequest 开局：matcher 成局后调用。
+message CreateBattleRequest {
+  string match_id = 1;
+  repeated string player_ids = 2;
+}
+
+message CreateBattleReply {
+  string battle_id = 1;
+}
+
+// GetBattleRequest/Reply 战斗状态查询。
+message GetBattleRequest {
+  string battle_id = 1;
+}
+
+message GetBattleReply {
+  string state = 1;
+}
+
+// PlayerResult 单个玩家的战斗结果。
+message PlayerResult {
+  string player_id = 1;
+  bool win = 2;
+  int32 score = 3;
+}
+
+// BattleSettledEvent 战斗结算事件（battle 发布 → nats → game 回写玩家数据）。
+message BattleSettledEvent {
+  string battle_id = 1;
+  string match_id = 2;
+  repeated PlayerResult players = 3;
+}
+
+// Battle 是战斗管理服务。
+service Battle {
+  rpc CreateBattle (CreateBattleRequest) returns (CreateBattleReply) {
+    option (google.api.http) = {
+      post: "/v1/battles"
+      body: "*"
+    };
+  }
+  rpc GetBattle (GetBattleRequest) returns (GetBattleReply) {
+    option (google.api.http) = {
+      get: "/v1/battles/{battle_id}"
+    };
+  }
+}
