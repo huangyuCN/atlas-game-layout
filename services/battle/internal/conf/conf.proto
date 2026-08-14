@@ -1,0 +1,20 @@
+// battle 服务配置：引用公共配置消息（含 mongo 战斗结果存储）。
+syntax = "proto3";
+
+package battle.conf;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;conf";
+
+import "protobuf/configs/runtime.proto";
+import "protobuf/configs/registry.proto";
+import "protobuf/configs/server.proto";
+import "protobuf/configs/data.proto";
+import "protobuf/configs/log.proto";
+
+message Bootstrap {
+  atlas.configs.Runtime runtime = 1;
+  atlas.configs.Registry registry = 2;
+  atlas.configs.Server server = 3;
+  atlas.configs.Data data = 4;
+  atlas.configs.Log log = 5;
+}

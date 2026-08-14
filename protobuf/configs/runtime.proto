@@ -1,0 +1,13 @@
+// 公共配置：服务运行时身份（服务名/实例/版本/环境）。
+syntax = "proto3";
+
+package atlas.configs;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
+
+message Runtime {
+  string name = 1;
+  string id = 2;
+  string version = 3;
+  string env = 4;
+}

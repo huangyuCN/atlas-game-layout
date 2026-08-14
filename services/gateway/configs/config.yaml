@@ -1,8 +1,21 @@
-# gateway 配置：五协议接入 + 会话与路由
-name: gateway
-id: gateway-1
-http:
-  addr: 0.0.0.0:10080
+runtime:
+  name: gateway
+  id: gateway-1
+registry:
+  etcd:
+    endpoints:
+      - 127.0.0.1:12379
+server:
+  http:
+    addr: 0.0.0.0:10080
+data:
+  redis:
+    addr: 127.0.0.1:16379
+  nats:
+    url: nats://127.0.0.1:14222
+log:
+  level: info
+  format: text
 tcp:
   addr: 0.0.0.0:9001
 websocket:
@@ -11,12 +24,3 @@ kcp:
   addr: 0.0.0.0:9003
 udp:
   addr: 0.0.0.0:9004
-etcd:
-  endpoints:
-    - 127.0.0.1:12379
-redis:
-  addr: 127.0.0.1:16379
-nats:
-  url: nats://127.0.0.1:14222
-log:
-  level: info

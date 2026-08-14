@@ -1,0 +1,17 @@
+// 公共配置：传输层监听地址（grpc 服务间调用、http 健康/管理）。
+syntax = "proto3";
+
+package atlas.configs;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
+
+message Server {
+  message GRPC {
+    string addr = 1;
+  }
+  message HTTP {
+    string addr = 1;
+  }
+  GRPC grpc = 1;
+  HTTP http = 2;
+}

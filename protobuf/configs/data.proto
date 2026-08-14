@@ -1,0 +1,22 @@
+// 公共配置：数据中间件（redis 会话/队列、nats 事件总线、mongo 持久化）。
+syntax = "proto3";
+
+package atlas.configs;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
+
+message Data {
+  message Redis {
+    string addr = 1;
+  }
+  message Nats {
+    string url = 1;
+  }
+  message Mongo {
+    string uri = 1;
+    string database = 2;
+  }
+  Redis redis = 1;
+  Nats nats = 2;
+  Mongo mongo = 3;
+}

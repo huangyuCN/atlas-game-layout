@@ -1,0 +1,20 @@
+// matcher 服务配置：引用公共配置消息（撮合队列配置 M6 追加）。
+syntax = "proto3";
+
+package matcher.conf;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf;conf";
+
+import "protobuf/configs/runtime.proto";
+import "protobuf/configs/registry.proto";
+import "protobuf/configs/server.proto";
+import "protobuf/configs/data.proto";
+import "protobuf/configs/log.proto";
+
+message Bootstrap {
+  atlas.configs.Runtime runtime = 1;
+  atlas.configs.Registry registry = 2;
+  atlas.configs.Server server = 3;
+  atlas.configs.Data data = 4;
+  atlas.configs.Log log = 5;
+}

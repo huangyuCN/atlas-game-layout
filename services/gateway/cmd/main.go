@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	var cfg conf.Config
+	var cfg conf.Bootstrap
 	opts, err := bootstrap.Assemble("gateway", &cfg, server.Module)
 	if err != nil {
 		panic(err)

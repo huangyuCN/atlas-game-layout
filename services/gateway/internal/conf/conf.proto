@@ -1,0 +1,29 @@
+// gateway 服务配置：引用公共配置消息 + 多协议接入端口。
+syntax = "proto3";
+
+package gateway.conf;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf;conf";
+
+import "protobuf/configs/runtime.proto";
+import "protobuf/configs/registry.proto";
+import "protobuf/configs/server.proto";
+import "protobuf/configs/data.proto";
+import "protobuf/configs/log.proto";
+
+message Bootstrap {
+  atlas.configs.Runtime runtime = 1;
+  atlas.configs.Registry registry = 2;
+  atlas.configs.Server server = 3;
+  atlas.configs.Data data = 4;
+  atlas.configs.Log log = 5;
+
+  // Net 是客户端接入协议的监听地址（M4 里程碑启用）。
+  message Net {
+    string addr = 1;
+  }
+  Net tcp = 10;
+  Net websocket = 11;
+  Net kcp = 12;
+  Net udp = 13;
+}

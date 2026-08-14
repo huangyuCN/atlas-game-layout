@@ -13,8 +13,8 @@ import (
 )
 
 // NewHTTPServer 构造 HTTP 服务端（健康检查）。
-func NewHTTPServer(cfg *conf.Config) (transport.Server, error) {
-	srv, err := atlashttp.NewServer(atlashttp.WithAddress(cfg.HTTP.Addr))
+func NewHTTPServer(cfg *conf.Bootstrap) (transport.Server, error) {
+	srv, err := atlashttp.NewServer(atlashttp.WithAddress(cfg.GetServer().GetHttp().GetAddr()))
 	if err != nil {
 		return nil, fmt.Errorf("server: 构造 HTTP 服务端失败: %w", err)
 	}

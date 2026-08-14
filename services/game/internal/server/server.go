@@ -14,8 +14,8 @@ import (
 )
 
 // NewHTTPServer 构造 HTTP 服务端（健康检查）。
-func NewHTTPServer(cfg *conf.Config) (transport.Server, error) {
-	srv, err := atlashttp.NewServer(atlashttp.WithAddress(cfg.HTTP.Addr))
+func NewHTTPServer(cfg *conf.Bootstrap) (transport.Server, error) {
+	srv, err := atlashttp.NewServer(atlashttp.WithAddress(cfg.GetServer().GetHttp().GetAddr()))
 	if err != nil {
 		return nil, fmt.Errorf("server: 构造 HTTP 服务端失败: %w", err)
 	}
@@ -27,8 +27,8 @@ func NewHTTPServer(cfg *conf.Config) (transport.Server, error) {
 }
 
 // NewGRPCServer 构造 gRPC 服务端（服务注册在协议里程碑后追加）。
-func NewGRPCServer(cfg *conf.Config) (transport.Server, error) {
-	srv, err := atlasgrpc.NewServer(atlasgrpc.WithAddress(cfg.GRPC.Addr))
+func NewGRPCServer(cfg *conf.Bootstrap) (transport.Server, error) {
+	srv, err := atlasgrpc.NewServer(atlasgrpc.WithAddress(cfg.GetServer().GetGrpc().GetAddr()))
 	if err != nil {
 		return nil, fmt.Errorf("server: 构造 gRPC 服务端失败: %w", err)
 	}

@@ -1,0 +1,13 @@
+// 公共配置：服务注册中心。
+syntax = "proto3";
+
+package atlas.configs;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
+
+message Registry {
+  message Etcd {
+    repeated string endpoints = 1;
+  }
+  Etcd etcd = 1;
+}

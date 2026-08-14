@@ -1,0 +1,11 @@
+// 公共配置：日志（级别/格式，装配见 pkg/log）。
+syntax = "proto3";
+
+package atlas.configs;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
+
+message Log {
+  string level = 1;
+  string format = 2;
+}
