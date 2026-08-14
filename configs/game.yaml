@@ -1,0 +1,19 @@
+# game 配置：grpc/http 服务 + 中间件
+name: game
+id: game-1
+grpc:
+  addr: 0.0.0.0:9100
+http:
+  addr: 0.0.0.0:9180
+etcd:
+  endpoints:
+    - 127.0.0.1:12379
+mongo:
+  uri: mongodb://127.0.0.1:27017
+  database: game
+redis:
+  addr: 127.0.0.1:16379
+nats:
+  url: nats://127.0.0.1:14222
+log:
+  level: info

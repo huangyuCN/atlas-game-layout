@@ -1,0 +1,16 @@
+# matcher 配置：撮合服务 + matchmaker 队列
+name: matcher
+id: matcher-1
+grpc:
+  addr: 0.0.0.0:9200
+http:
+  addr: 0.0.0.0:9280
+etcd:
+  endpoints:
+    - 127.0.0.1:12379
+redis:
+  addr: 127.0.0.1:16379
+nats:
+  url: nats://127.0.0.1:14222
+log:
+  level: info
