@@ -65,7 +65,7 @@ func TestLoadBadFormat(t *testing.T) {
 	}
 }
 
-// TestFromService 验证按服务名从 configs 目录加载的路径约定。
+// TestFromService 验证按服务名从服务目录加载的路径约定。
 func TestFromService(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, err := os.Getwd()
@@ -77,11 +77,12 @@ func TestFromService(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldWD) })
 
-	if err := os.MkdirAll("configs", 0o755); err != nil {
-		t.Fatalf("创建 configs 目录失败: %v", err)
+	confDir := filepath.Join("services", "demo", "configs")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		t.Fatalf("创建服务配置目录失败: %v", err)
 	}
 	data := "name: demo\nid: demo-1\n"
-	if err := os.WriteFile("configs/demo.yaml", []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(confDir, "config.yaml"), []byte(data), 0o644); err != nil {
 		t.Fatalf("写入服务配置失败: %v", err)
 	}
 

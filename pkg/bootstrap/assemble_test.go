@@ -16,13 +16,14 @@ type testConf struct {
 // BaseConfig 返回配置底座。
 func (c *testConf) BaseConfig() *confbase.Base { return &c.Base }
 
-// writeConf 在 dir 下生成 configs/demo.yaml 并切换工作目录。
+// writeConf 在 dir 下生成 services/demo/configs/config.yaml 并切换工作目录。
 func writeConf(t *testing.T, dir, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, "configs"), 0o755); err != nil {
-		t.Fatalf("创建 configs 目录失败: %v", err)
+	confDir := filepath.Join(dir, "services", "demo", "configs")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		t.Fatalf("创建服务配置目录失败: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "configs", "demo.yaml"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(confDir, "config.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 	oldWD, err := os.Getwd()

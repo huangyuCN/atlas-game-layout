@@ -2,7 +2,7 @@
 name: gateway
 id: gateway-1
 http:
-  addr: 0.0.0.0:8080
+  addr: 0.0.0.0:10080
 tcp:
   addr: 0.0.0.0:9001
 websocket:
