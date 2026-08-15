@@ -6,9 +6,12 @@ import (
 	"strings"
 	"time"
 
+	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/nats-io/nats.go"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // pushEnvelope 是 nats 推送事件的消息格式：
@@ -25,6 +28,7 @@ type kickNotice struct {
 
 // StartRelay 启动下行推送与控制通道订阅（D11/D13）：
 //   - 订阅 atlas.push.> 通配主题，按路由表仅持有连接的实例下发；
+//   - 订阅成局事件（atlas.event.match.started），向参战玩家推送开局通知；
 //   - 订阅本实例控制通道，处理跨实例挤下线通知。
 func (g *Gateway) StartRelay(ctx context.Context) error {
 	if g.nc == nil {
@@ -33,8 +37,34 @@ func (g *Gateway) StartRelay(ctx context.Context) error {
 	if _, err := pkgnats.SubscribeWildcard(g.nc, consts.TopicPush+">", g.onPushEvent); err != nil {
 		return err
 	}
+	if _, err := pkgnats.Subscribe(g.nc, consts.MatchStartedTopic(), g.onMatchStarted); err != nil {
+		return err
+	}
 	_, err := pkgnats.Subscribe(g.nc, consts.GatewayTopic(g.instanceID), g.onKickNotice)
 	return err
+}
+
+// onMatchStarted 处理成局事件：向参战玩家推送开局通知
+// （MatchStartedNotify：对局 ID + battle ID + 参战名单 + 实例端点，规格 §7）。
+func (g *Gateway) onMatchStarted(_ string, data []byte) {
+	var ev matcherv1.MatchStartedEvent
+	if err := protojson.Unmarshal(data, &ev); err != nil {
+		return
+	}
+	payload, err := protojson.Marshal(&gatewayv1.MatchStartedNotify{
+		MatchId:   ev.GetMatchId(),
+		BattleId:  ev.GetBattleId(),
+		PlayerIds: ev.GetPlayerIds(),
+		Endpoint:  ev.GetBattleEndpoint(),
+	})
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	defer cancel()
+	for _, pid := range ev.GetPlayerIds() {
+		_ = pkgnats.PublishEnvelope(ctx, g.nc, pid, consts.PushOpMatchStarted, payload)
+	}
 }
 
 // relayTimeout 是推送/控制回调访问 redis 的兜底超时（防回调 goroutine 悬挂）。

@@ -3,10 +3,12 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
@@ -41,6 +43,12 @@ func NewGRPCServer(cfg *conf.Bootstrap, svc *handler.GameHandler) (transport.Ser
 	return srv, nil
 }
 
+// newMongoPlayerRepo 装配 mongo 玩家持久化：
+// fx 无法注入裸 context.Context，这里以进程级上下文构造（仅索引初始化用）。
+func newMongoPlayerRepo(cli *mongo.Client) (*repo.MongoPlayerRepo, error) {
+	return repo.NewMongoPlayerRepo(context.Background(), cli)
+}
+
 // Module 是 game 服务的传输层装配模块（grpc/http + infra + 仓储 + 业务 + actor）。
 var Module = fx.Module("server",
 	fx.Provide(
@@ -51,7 +59,7 @@ var Module = fx.Module("server",
 		infra.NewMongoClient,
 		infra.NewActorRuntime,
 		repo.NewRedisPlayerCache,
-		repo.NewMongoPlayerRepo,
+		newMongoPlayerRepo,
 		newPlayerStore,
 		newPlayerService,
 		newPlayerActorClient,

@@ -132,14 +132,35 @@ func newGateway(
 	return g, nil
 }
 
+// serverSet 把五协议 Server 汇入 Atlas App 的 servers 组；
+// 具体类型同时直供 newGateway 装配（fx 组注解会把结果移出类型空间，故用聚合器双路提供）。
+// serverSet 把五协议 Server 汇入 Atlas App 的 servers 组；
+// 具体类型同时直供 newGateway 装配。组值统一以 transport.Server 接口形态提供
+// （fx 按元素类型收集组值，具体指针形态不会被 []transport.Server 组采纳）。
+type serverSet struct {
+	fx.Out
+
+	HTTP transport.Server `group:"servers"`
+	TCP  transport.Server `group:"servers"`
+	WS   transport.Server `group:"servers"`
+	KCP  transport.Server `group:"servers"`
+	UDP  transport.Server `group:"servers"`
+}
+
+// newServerSet 聚合五协议 Server 到 servers 组。
+func newServerSet(httpSrv transport.Server, tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server) serverSet {
+	return serverSet{HTTP: httpSrv, TCP: tcpSrv, WS: wsSrv, KCP: kcpSrv, UDP: udpSrv}
+}
+
 // Module 是 gateway 服务的传输层装配模块（五协议 + 会话 + 推送 + actor 客户端）。
 var Module = fx.Module("server",
 	fx.Provide(
-		fx.Annotate(NewHTTPServer, fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(NewTCPServer, fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(NewWSServer, fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(NewKCPServer, fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(NewUDPServer, fx.ResultTags(`group:"servers"`)),
+		NewHTTPServer,
+		NewTCPServer,
+		NewWSServer,
+		NewKCPServer,
+		NewUDPServer,
+		newServerSet,
 		newRedisClient,
 		newNatsConn,
 		newSessionManager,

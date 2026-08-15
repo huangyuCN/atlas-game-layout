@@ -1,0 +1,37 @@
+# 游戏模板中间件环境（etcd/redis/nats/mongo）
+# 端口与 services/*/configs/config.yaml 约定一致：
+#   etcd 12379（peer 12380）、redis 16379、nats 14222、mongo 27017。
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.9
+    container_name: atlas-layout-etcd
+    entrypoint: /usr/local/bin/etcd
+    command:
+      - --name=atlas-layout-etcd
+      - --data-dir=/tmp/etcd-data
+      - --listen-client-urls=http://0.0.0.0:12379
+      - --advertise-client-urls=http://127.0.0.1:12379
+      - --listen-peer-urls=http://0.0.0.0:12380
+      - --initial-advertise-peer-urls=http://127.0.0.1:12380
+      - --initial-cluster=atlas-layout-etcd=http://127.0.0.1:12380
+    ports:
+      - "12379:12379"
+      - "12380:12380"
+
+  redis:
+    image: redis:7-alpine
+    container_name: atlas-layout-redis
+    ports:
+      - "16379:6379"
+
+  nats:
+    image: nats:2
+    container_name: atlas-layout-nats
+    ports:
+      - "14222:4222"
+
+  mongo:
+    image: mongo:7
+    container_name: atlas-layout-mongo
+    ports:
+      - "27017:27017"

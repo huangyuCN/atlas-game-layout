@@ -130,9 +130,11 @@ func registerActorLifecycle(lc fx.Lifecycle, rt *pkgactor.Runtime) {
 }
 
 // registerRuntime 把撮合运行时接入生命周期（Start tick 循环 / Stop 优雅停止）。
+// 注意：tick 循环是长驻 goroutine，不能用 fx OnStart 的 ctx（15s 超时取消会杀掉循环），
+// 故以进程级 context 启动；停止经 Matcher.Stop 的 stopCh 通道完成。
 func registerRuntime(lc fx.Lifecycle, rt *matchredis.Runtime) {
 	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error { return rt.Start(ctx) },
+		OnStart: func(ctx context.Context) error { return rt.Start(context.Background()) },
 		OnStop:  func(ctx context.Context) error { return rt.Stop(ctx) },
 	})
 }

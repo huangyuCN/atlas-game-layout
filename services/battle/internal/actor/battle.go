@@ -24,6 +24,7 @@ import (
 	lockstepimpl "github.com/huangyuCN/atlas/contrib/lockstep"
 	"github.com/huangyuCN/atlas/lockstep"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Config 是战斗装配参数（Props 工厂用）。
@@ -189,8 +190,9 @@ func (b *BattleActor) OnTell(ctx core.ActorContext, msg any) error {
 	}
 	// 帧广播下发全部参战玩家（v1 链路：nats → gateway → 客户端）。
 	frame := &locksteppb.LockstepFrame{
-		FrameId:  uint64(result.Frame),
-		Snapshot: snapshotMeta(result.Snapshot),
+		FrameId:    uint64(result.Frame),
+		ServerTime: timestamppb.Now(), // 广播时间戳：客户端对时与压测延迟度量
+		Snapshot:   snapshotMeta(result.Snapshot),
 	}
 	for _, in := range result.Inputs {
 		frame.Inputs = append(frame.Inputs, toPBInput(in))
@@ -205,10 +207,14 @@ func (b *BattleActor) OnTell(ctx core.ActorContext, msg any) error {
 	return nil
 }
 
-// checkSettle 从快照解出胜负：有胜者即结算（落库 + 事件 + 自停）。
+// checkSettle 从快照解出胜负：有胜者即结算；
+// 帧数耗尽即使平局也结算（防无限对局泄漏帧广播与 actor 实例）。
 func (b *BattleActor) checkSettle(ctx core.ActorContext, result lockstep.FrameResult) {
 	var st simulator.State
-	if err := json.Unmarshal(result.Snapshot.State, &st); err != nil || st.Winner == "" {
+	if err := json.Unmarshal(result.Snapshot.State, &st); err != nil {
+		return
+	}
+	if st.Winner == "" && uint64(result.Frame) < b.cfg.MaxFrames {
 		return
 	}
 	b.settled = true

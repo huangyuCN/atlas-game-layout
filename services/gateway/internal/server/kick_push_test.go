@@ -6,7 +6,9 @@ import (
 	"time"
 
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -162,5 +164,51 @@ func TestKickCrossInstanceKeepsNewRoute(t *testing.T) {
 	}
 	if _, err := authB.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: "p-1", Token: r.Token, Ts: 1}); err != nil {
 		t.Fatalf("B 心跳失败: %v", err)
+	}
+}
+
+// TestMatchStartedNotifyRelay 验证成局事件 → 开局通知推送（规格 §7：
+// matcher 发布 atlas.event.match.started → gateway 向参战玩家推送 MatchStartedNotify）。
+func TestMatchStartedNotifyRelay(t *testing.T) {
+	mr, natsURL, pub := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cli, auth := env.newTCPAuthClient(t)
+	if _, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
+		t.Fatalf("登录: %v", err)
+	}
+	notify := make(chan *gatewayv1.MatchStartedNotify, 2)
+	cli.OnNotify(func(operation string, payload []byte) {
+		if operation != consts.PushOpMatchStarted {
+			return
+		}
+		var n gatewayv1.MatchStartedNotify
+		if err := protojson.Unmarshal(payload, &n); err == nil {
+			notify <- &n
+		}
+	})
+
+	// 发布成局事件（matcher 侧形态）。
+	payload, err := protojson.Marshal(&matcherv1.MatchStartedEvent{
+		MatchId:   "m-1",
+		BattleId:  "b-1",
+		PlayerIds: []string{"p-1", "p-2"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := nats.Publish(ctx, pub, consts.MatchStartedTopic(), payload); err != nil {
+		t.Fatalf("发布成局事件: %v", err)
+	}
+
+	select {
+	case n := <-notify:
+		if n.GetBattleId() != "b-1" || n.GetMatchId() != "m-1" || len(n.GetPlayerIds()) != 2 {
+			t.Fatalf("开局通知不符: %+v", n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("未收到开局通知")
 	}
 }

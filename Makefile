@@ -26,9 +26,15 @@ build-%: ## 构建单个服务（make build-gateway）
 run-%: ## 运行单个服务（make run-gateway）
 	$(GO) run ./services/$*/cmd
 
-run-all: ## 一键起四服务（前台交错输出，Ctrl-C 全部退出）
-	@trap 'kill 0' INT TERM; \
+run-all: ## 一键起四服务（前台交错输出，Ctrl-C 全部退出并等待子进程结束）
+	@trap 'kill 0; wait' INT TERM; \
 	for s in $(SERVICES); do $(GO) run ./services/$$s/cmd & done; wait
+
+# e2e 客户端形态：dual（TCP+KCP 双通道）/ single（WS 单通道）。
+E2E_MODE ?= dual
+
+e2e: ## 运行 e2e 闭环脚本（需 make compose + make run-all；-e E2E_MODE=single 切 WS 单通道）
+	$(GO) run ./scripts/e2e -mode $(E2E_MODE)
 
 
 compose: ## 起中间件（etcd/redis/nats/mongo）
