@@ -21,14 +21,16 @@
   并在 `assemble` 挂载；路由/会话/推送无需改动
 - `make proto` 全家桶（go/grpc/http/tcp/udp/kcp/ws/errors/openapi）全链路重跑无多余 diff（M9 验证）
 
-## 3. CLI 可扩展 ⚠️ 部分达成
+## 3. CLI 可扩展 ✅
 
 > `atlas add actor/locator/lockstep` 模块可直接接入
 
-- 实测 `atlas add actor <entity>`：生成自编译的 fx 模块（handler/usecase/messages/module），
-  可按 `bootstrap.Assemble` 的 extra `fx.Option` 接入任意服务的装配
-- 留白：生成落点为仓库根 `internal/`（Kratos 风格），与 `services/<svc>/internal` 分层不一致；
-  游戏模板专用装配（actor Props 注册 / 懒激活副本 / 帧传输）需手工搬运，未提供自动接入
+- 游戏模板多服务布局下 `atlas add actor <entity> -s <service>`（`--service` 为游戏布局必填）：
+  模块生成到 `services/<service>/internal/<pkg>/`，可编译，并输出接入提示
+  （`<pkg>.Module` 追加到 `bootstrap.Assemble` 的 extra `fx.Option` + import 路径）
+- 非游戏布局保持 Kratos 风格根 `internal/<pkg>` 生成，行为不变
+- 验证：Atlas 集成测试 `TestAdd_GameLayoutService`（生成 + 编译 + 缺 `--service` 报错）、
+  `gamelayout` 布局识别单测、命令行端到端实测（生成 → `go build ./services/...` 通过）
 
 ## 4. 双端形态 ✅
 
