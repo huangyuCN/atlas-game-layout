@@ -88,9 +88,5 @@ func publishControl(ctx context.Context, nc *nats.Conn, instanceID string, data 
 
 // PublishPush 向玩家推送消息（供 gateway 上层/测试发布 nats 推送事件）。
 func PublishPush(ctx context.Context, nc *nats.Conn, playerID, operation string, payload json.RawMessage) error {
-	env, err := json.Marshal(pushEnvelope{Type: operation, Payload: payload})
-	if err != nil {
-		return err
-	}
-	return pkgnats.Publish(ctx, nc, consts.PushTopic(playerID), env)
+	return pkgnats.PublishEnvelope(ctx, nc, playerID, operation, payload)
 }

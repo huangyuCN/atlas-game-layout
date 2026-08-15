@@ -129,3 +129,13 @@ func (c *Client) AskBattle(ctx context.Context, battleID string, req any) (any, 
 	}
 	return c.rt.Ask(ctx, pid, req)
 }
+
+// AskBattleProto 以 proto 信封向战斗 actor 请求并解析 proto 响应。
+// 跨节点响应为序列化字节（集群约定），本地注入实现须同样返回字节。
+func (c *Client) AskBattleProto(ctx context.Context, battleID string, req, out proto.Message) error {
+	reply, err := c.AskBattle(ctx, battleID, req)
+	if err != nil {
+		return err
+	}
+	return decodeReply(reply, out)
+}

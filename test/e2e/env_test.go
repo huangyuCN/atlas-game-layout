@@ -7,12 +7,16 @@ import (
 	"testing"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	battleassemble "github.com/huangyuCN/atlas-game-layout/services/battle/assemble"
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
 	gwassemble "github.com/huangyuCN/atlas-game-layout/services/gateway/assemble"
+	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
 
 // 集成环境地址（本地 Docker 端口约定，与 10.10.9.36 集成服务器一致）。
@@ -102,4 +106,41 @@ func newGateway(t *testing.T, id string) *gwassemble.Gateway {
 	}
 	t.Cleanup(func() { _ = gw.Stop(context.Background()) })
 	return gw
+}
+
+// newBattle 起 battle 服务进程内装配（cfg 可覆盖战斗参数，nil 用默认）。
+func newBattle(t *testing.T, cfg *battleassemble.BattleConfig) *battleassemble.Battle {
+	t.Helper()
+	b, err := battleassemble.New(context.Background(), battleassemble.Options{
+		NodeID:        "battle-it",
+		EtcdEndpoints: []string{itEtcdEndpoints},
+		NatsURL:       itNatsURL,
+		MongoURI:      itMongoURI,
+		MongoDB:       itMongoDB,
+		BattleCfg:     cfg,
+	})
+	if err != nil {
+		t.Fatalf("battle 装配: %v", err)
+	}
+	t.Cleanup(func() { _ = b.Stop(context.Background()) })
+	return b
+}
+
+// seedBattle 预置战斗成员：直接开局战斗 actor（懒激活），供战斗通道测试使用。
+func seedBattle(t *testing.T, ctx context.Context, b *battleassemble.Battle, battleID string, playerIDs ...string) {
+	t.Helper()
+	pid, err := types.NewPID(consts.ActorTypeBattle, battleID)
+	if err != nil {
+		t.Fatalf("seedBattle PID: %v", err)
+	}
+	reply := new(battlev1.CreateBattleReply)
+	err = b.Runtime.AskProto(ctx, pid, &battlev1.BattleActorMsg{
+		Kind: &battlev1.BattleActorMsg_Create{Create: &battlev1.CreateBattleRequest{
+			MatchId:   "m-seed-" + battleID,
+			PlayerIds: playerIDs,
+		}},
+	}, reply)
+	if err != nil {
+		t.Fatalf("seedBattle 开局: %v", err)
+	}
 }

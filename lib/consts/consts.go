@@ -32,6 +32,15 @@ const (
 	CtxKeyBattleID  = "battle_id"
 )
 
+// 服务端推送 operation（消息 protobuf 完整名，客户端 OnNotify 按此分发；
+// gateway 下发与 battle 上行通知共用同一套约定，ADR-0002）。
+const (
+	PushOpKickedOffline  = "gateway.v1.KickedNotify"
+	PushOpMatchStarted   = "gateway.v1.MatchStartedNotify"
+	PushOpFrameBroadcast = "gateway.v1.FrameBroadcast"
+	PushOpBattleEnd      = "gateway.v1.BattleEndNotify"
+)
+
 // 成局事件主题：atlas.event.match.started。
 func MatchStartedTopic() string { return TopicEvent + "match.started" }
 

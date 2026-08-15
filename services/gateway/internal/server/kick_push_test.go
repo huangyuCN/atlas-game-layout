@@ -6,6 +6,7 @@ import (
 	"time"
 
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -25,7 +26,7 @@ func TestKickCrossInstance(t *testing.T) {
 	}
 	kicked := make(chan struct{}, 1)
 	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation == PushOpKickedOffline {
+		if operation == consts.PushOpKickedOffline {
 			var kn gatewayv1.KickedNotify
 			if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == "logged_in_elsewhere" {
 				kicked <- struct{}{}
@@ -78,18 +79,18 @@ func TestPushOnlyOwnerDelivers(t *testing.T) {
 	gotA := make(chan struct{}, 1)
 	gotB := make(chan struct{}, 1)
 	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation == PushOpMatchStarted {
+		if operation == consts.PushOpMatchStarted {
 			gotA <- struct{}{}
 		}
 	})
 	cliB.OnNotify(func(operation string, payload []byte) {
-		if operation == PushOpMatchStarted {
+		if operation == consts.PushOpMatchStarted {
 			gotB <- struct{}{}
 		}
 	})
 
 	// 推送 p-1：仅实例 A 下发。
-	if err := PublishPush(ctx, pub, "p-1", PushOpMatchStarted, []byte(`{"match_id":"m-1","battle_id":"b-1"}`)); err != nil {
+	if err := PublishPush(ctx, pub, "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1","battle_id":"b-1"}`)); err != nil {
 		t.Fatalf("PublishPush p-1: %v", err)
 	}
 	select {
@@ -104,7 +105,7 @@ func TestPushOnlyOwnerDelivers(t *testing.T) {
 	}
 
 	// 推送 p-2：仅实例 B 下发。
-	if err := PublishPush(ctx, pub, "p-2", PushOpMatchStarted, []byte(`{"match_id":"m-2","battle_id":"b-2"}`)); err != nil {
+	if err := PublishPush(ctx, pub, "p-2", consts.PushOpMatchStarted, []byte(`{"match_id":"m-2","battle_id":"b-2"}`)); err != nil {
 		t.Fatalf("PublishPush p-2: %v", err)
 	}
 	select {
@@ -128,7 +129,7 @@ func TestKickCrossInstanceKeepsNewRoute(t *testing.T) {
 	}
 	kicked := make(chan struct{}, 1)
 	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation == PushOpKickedOffline {
+		if operation == consts.PushOpKickedOffline {
 			kicked <- struct{}{}
 		}
 	})

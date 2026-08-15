@@ -5,11 +5,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	libsession "github.com/huangyuCN/atlas-game-layout/lib/session"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
@@ -25,14 +28,6 @@ import (
 type pushServer interface {
 	PushRaw(connID uint64, operation string, payload []byte) error
 }
-
-// 推送 operation 约定：消息的 protobuf 完整名（客户端 OnNotify 按此分发）。
-const (
-	PushOpKickedOffline  = "gateway.v1.KickedNotify"
-	PushOpFrameBroadcast = "gateway.v1.FrameBroadcast"
-	PushOpMatchStarted   = "gateway.v1.MatchStartedNotify"
-	PushOpBattleEnd      = "gateway.v1.BattleEndNotify"
-)
 
 // Gateway 是 gateway 统一 handler：鉴权 → 会话绑定 → 按 operation 路由。
 // 实现全部生成的服务端接口（GatewayAuthTCP/WS + GatewayBattleWS/KCP/UDP）。
@@ -69,7 +64,7 @@ func NewGateway(
 }
 
 // connFrom 从请求上下文提取连接寻址信息（connID + 传输种类 + 回写函数）。
-// UDP 无 connID 语义，按 peer 地址寻址。
+// UDP 无 connID 语义，按 peer 地址寻址。Ref 为连接身份键（会话反向索引用）。
 func (g *Gateway) connFrom(ctx context.Context) *session.Conn {
 	tr, ok := transport.FromServerContext(ctx)
 	if !ok {
@@ -82,6 +77,7 @@ func (g *Gateway) connFrom(ctx context.Context) *session.Conn {
 		}
 		return &session.Conn{
 			Kind: string(tr.Kind()),
+			Ref:  "udp:" + peer,
 			Send: func(operation string, payload []byte) error {
 				return g.udpSrv.PushToRaw(peer, operation, payload)
 			},
@@ -98,10 +94,16 @@ func (g *Gateway) connFrom(ctx context.Context) *session.Conn {
 	return &session.Conn{
 		ID:   connID,
 		Kind: string(tr.Kind()),
+		Ref:  connRef(connID),
 		Send: func(operation string, payload []byte) error {
 			return pusher.PushRaw(connID, operation, payload)
 		},
 	}
+}
+
+// connRef 是连接 ID 的身份键（与 session 反向索引约定一致）。
+func connRef(connID uint64) string {
+	return "conn:" + strconv.FormatUint(connID, 10)
 }
 
 // Register 注册：经 actor 转发 game PlayerActor（懒激活），创建玩家数据并回执（D9）。
@@ -204,8 +206,8 @@ func (g *Gateway) Heartbeat(ctx context.Context, req *gatewayv1.HeartbeatRequest
 	}, nil
 }
 
-// JoinBattle 加入战斗：令牌校验后绑定战斗通道（同连接回退场景自然支持）。
-// 会话元信息/当前帧/快照由 battle 服务提供（M7 里程碑），M4 回执绑定结果。
+// JoinBattle 加入战斗：令牌校验 → battle actor 裁决参战资格并回执
+// 会话元信息/当前帧/快照（M7）→ 绑定战斗通道。
 func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleRequest) (*gatewayv1.JoinBattleReply, error) {
 	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
 	if err != nil {
@@ -218,20 +220,107 @@ func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleReque
 	if conn == nil {
 		return nil, errorv1.ErrInvalidToken("请求缺少连接上下文")
 	}
+	// battle actor 裁决参战资格（懒激活）并回执会话元信息/当前帧/快照。
+	reply := new(battlev1.JoinBattleReply)
+	err = g.actors.AskBattleProto(ctx, req.GetBattleId(), &battlev1.BattleActorMsg{
+		Kind: &battlev1.BattleActorMsg_Join{Join: &battlev1.JoinBattleReq{PlayerId: req.GetPlayerId()}},
+	}, reply)
+	if err != nil {
+		return nil, errorv1.ErrInternal("加入战斗请求失败")
+	}
+	if !reply.GetOk() {
+		return nil, actorBattleError(reply.GetErrorReason())
+	}
 	if _, err := g.sess.Bind(ctx, req.GetPlayerId(), conn, session.ChannelBattle, req.GetToken()); err != nil {
 		return nil, errorv1.ErrInternal("战斗通道绑定失败")
 	}
-	return &gatewayv1.JoinBattleReply{Ok: true}, nil
+	return &gatewayv1.JoinBattleReply{
+		Ok:           true,
+		Meta:         reply.GetMeta(),
+		CurrentFrame: reply.GetCurrentFrame(),
+		Snapshot:     reply.GetSnapshot(),
+	}, nil
 }
 
-// SendFrameInput 帧输入：透传 battle 战斗 actor 帧通道（M7 里程碑接入）。
+// SendFrameInput 帧输入：透传 battle 战斗 actor 帧通道（lockstep 输入）。
+// 玩家身份以连接会话绑定为准（忽略客户端自报 player_id，防伪造）。
 func (g *Gateway) SendFrameInput(ctx context.Context, req *gatewayv1.SendFrameInputRequest) (*gatewayv1.SendFrameInputReply, error) {
-	return nil, errorv1.ErrInternal("帧通道需 battle 服务接入（M7 里程碑）")
+	playerID, err := g.playerFromConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	in := req.GetInput()
+	if req.GetBattleId() == "" || in == nil {
+		return nil, errorv1.ErrInvalidParams("战斗 ID 与输入不能为空")
+	}
+	in.PlayerId = playerID
+	reply := new(battlev1.FrameInputReply)
+	err = g.actors.AskBattleProto(ctx, req.GetBattleId(), &battlev1.BattleActorMsg{
+		Kind: &battlev1.BattleActorMsg_FrameInput{FrameInput: &battlev1.FrameInputReq{
+			PlayerId: playerID,
+			Input:    in,
+		}},
+	}, reply)
+	if err != nil {
+		return nil, errorv1.ErrInternal("帧输入请求失败")
+	}
+	return &gatewayv1.SendFrameInputReply{}, nil
 }
 
-// SyncFrames 补帧：断线重连补帧（M7 里程碑接入）。
+// SyncFrames 补帧：断线重连后拉取缺失帧（battle actor 补帧回执）。
+// 玩家身份以连接会话绑定为准；battle actor 按参战名单复核。
 func (g *Gateway) SyncFrames(ctx context.Context, req *locksteppb.SyncFrameRequest) (*locksteppb.SyncFrameReply, error) {
-	return nil, errorv1.ErrInternal("补帧通道需 battle 服务接入（M7 里程碑）")
+	playerID, err := g.playerFromConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reply := new(battlev1.ReconnectReply)
+	err = g.actors.AskBattleProto(ctx, req.GetSessionId(), &battlev1.BattleActorMsg{
+		Kind: &battlev1.BattleActorMsg_Reconnect{Reconnect: &battlev1.ReconnectReq{
+			PlayerId:      playerID,
+			LastSeenFrame: req.GetFromFrameId(),
+		}},
+	}, reply)
+	if err != nil {
+		return nil, errorv1.ErrInternal("补帧请求失败")
+	}
+	if !reply.GetOk() {
+		return nil, errorv1.ErrInvalidToken("补帧被拒绝：不在参战名单")
+	}
+	out := &locksteppb.SyncFrameReply{
+		Frames:           make([]*locksteppb.LockstepFrame, 0, len(reply.GetMissed())),
+		ConfirmedFrameId: reply.GetCurrentFrame(),
+	}
+	for _, group := range reply.GetMissed() {
+		out.Frames = append(out.Frames, &locksteppb.LockstepFrame{
+			FrameId: group.GetFrameId(),
+			Inputs:  group.GetInputs(),
+		})
+	}
+	return out, nil
+}
+
+// playerFromConn 按请求连接反查会话绑定的玩家身份（帧上行鉴权）。
+func (g *Gateway) playerFromConn(ctx context.Context) (string, error) {
+	conn := g.connFrom(ctx)
+	if conn == nil {
+		return "", errorv1.ErrInvalidToken("请求缺少连接上下文")
+	}
+	playerID, ok := g.sess.PlayerByRef(conn.Ref)
+	if !ok {
+		return "", errorv1.ErrInvalidToken("战斗通道未绑定玩家身份")
+	}
+	return playerID, nil
+}
+
+// actorBattleError 把 battle 战斗 actor 回执的 error_reason 映射为结构化错误。
+func actorBattleError(reason string) *atlaserrors.Error {
+	switch reason {
+	case "PLAYER_NOT_IN_BATTLE":
+		return errorv1.ErrBattleNotFound("玩家不在该战斗参战名单")
+	default:
+		return errorv1.ErrInternal("加入战斗失败: %s", reason)
+	}
 }
 
 // kickOld 处理挤下线（D10+D13）：新登录覆盖旧路由后，
@@ -261,7 +350,7 @@ func (g *Gateway) pushKicked(sess *session.Session) {
 	}
 	for _, c := range []*session.Conn{sess.Battle, sess.Biz} {
 		if c != nil {
-			_ = c.Send(PushOpKickedOffline, payload)
+			_ = c.Send(consts.PushOpKickedOffline, payload)
 		}
 	}
 }

@@ -129,18 +129,21 @@ func NewBattleActorStarter(rt *pkgactor.Runtime) *BattleActorStarter {
 	return &BattleActorStarter{rt: rt}
 }
 
-// Start 实现 biz.BattleStarter：开局请求（battle 未接入时失败仅记录，不阻断事件发布）。
+// Start 实现 biz.BattleStarter：经 actor 集群 Ask 懒激活战斗 actor（信封开局）。
 func (s *BattleActorStarter) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
 	pid, err := types.NewPID(consts.ActorTypeBattle, battleID)
 	if err != nil {
 		return fmt.Errorf("infra: 非法战斗 ID %q: %w", battleID, err)
 	}
 	reply := new(battlev1.CreateBattleReply)
-	if err := s.rt.AskProto(ctx, pid, &battlev1.CreateBattleRequest{
-		MatchId:   matchID,
-		PlayerIds: playerIDs,
-	}, reply); err != nil {
-		return fmt.Errorf("infra: 开局调用失败（battle 未接入）: %w", err)
+	err = s.rt.AskProto(ctx, pid, &battlev1.BattleActorMsg{
+		Kind: &battlev1.BattleActorMsg_Create{Create: &battlev1.CreateBattleRequest{
+			MatchId:   matchID,
+			PlayerIds: playerIDs,
+		}},
+	}, reply)
+	if err != nil {
+		return fmt.Errorf("infra: 开局调用失败: %w", err)
 	}
 	return nil
 }

@@ -40,6 +40,9 @@ type Route struct {
 type Conn struct {
 	ID   uint64
 	Kind string
+	// Ref 是连接身份键（如 "ws:123"、"udp:1.2.3.4:5"），供会话反向索引
+	// （帧输入/补帧按连接反查玩家身份）。同一种类的连接 Ref 唯一。
+	Ref string
 	// Send 回写该连接（服务端推送）；由 server 层装配为 transport Server 的 PushRaw。
 	Send func(operation string, payload []byte) error
 }
@@ -62,6 +65,7 @@ type Manager struct {
 
 	mu    sync.RWMutex
 	local map[string]*Session // playerID → 本地会话
+	refs  map[string]string   // 连接 Ref → playerID（按连接反查玩家身份）
 }
 
 // NewManager 构造会话管理器。
@@ -71,6 +75,7 @@ func NewManager(store Store, instanceID string, ttl time.Duration) *Manager {
 		instanceID: instanceID,
 		ttl:        ttl,
 		local:      make(map[string]*Session),
+		refs:       make(map[string]string),
 	}
 }
 
@@ -105,6 +110,11 @@ func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Ch
 		return nil, fmt.Errorf("session: 未知通道类别 %q", channel)
 	}
 	m.local[playerID] = next
+	// 反向索引：新连接登记；被替换/移除的旧连接注销（防旧连接残留身份）。
+	m.dropStaleRefs(prev, next)
+	if c.Ref != "" {
+		m.refs[c.Ref] = playerID
+	}
 	m.mu.Unlock()
 
 	// 路由表：单命令原子「写新值 + 设 TTL + 取旧值」（SET ... GET，见 RedisStore）。
@@ -141,8 +151,46 @@ func (m *Manager) Unbind(ctx context.Context, playerID string, connID uint64) {
 		return
 	}
 	delete(m.local, playerID)
+	m.dropConnRefs(sess)
 	m.mu.Unlock()
 	m.deleteRouteIfOwned(ctx, playerID, connID)
+}
+
+// dropStaleRefs 注销旧会话中已不在新会话的连接反向索引（调用方持写锁）。
+func (m *Manager) dropStaleRefs(prev, next *Session) {
+	if prev == nil {
+		return
+	}
+	for _, old := range []*Conn{prev.Biz, prev.Battle} {
+		if old == nil || old.Ref == "" {
+			continue
+		}
+		keep := (next.Biz != nil && next.Biz.Ref == old.Ref) ||
+			(next.Battle != nil && next.Battle.Ref == old.Ref)
+		if !keep {
+			delete(m.refs, old.Ref)
+		}
+	}
+}
+
+// dropConnRefs 注销会话全部连接的反向索引（调用方持写锁）。
+func (m *Manager) dropConnRefs(sess *Session) {
+	for _, c := range []*Conn{sess.Biz, sess.Battle} {
+		if c != nil && c.Ref != "" {
+			delete(m.refs, c.Ref)
+		}
+	}
+}
+
+// PlayerByRef 按连接身份反查玩家（帧输入/补帧的身份来源）；未绑定返回 false。
+func (m *Manager) PlayerByRef(ref string) (string, bool) {
+	if ref == "" {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	pid, ok := m.refs[ref]
+	return pid, ok
 }
 
 // deleteRouteIfOwned 仅当 redis 路由仍归属本实例的该连接时删除。
@@ -239,6 +287,7 @@ func (m *Manager) SweepOnce(ctx context.Context) int {
 		sess := m.local[id]
 		if sess != nil && sess.LastHeartbeat.Before(deadline) {
 			delete(m.local, id)
+			m.dropConnRefs(sess)
 			removed++
 		}
 		m.mu.Unlock()

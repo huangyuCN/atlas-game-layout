@@ -5,9 +5,11 @@ package nats
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/nats-io/nats.go"
 )
 
@@ -73,4 +75,20 @@ func Subscribe(nc *nats.Conn, subject string, cb func(subject string, data []byt
 // SubscribeWildcard 订阅通配主题（如 atlas.push.>），用于 gateway 广播过滤模式。
 func SubscribeWildcard(nc *nats.Conn, subject string, cb func(subject string, data []byte)) (*nats.Subscription, error) {
 	return Subscribe(nc, subject, cb)
+}
+
+// pushEnvelope 是玩家推送主题的信封：type 为推送 operation，payload 为消息编码字节。
+type pushEnvelope struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// PublishEnvelope 以 {type, payload} 信封向玩家推送主题（atlas.push.<playerID>）发布，
+// 供 gateway 订阅后按信封透传下发（见 gateway server push 订阅约定）。
+func PublishEnvelope(ctx context.Context, nc *nats.Conn, playerID, operation string, payload []byte) error {
+	env, err := json.Marshal(pushEnvelope{Type: operation, Payload: json.RawMessage(payload)})
+	if err != nil {
+		return fmt.Errorf("nats: 信封编码失败: %w", err)
+	}
+	return Publish(ctx, nc, consts.PushTopic(playerID), env)
 }

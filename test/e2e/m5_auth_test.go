@@ -9,15 +9,13 @@ import (
 
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	"google.golang.org/protobuf/encoding/protojson"
 )
-
-// pushOpKickedOffline 是挤下线推送 operation（对齐 gateway server 常量）。
-const pushOpKickedOffline = "gateway.v1.KickedNotify"
 
 // testAccount 生成本轮测试唯一账号（mongo 数据残留隔离）。
 func testAccount(t *testing.T, base string) string {
@@ -123,7 +121,7 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	}
 	kicked := make(chan struct{}, 1)
 	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation != pushOpKickedOffline {
+		if operation != consts.PushOpKickedOffline {
 			return
 		}
 		var kn gatewayv1.KickedNotify

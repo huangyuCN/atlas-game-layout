@@ -44,6 +44,43 @@ func (c *fakeConn) conn() *Conn {
 	return &Conn{ID: c.id, Kind: c.kind, Send: c.send}
 }
 
+// connWithRef 以身份 Ref 构造测试连接（反向索引测试用）。
+func (c *fakeConn) connWithRef(ref string) *Conn {
+	return &Conn{ID: c.id, Kind: c.kind, Ref: ref, Send: c.send}
+}
+
+// TestPlayerByRef 验证连接反向索引：绑定登记、换绑注销、解绑移除。
+func TestPlayerByRef(t *testing.T) {
+	ctx := context.Background()
+	m := newTestManager(t, "gw-1")
+	c1 := (&fakeConn{id: 1, kind: "ws"}).connWithRef("conn:1")
+	if _, err := m.Bind(ctx, "p-1", c1, ChannelBiz, "t1"); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if pid, ok := m.PlayerByRef("conn:1"); !ok || pid != "p-1" {
+		t.Fatalf("PlayerByRef = %q,%v, want p-1,true", pid, ok)
+	}
+	if _, ok := m.PlayerByRef("conn:2"); ok {
+		t.Fatal("未绑定连接不应命中")
+	}
+	// 换绑新连接后旧连接身份注销。
+	c2 := (&fakeConn{id: 2, kind: "ws"}).connWithRef("conn:2")
+	if _, err := m.Bind(ctx, "p-1", c2, ChannelBiz, "t1"); err != nil {
+		t.Fatalf("换绑: %v", err)
+	}
+	if _, ok := m.PlayerByRef("conn:1"); ok {
+		t.Fatal("被替换的旧连接身份应注销")
+	}
+	if pid, ok := m.PlayerByRef("conn:2"); !ok || pid != "p-1" {
+		t.Fatalf("新连接身份未登记: %q,%v", pid, ok)
+	}
+	// 解绑后身份移除。
+	m.Unbind(ctx, "p-1", 2)
+	if _, ok := m.PlayerByRef("conn:2"); ok {
+		t.Fatal("解绑后连接身份应移除")
+	}
+}
+
 // TestBindBizWritesRoute 验证登录绑定业务通道后路由表内容完整。
 func TestBindBizWritesRoute(t *testing.T) {
 	ctx := context.Background()

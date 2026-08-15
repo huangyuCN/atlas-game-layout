@@ -112,6 +112,16 @@ func (r *Runtime) Register(props core.Props) error {
 	return r.inner.Register(props)
 }
 
+// Spawn 在本节点手动拉起指定 PID（须已 Register 对应 Props；lockstep 会话等 SpawnManual 类型使用）。
+func (r *Runtime) Spawn(ctx context.Context, pid types.PID) (core.Ref, error) {
+	return r.inner.Local().Spawn(ctx, pid)
+}
+
+// Stop 停止指定 PID（幂等；lockstep 会话等子 actor 的回收）。
+func (r *Runtime) Stop(ctx context.Context, pid types.PID) error {
+	return r.inner.Local().Stop(ctx, pid)
+}
+
 // Tell 向任意 actor 发送消息（目录路由自动寻址，支持跨节点与懒激活）。
 func (r *Runtime) Tell(ctx context.Context, pid types.PID, msg any) error {
 	return r.inner.Local().Tell(ctx, pid, msg)

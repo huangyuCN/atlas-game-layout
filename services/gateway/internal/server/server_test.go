@@ -10,10 +10,12 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
+	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
@@ -48,6 +50,7 @@ type gwEnv struct {
 	id     string
 	sess   *session.Manager
 	g      *Gateway
+	mock   *mockActorRuntime // game/battle actor 桩（断言投递用）
 	tcpSrv *tcpt.Server
 	wsSrv  *wst.Server
 	wsHTTP *httptest.Server
@@ -92,7 +95,8 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 	}
 
 	sess := session.NewManager(session.NewRedisStore(cli), id, 30*time.Second)
-	g := NewGateway(id, sess, actorclient.NewClient(newMockActorRuntime()), nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	mock := newMockActorRuntime()
+	g := NewGateway(id, sess, actorclient.NewClient(mock), nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
 	if err := RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
 		t.Fatalf("registerHandlers: %v", err)
 	}
@@ -127,6 +131,7 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 		id:     id,
 		sess:   sess,
 		g:      g,
+		mock:   mock,
 		tcpSrv: tcpSrv,
 		wsSrv:  wsSrv,
 		wsHTTP: wsHTTP,
@@ -205,7 +210,7 @@ func TestKickSameInstance(t *testing.T) {
 	// 注册挤下线监听，然后发起二次登录。
 	kicked := make(chan struct{}, 1)
 	oldCli.OnNotify(func(operation string, payload []byte) {
-		if operation == PushOpKickedOffline {
+		if operation == consts.PushOpKickedOffline {
 			kicked <- struct{}{}
 		}
 	})
@@ -243,20 +248,127 @@ func TestJoinBattleBindsChannel(t *testing.T) {
 	if !join.GetOk() {
 		t.Fatal("JoinBattle 回执 ok=false")
 	}
+	// 会话元信息/当前帧/快照由 battle actor 回执（M7）。
+	if join.GetMeta().GetSessionId() != "b-1" || join.GetCurrentFrame() != 3 || join.GetSnapshot() == nil {
+		t.Fatalf("JoinBattle 元信息回执不符: %+v", join)
+	}
 
 	// 战斗通道绑定后推送仍可达（同连接回退）。
 	got := make(chan struct{}, 1)
 	cli.OnNotify(func(operation string, payload []byte) {
-		if operation == "gateway.v1.MatchStartedNotify" {
+		if operation == consts.PushOpMatchStarted {
 			got <- struct{}{}
 		}
 	})
-	if err := PublishPush(ctx, pub, "p-1", "gateway.v1.MatchStartedNotify", []byte(`{"match_id":"m-1"}`)); err != nil {
+	if err := PublishPush(ctx, pub, "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
 		t.Fatalf("PublishPush: %v", err)
 	}
 	select {
 	case <-got:
 	case <-time.After(2 * time.Second):
 		t.Fatal("未收到推送")
+	}
+}
+
+// TestJoinBattleRejectsNonMember 验证 battle actor 拒绝非参战玩家且不绑定战斗通道。
+func TestJoinBattleRejectsNonMember(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	// 注入拒绝加入的 battle 裁决。
+	env.mock.joinOK = false
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, auth, battle := env.newWSClients(t)
+	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: login.GetToken(), PlayerId: "p-1", BattleId: "b-1"}); err == nil {
+		t.Fatal("非参战玩家加入战斗应报错")
+	}
+	// 未绑定战斗通道：本地会话无 Battle 连接。
+	sess, ok := env.sess.LocalSession("p-1")
+	if !ok {
+		t.Fatal("本地会话应存在（业务通道绑定）")
+	}
+	if sess.Battle != nil {
+		t.Fatal("被拒加入后不应绑定战斗通道")
+	}
+}
+
+// TestSendFrameInputForwardsToBattle 验证帧输入透传 battle actor（信封 + 路由）。
+func TestSendFrameInputForwardsToBattle(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, auth, battle := env.newWSClients(t)
+	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: login.GetToken(), PlayerId: "p-1", BattleId: "b-1"}); err != nil {
+		t.Fatalf("JoinBattle: %v", err)
+	}
+	_, err = battle.SendFrameInput(ctx, &gatewayv1.SendFrameInputRequest{
+		BattleId: "b-1",
+		// 伪造他人身份：gateway 应以连接会话绑定为准改写为 p-1。
+		Input: &locksteppb.LockstepInput{FrameId: 1, PlayerId: "p-9", Payload: []byte("up")},
+	})
+	if err != nil {
+		t.Fatalf("SendFrameInput: %v", err)
+	}
+	// 帧输入已按战斗 ID 路由投递，且身份被改回会话绑定玩家（防伪造）。
+	ins := env.mock.frameInputs["b-1"]
+	if len(ins) != 1 || ins[0].GetPlayerId() != "p-1" ||
+		ins[0].GetInput().GetPlayerId() != "p-1" || string(ins[0].GetInput().GetPayload()) != "up" {
+		t.Fatalf("帧输入投递不符: %+v", ins)
+	}
+}
+
+// TestSendFrameInputRequiresBinding 验证未绑定战斗通道的连接发帧输入被拒。
+func TestSendFrameInputRequiresBinding(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, _, battle := env.newWSClients(t)
+	if _, err := battle.SendFrameInput(ctx, &gatewayv1.SendFrameInputRequest{
+		BattleId: "b-1",
+		Input:    &locksteppb.LockstepInput{FrameId: 1, PlayerId: "p-1", Payload: []byte("up")},
+	}); err == nil {
+		t.Fatal("未绑定身份的连接发帧输入应被拒")
+	}
+}
+
+// TestSyncFramesForwardsToBattle 验证补帧请求透传 battle actor 并回执缺失帧。
+func TestSyncFramesForwardsToBattle(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, auth, battle := env.newWSClients(t)
+	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: login.GetToken(), PlayerId: "p-1", BattleId: "b-1"}); err != nil {
+		t.Fatalf("JoinBattle: %v", err)
+	}
+	reply, err := battle.SyncFrames(ctx, &locksteppb.SyncFrameRequest{SessionId: "b-1", FromFrameId: 3, Limit: 10})
+	if err != nil {
+		t.Fatalf("SyncFrames: %v", err)
+	}
+	if reply.GetConfirmedFrameId() != 5 || len(reply.GetFrames()) != 1 || reply.GetFrames()[0].GetFrameId() != 4 {
+		t.Fatalf("补帧回执不符: %+v", reply)
+	}
+	// 补帧请求已携带断点帧号与会话绑定玩家投递。
+	recs := env.mock.reconnects["b-1"]
+	if len(recs) != 1 || recs[0].GetLastSeenFrame() != 3 || recs[0].GetPlayerId() != "p-1" {
+		t.Fatalf("补帧投递不符: %+v", recs)
 	}
 }

@@ -43,6 +43,7 @@ func TestE2EWSAuth(t *testing.T) {
 	}
 	newGame(t)
 	gw := newGateway(t, "a")
+	battleSvc := newBattle(t, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -53,6 +54,7 @@ func TestE2EWSAuth(t *testing.T) {
 	defer cli.Close()
 	auth := gatewayv1.NewGatewayAuthWSClient(cli)
 	token, playerID := loginFlow(t, ctx, auth)
+	seedBattle(t, ctx, battleSvc, "b-1", playerID)
 
 	// 战斗协议绑定（单通道回退：同一 ws 连接）。
 	battle := gatewayv1.NewGatewayBattleWSClient(cli)
@@ -72,18 +74,20 @@ func TestE2EKCPBattle(t *testing.T) {
 	}
 	newGame(t)
 	gw := newGateway(t, "a")
+	battle := newBattle(t, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	token, playerID := loginViaTCP(t, ctx, gw.TCPURL)
+	seedBattle(t, ctx, battle, "b-1", playerID)
 
 	cli, err := kcpt.NewClient(gw.KCPURL)
 	if err != nil {
 		t.Fatalf("kcp client: %v", err)
 	}
 	defer cli.Close()
-	battle := gatewayv1.NewGatewayBattleKCPClient(cli)
-	join, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: token, PlayerId: playerID, BattleId: "b-1"})
+	bcli := gatewayv1.NewGatewayBattleKCPClient(cli)
+	join, err := bcli.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: token, PlayerId: playerID, BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("kcp JoinBattle: %v", err)
 	}
@@ -99,18 +103,20 @@ func TestE2EUDPBattle(t *testing.T) {
 	}
 	newGame(t)
 	gw := newGateway(t, "a")
+	battle := newBattle(t, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	token, playerID := loginViaTCP(t, ctx, gw.TCPURL)
+	seedBattle(t, ctx, battle, "b-1", playerID)
 
 	cli, err := udpt.NewClient(gw.UDPURL)
 	if err != nil {
 		t.Fatalf("udp client: %v", err)
 	}
 	defer cli.Close()
-	battle := gatewayv1.NewGatewayBattleUDPClient(cli)
-	join, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: token, PlayerId: playerID, BattleId: "b-1"})
+	bcli := gatewayv1.NewGatewayBattleUDPClient(cli)
+	join, err := bcli.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: token, PlayerId: playerID, BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("udp JoinBattle: %v", err)
 	}

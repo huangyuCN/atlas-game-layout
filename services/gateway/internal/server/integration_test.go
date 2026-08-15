@@ -6,6 +6,7 @@ import (
 	"time"
 
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	natss "github.com/nats-io/nats.go"
@@ -64,7 +65,7 @@ func TestIntegrationKickCrossInstance(t *testing.T) {
 	}
 	kicked := make(chan struct{}, 1)
 	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation != PushOpKickedOffline {
+		if operation != consts.PushOpKickedOffline {
 			return
 		}
 		var kn gatewayv1.KickedNotify
@@ -108,12 +109,12 @@ func TestIntegrationPushOnlyOwnerDelivers(t *testing.T) {
 	gotA := make(chan struct{}, 1)
 	gotB := make(chan struct{}, 1)
 	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation == PushOpMatchStarted {
+		if operation == consts.PushOpMatchStarted {
 			gotA <- struct{}{}
 		}
 	})
 	cliB.OnNotify(func(operation string, payload []byte) {
-		if operation == PushOpMatchStarted {
+		if operation == consts.PushOpMatchStarted {
 			gotB <- struct{}{}
 		}
 	})
@@ -124,7 +125,7 @@ func TestIntegrationPushOnlyOwnerDelivers(t *testing.T) {
 	}
 	defer nc.Close()
 
-	if err := PublishPush(ctx, nc, "it-p-1", PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
+	if err := PublishPush(ctx, nc, "it-p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
 		t.Fatalf("PublishPush: %v", err)
 	}
 	select {
