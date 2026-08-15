@@ -86,9 +86,10 @@ func (x *QueueMatchRequest) GetRuleset() string {
 	return ""
 }
 
+// QueueMatchReply 入队回执：ticket_id 用于取消/查询与事件关联。
 type QueueMatchReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	MatchId       string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	TicketId      string                 `protobuf:"bytes,1,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -123,9 +124,9 @@ func (*QueueMatchReply) Descriptor() ([]byte, []int) {
 	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *QueueMatchReply) GetMatchId() string {
+func (x *QueueMatchReply) GetTicketId() string {
 	if x != nil {
-		return x.MatchId
+		return x.TicketId
 	}
 	return ""
 }
@@ -176,6 +177,7 @@ func (x *CancelMatchRequest) GetPlayerId() string {
 
 type CancelMatchReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Canceled      bool                   `protobuf:"varint,1,opt,name=canceled,proto3" json:"canceled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -208,6 +210,13 @@ func (x *CancelMatchReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CancelMatchReply.ProtoReflect.Descriptor instead.
 func (*CancelMatchReply) Descriptor() ([]byte, []int) {
 	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CancelMatchReply) GetCanceled() bool {
+	if x != nil {
+		return x.Canceled
+	}
+	return false
 }
 
 // QueryMatchRequest 查询玩家当前匹配状态。
@@ -259,7 +268,8 @@ func (x *QueryMatchRequest) GetPlayerId() string {
 type QueryMatchReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
-	MatchId       string                 `protobuf:"bytes,2,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	TicketId      string                 `protobuf:"bytes,2,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
+	MatchId       string                 `protobuf:"bytes,3,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -301,6 +311,13 @@ func (x *QueryMatchReply) GetState() string {
 	return ""
 }
 
+func (x *QueryMatchReply) GetTicketId() string {
+	if x != nil {
+		return x.TicketId
+	}
+	return ""
+}
+
 func (x *QueryMatchReply) GetMatchId() string {
 	if x != nil {
 		return x.MatchId
@@ -317,17 +334,19 @@ const file_api_matcher_v1_matcher_proto_rawDesc = "" +
 	"\x11QueueMatchRequest\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x120\n" +
 	"\x06player\x18\x02 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\x12\x18\n" +
-	"\aruleset\x18\x03 \x01(\tR\aruleset\",\n" +
-	"\x0fQueueMatchReply\x12\x19\n" +
-	"\bmatch_id\x18\x01 \x01(\tR\amatchId\"1\n" +
+	"\aruleset\x18\x03 \x01(\tR\aruleset\".\n" +
+	"\x0fQueueMatchReply\x12\x1b\n" +
+	"\tticket_id\x18\x01 \x01(\tR\bticketId\"1\n" +
 	"\x12CancelMatchRequest\x12\x1b\n" +
-	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"\x12\n" +
-	"\x10CancelMatchReply\"0\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\".\n" +
+	"\x10CancelMatchReply\x12\x1a\n" +
+	"\bcanceled\x18\x01 \x01(\bR\bcanceled\"0\n" +
 	"\x11QueryMatchRequest\x12\x1b\n" +
-	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"B\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"_\n" +
 	"\x0fQueryMatchReply\x12\x14\n" +
-	"\x05state\x18\x01 \x01(\tR\x05state\x12\x19\n" +
-	"\bmatch_id\x18\x02 \x01(\tR\amatchId2\xce\x02\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x1b\n" +
+	"\tticket_id\x18\x02 \x01(\tR\bticketId\x12\x19\n" +
+	"\bmatch_id\x18\x03 \x01(\tR\amatchId2\xce\x02\n" +
 	"\aMatcher\x12f\n" +
 	"\n" +
 	"QueueMatch\x12\x1d.matcher.v1.QueueMatchRequest\x1a\x1b.matcher.v1.QueueMatchReply\"\x1c\x82\xd3\xe4\x93\x02\x16:\x01*\"\x11/v1/matcher/queue\x12j\n" +

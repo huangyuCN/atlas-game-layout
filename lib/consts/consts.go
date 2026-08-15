@@ -32,6 +32,12 @@ const (
 	CtxKeyBattleID  = "battle_id"
 )
 
+// 成局事件主题：atlas.event.match.started。
+func MatchStartedTopic() string { return TopicEvent + "match.started" }
+
+// 失败事件主题：atlas.event.match.failed。
+func MatchFailedTopic() string { return TopicEvent + "match.failed" }
+
 // 玩家推送主题拼接：atlas.push.<playerID>。
 func PushTopic(playerID string) string { return TopicPush + playerID }
 

@@ -218,7 +218,9 @@ components:
             description: BackpackItem 背包条目（示例业务：M5 背包 handler 使用）。
         CancelMatchReply:
             type: object
-            properties: {}
+            properties:
+                canceled:
+                    type: boolean
         CancelMatchRequest:
             type: object
             properties:
@@ -297,14 +299,17 @@ components:
             properties:
                 state:
                     type: string
+                ticketId:
+                    type: string
                 matchId:
                     type: string
             description: QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
         QueueMatchReply:
             type: object
             properties:
-                matchId:
+                ticketId:
                     type: string
+            description: QueueMatchReply 入队回执：ticket_id 用于取消/查询与事件关联。
         QueueMatchRequest:
             type: object
             properties:

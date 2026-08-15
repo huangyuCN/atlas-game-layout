@@ -15,15 +15,18 @@ message QueueMatchRequest {
   string ruleset = 3;
 }
 
+// QueueMatchReply 入队回执：ticket_id 用于取消/查询与事件关联。
 message QueueMatchReply {
-  string match_id = 1;
+  string ticket_id = 1;
 }
 
 message CancelMatchRequest {
   string player_id = 1;
 }
 
-message CancelMatchReply {}
+message CancelMatchReply {
+  bool canceled = 1;
+}
 
 // QueryMatchRequest 查询玩家当前匹配状态。
 message QueryMatchRequest {
@@ -33,7 +36,8 @@ message QueryMatchRequest {
 // QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
 message QueryMatchReply {
   string state = 1;
-  string match_id = 2;
+  string ticket_id = 2;
+  string match_id = 3;
 }
 
 // Matcher 是撮合服务。

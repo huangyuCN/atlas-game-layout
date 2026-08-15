@@ -16,12 +16,22 @@ func (replicaHandler) OnStop(core.ActorContext, types.ExitReason) error { return
 func (replicaHandler) OnTell(core.ActorContext, any) error              { return nil }
 func (replicaHandler) OnAsk(core.ActorContext, any) (any, error)        { return nil, nil }
 
-// RegisterPlayerReplica 在运行时注册 PlayerActor 类型的懒激活副本
-// （gateway 等「只发不接」的节点使用；实际拉起在 game 节点）。
-func RegisterPlayerReplica(r *Runtime) error {
+// RegisterAutoReplica 在运行时注册某 actor 类型的懒激活副本
+// （「只发不接」的节点使用；实际拉起由持有完整 Props 的服务节点执行）。
+func RegisterAutoReplica(r *Runtime, actorType string) error {
 	return r.Register(core.Props{
-		Type:       consts.ActorTypePlayer,
+		Type:       actorType,
 		NewHandler: func(types.PID) core.Handler { return replicaHandler{} },
 		SpawnMode:  core.SpawnAuto,
 	})
+}
+
+// RegisterPlayerReplica 注册 PlayerActor 类型懒激活副本（gateway 使用；实际拉起在 game 节点）。
+func RegisterPlayerReplica(r *Runtime) error {
+	return RegisterAutoReplica(r, consts.ActorTypePlayer)
+}
+
+// RegisterBattleReplica 注册战斗 actor 类型懒激活副本（matcher 开局使用；实际拉起在 battle 节点）。
+func RegisterBattleReplica(r *Runtime) error {
+	return RegisterAutoReplica(r, consts.ActorTypeBattle)
 }

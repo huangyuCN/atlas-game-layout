@@ -24,8 +24,8 @@ const (
 	itMongoDB       = "game_it"
 )
 
-// probeMiddlewares 探测四中间件；不可用返回 skip 原因。
-func probeMiddlewares(t *testing.T) string {
+// probeCore 探测基础中间件（etcd/redis/nats）；不可用返回 skip 原因。
+func probeCore(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -51,7 +51,17 @@ func probeMiddlewares(t *testing.T) string {
 		return "etcd 不可用: " + err.Error()
 	}
 	_ = ec.Close()
+	return ""
+}
 
+// probeMiddlewares 探测四中间件（含 mongo）；不可用返回 skip 原因。
+func probeMiddlewares(t *testing.T) string {
+	t.Helper()
+	if reason := probeCore(t); reason != "" {
+		return reason
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
 	mc, err := pkgmongo.NewClient(ctx, pkgmongo.Options{URI: itMongoURI, Database: itMongoDB})
 	if err != nil {
 		return "mongo 不可用: " + err.Error()
