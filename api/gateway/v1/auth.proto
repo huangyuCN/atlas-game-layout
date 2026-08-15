@@ -31,14 +31,26 @@ message LoginReply {
   common.v1.PlayerSummary player = 3;
 }
 
-// Ping/Pong 心跳保活。
-message Ping {
-  int64 ts = 1;
+// HeartbeatRequest 心跳保活（携带令牌与玩家 ID，服务端续租路由 TTL）。
+message HeartbeatRequest {
+  string token = 1;
+  string player_id = 2;
+  int64 ts = 3;
 }
 
-message Pong {
+// HeartbeatReply 心跳回执（携带服务端时间用于对时）。
+message HeartbeatReply {
   int64 ts = 1;
+  uint64 server_time_unix_ms = 2;
 }
+
+// LogoutRequest 登出（清理会话与路由）。
+message LogoutRequest {
+  string token = 1;
+  string player_id = 2;
+}
+
+message LogoutReply {}
 
 // KickedNotify 服务端推送：被挤下线（旧连接断开前收到）。
 message KickedNotify {
@@ -49,5 +61,6 @@ message KickedNotify {
 service GatewayAuth {
   rpc Register (RegisterRequest) returns (RegisterReply);
   rpc Login (LoginRequest) returns (LoginReply);
-  rpc Heartbeat (Ping) returns (Pong);
+  rpc Heartbeat (HeartbeatRequest) returns (HeartbeatReply);
+  rpc Logout (LogoutRequest) returns (LogoutReply);
 }

@@ -20,6 +20,7 @@ enum ErrorReason {
   TokenExpired = 1005 [(atlas.errors.code) = 401];        // 会话令牌过期
   SessionNotFound = 1006 [(atlas.errors.code) = 404];     // 会话不存在
   PlayerNotOnline = 1007 [(atlas.errors.code) = 404];     // 玩家不在线
+  InvalidParams = 1008 [(atlas.errors.code) = 400];       // 参数非法
 
   // 匹配
   AlreadyInMatch = 2001 [(atlas.errors.code) = 409]; // 已在匹配中

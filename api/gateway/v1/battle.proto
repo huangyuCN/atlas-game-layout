@@ -11,7 +11,9 @@ import "api/lockstep/lockstep.proto";
 
 // JoinBattleRequest 加入战斗（战斗通道 token 绑定后调用）。
 message JoinBattleRequest {
-  string battle_id = 1;
+  string token = 1;      // 登录令牌（快速绑定，无需二次登录）
+  string player_id = 2;  // 玩家 ID
+  string battle_id = 3;  // 战斗 ID
 }
 
 // JoinBattleReply 加入回执：携带会话元信息、当前帧与快照，支持断线重连恢复。

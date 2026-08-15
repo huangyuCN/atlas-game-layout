@@ -29,7 +29,9 @@ const (
 // JoinBattleRequest 加入战斗（战斗通道 token 绑定后调用）。
 type JoinBattleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	BattleId      string                 `protobuf:"bytes,1,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`                       // 登录令牌（快速绑定，无需二次登录）
+	PlayerId      string                 `protobuf:"bytes,2,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"` // 玩家 ID
+	BattleId      string                 `protobuf:"bytes,3,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"` // 战斗 ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -62,6 +64,20 @@ func (x *JoinBattleRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use JoinBattleRequest.ProtoReflect.Descriptor instead.
 func (*JoinBattleRequest) Descriptor() ([]byte, []int) {
 	return file_api_gateway_v1_battle_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *JoinBattleRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *JoinBattleRequest) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
 }
 
 func (x *JoinBattleRequest) GetBattleId() string {
@@ -417,9 +433,11 @@ var File_api_gateway_v1_battle_proto protoreflect.FileDescriptor
 const file_api_gateway_v1_battle_proto_rawDesc = "" +
 	"\n" +
 	"\x1bapi/gateway/v1/battle.proto\x12\n" +
-	"gateway.v1\x1a\x1bapi/lockstep/lockstep.proto\"0\n" +
-	"\x11JoinBattleRequest\x12\x1b\n" +
-	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"\xde\x01\n" +
+	"gateway.v1\x1a\x1bapi/lockstep/lockstep.proto\"c\n" +
+	"\x11JoinBattleRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1b\n" +
+	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\x12\x1b\n" +
+	"\tbattle_id\x18\x03 \x01(\tR\bbattleId\"\xde\x01\n" +
 	"\x0fJoinBattleReply\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12!\n" +
 	"\ferror_reason\x18\x02 \x01(\tR\verrorReason\x124\n" +

@@ -243,28 +243,30 @@ func (x *LoginReply) GetPlayer() *v1.PlayerSummary {
 	return nil
 }
 
-// Ping/Pong 心跳保活。
-type Ping struct {
+// HeartbeatRequest 心跳保活（携带令牌与玩家 ID，服务端续租路由 TTL）。
+type HeartbeatRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ts            int64                  `protobuf:"varint,1,opt,name=ts,proto3" json:"ts,omitempty"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	PlayerId      string                 `protobuf:"bytes,2,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Ts            int64                  `protobuf:"varint,3,opt,name=ts,proto3" json:"ts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Ping) Reset() {
-	*x = Ping{}
+func (x *HeartbeatRequest) Reset() {
+	*x = HeartbeatRequest{}
 	mi := &file_api_gateway_v1_auth_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Ping) String() string {
+func (x *HeartbeatRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Ping) ProtoMessage() {}
+func (*HeartbeatRequest) ProtoMessage() {}
 
-func (x *Ping) ProtoReflect() protoreflect.Message {
+func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_api_gateway_v1_auth_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -276,39 +278,55 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Ping.ProtoReflect.Descriptor instead.
-func (*Ping) Descriptor() ([]byte, []int) {
+// Deprecated: Use HeartbeatRequest.ProtoReflect.Descriptor instead.
+func (*HeartbeatRequest) Descriptor() ([]byte, []int) {
 	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *Ping) GetTs() int64 {
+func (x *HeartbeatRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *HeartbeatRequest) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
+}
+
+func (x *HeartbeatRequest) GetTs() int64 {
 	if x != nil {
 		return x.Ts
 	}
 	return 0
 }
 
-type Pong struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ts            int64                  `protobuf:"varint,1,opt,name=ts,proto3" json:"ts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+// HeartbeatReply 心跳回执（携带服务端时间用于对时）。
+type HeartbeatReply struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Ts               int64                  `protobuf:"varint,1,opt,name=ts,proto3" json:"ts,omitempty"`
+	ServerTimeUnixMs uint64                 `protobuf:"varint,2,opt,name=server_time_unix_ms,json=serverTimeUnixMs,proto3" json:"server_time_unix_ms,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
-func (x *Pong) Reset() {
-	*x = Pong{}
+func (x *HeartbeatReply) Reset() {
+	*x = HeartbeatReply{}
 	mi := &file_api_gateway_v1_auth_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Pong) String() string {
+func (x *HeartbeatReply) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Pong) ProtoMessage() {}
+func (*HeartbeatReply) ProtoMessage() {}
 
-func (x *Pong) ProtoReflect() protoreflect.Message {
+func (x *HeartbeatReply) ProtoReflect() protoreflect.Message {
 	mi := &file_api_gateway_v1_auth_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -320,16 +338,112 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Pong.ProtoReflect.Descriptor instead.
-func (*Pong) Descriptor() ([]byte, []int) {
+// Deprecated: Use HeartbeatReply.ProtoReflect.Descriptor instead.
+func (*HeartbeatReply) Descriptor() ([]byte, []int) {
 	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *Pong) GetTs() int64 {
+func (x *HeartbeatReply) GetTs() int64 {
 	if x != nil {
 		return x.Ts
 	}
 	return 0
+}
+
+func (x *HeartbeatReply) GetServerTimeUnixMs() uint64 {
+	if x != nil {
+		return x.ServerTimeUnixMs
+	}
+	return 0
+}
+
+// LogoutRequest 登出（清理会话与路由）。
+type LogoutRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	PlayerId      string                 `protobuf:"bytes,2,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogoutRequest) Reset() {
+	*x = LogoutRequest{}
+	mi := &file_api_gateway_v1_auth_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogoutRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogoutRequest) ProtoMessage() {}
+
+func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gateway_v1_auth_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogoutRequest.ProtoReflect.Descriptor instead.
+func (*LogoutRequest) Descriptor() ([]byte, []int) {
+	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *LogoutRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *LogoutRequest) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
+}
+
+type LogoutReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogoutReply) Reset() {
+	*x = LogoutReply{}
+	mi := &file_api_gateway_v1_auth_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogoutReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogoutReply) ProtoMessage() {}
+
+func (x *LogoutReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gateway_v1_auth_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogoutReply.ProtoReflect.Descriptor instead.
+func (*LogoutReply) Descriptor() ([]byte, []int) {
+	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{7}
 }
 
 // KickedNotify 服务端推送：被挤下线（旧连接断开前收到）。
@@ -342,7 +456,7 @@ type KickedNotify struct {
 
 func (x *KickedNotify) Reset() {
 	*x = KickedNotify{}
-	mi := &file_api_gateway_v1_auth_proto_msgTypes[6]
+	mi := &file_api_gateway_v1_auth_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -354,7 +468,7 @@ func (x *KickedNotify) String() string {
 func (*KickedNotify) ProtoMessage() {}
 
 func (x *KickedNotify) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gateway_v1_auth_proto_msgTypes[6]
+	mi := &file_api_gateway_v1_auth_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -367,7 +481,7 @@ func (x *KickedNotify) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KickedNotify.ProtoReflect.Descriptor instead.
 func (*KickedNotify) Descriptor() ([]byte, []int) {
-	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{6}
+	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *KickedNotify) GetReason() string {
@@ -396,17 +510,25 @@ const file_api_gateway_v1_auth_proto_rawDesc = "" +
 	"LoginReply\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x120\n" +
-	"\x06player\x18\x03 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"\x16\n" +
-	"\x04Ping\x12\x0e\n" +
-	"\x02ts\x18\x01 \x01(\x03R\x02ts\"\x16\n" +
-	"\x04Pong\x12\x0e\n" +
-	"\x02ts\x18\x01 \x01(\x03R\x02ts\"&\n" +
+	"\x06player\x18\x03 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"U\n" +
+	"\x10HeartbeatRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1b\n" +
+	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\x12\x0e\n" +
+	"\x02ts\x18\x03 \x01(\x03R\x02ts\"O\n" +
+	"\x0eHeartbeatReply\x12\x0e\n" +
+	"\x02ts\x18\x01 \x01(\x03R\x02ts\x12-\n" +
+	"\x13server_time_unix_ms\x18\x02 \x01(\x04R\x10serverTimeUnixMs\"B\n" +
+	"\rLogoutRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1b\n" +
+	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\"\r\n" +
+	"\vLogoutReply\"&\n" +
 	"\fKickedNotify\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason2\xbd\x01\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason2\x91\x02\n" +
 	"\vGatewayAuth\x12B\n" +
 	"\bRegister\x12\x1b.gateway.v1.RegisterRequest\x1a\x19.gateway.v1.RegisterReply\x129\n" +
-	"\x05Login\x12\x18.gateway.v1.LoginRequest\x1a\x16.gateway.v1.LoginReply\x12/\n" +
-	"\tHeartbeat\x12\x10.gateway.v1.Ping\x1a\x10.gateway.v1.PongBAZ?github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1b\x06proto3"
+	"\x05Login\x12\x18.gateway.v1.LoginRequest\x1a\x16.gateway.v1.LoginReply\x12E\n" +
+	"\tHeartbeat\x12\x1c.gateway.v1.HeartbeatRequest\x1a\x1a.gateway.v1.HeartbeatReply\x12<\n" +
+	"\x06Logout\x12\x19.gateway.v1.LogoutRequest\x1a\x17.gateway.v1.LogoutReplyBAZ?github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1b\x06proto3"
 
 var (
 	file_api_gateway_v1_auth_proto_rawDescOnce sync.Once
@@ -420,27 +542,31 @@ func file_api_gateway_v1_auth_proto_rawDescGZIP() []byte {
 	return file_api_gateway_v1_auth_proto_rawDescData
 }
 
-var file_api_gateway_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_api_gateway_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_api_gateway_v1_auth_proto_goTypes = []any{
 	(*RegisterRequest)(nil),  // 0: gateway.v1.RegisterRequest
 	(*RegisterReply)(nil),    // 1: gateway.v1.RegisterReply
 	(*LoginRequest)(nil),     // 2: gateway.v1.LoginRequest
 	(*LoginReply)(nil),       // 3: gateway.v1.LoginReply
-	(*Ping)(nil),             // 4: gateway.v1.Ping
-	(*Pong)(nil),             // 5: gateway.v1.Pong
-	(*KickedNotify)(nil),     // 6: gateway.v1.KickedNotify
-	(*v1.PlayerSummary)(nil), // 7: common.v1.PlayerSummary
+	(*HeartbeatRequest)(nil), // 4: gateway.v1.HeartbeatRequest
+	(*HeartbeatReply)(nil),   // 5: gateway.v1.HeartbeatReply
+	(*LogoutRequest)(nil),    // 6: gateway.v1.LogoutRequest
+	(*LogoutReply)(nil),      // 7: gateway.v1.LogoutReply
+	(*KickedNotify)(nil),     // 8: gateway.v1.KickedNotify
+	(*v1.PlayerSummary)(nil), // 9: common.v1.PlayerSummary
 }
 var file_api_gateway_v1_auth_proto_depIdxs = []int32{
-	7, // 0: gateway.v1.LoginReply.player:type_name -> common.v1.PlayerSummary
+	9, // 0: gateway.v1.LoginReply.player:type_name -> common.v1.PlayerSummary
 	0, // 1: gateway.v1.GatewayAuth.Register:input_type -> gateway.v1.RegisterRequest
 	2, // 2: gateway.v1.GatewayAuth.Login:input_type -> gateway.v1.LoginRequest
-	4, // 3: gateway.v1.GatewayAuth.Heartbeat:input_type -> gateway.v1.Ping
-	1, // 4: gateway.v1.GatewayAuth.Register:output_type -> gateway.v1.RegisterReply
-	3, // 5: gateway.v1.GatewayAuth.Login:output_type -> gateway.v1.LoginReply
-	5, // 6: gateway.v1.GatewayAuth.Heartbeat:output_type -> gateway.v1.Pong
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
+	4, // 3: gateway.v1.GatewayAuth.Heartbeat:input_type -> gateway.v1.HeartbeatRequest
+	6, // 4: gateway.v1.GatewayAuth.Logout:input_type -> gateway.v1.LogoutRequest
+	1, // 5: gateway.v1.GatewayAuth.Register:output_type -> gateway.v1.RegisterReply
+	3, // 6: gateway.v1.GatewayAuth.Login:output_type -> gateway.v1.LoginReply
+	5, // 7: gateway.v1.GatewayAuth.Heartbeat:output_type -> gateway.v1.HeartbeatReply
+	7, // 8: gateway.v1.GatewayAuth.Logout:output_type -> gateway.v1.LogoutReply
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -457,7 +583,7 @@ func file_api_gateway_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_gateway_v1_auth_proto_rawDesc), len(file_api_gateway_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

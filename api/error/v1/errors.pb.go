@@ -36,6 +36,7 @@ const (
 	ErrorReason_TokenExpired        ErrorReason = 1005 // 会话令牌过期
 	ErrorReason_SessionNotFound     ErrorReason = 1006 // 会话不存在
 	ErrorReason_PlayerNotOnline     ErrorReason = 1007 // 玩家不在线
+	ErrorReason_InvalidParams       ErrorReason = 1008 // 参数非法
 	// 匹配
 	ErrorReason_AlreadyInMatch ErrorReason = 2001 // 已在匹配中
 	ErrorReason_MatchNotFound  ErrorReason = 2002 // 匹配不存在
@@ -58,6 +59,7 @@ var (
 		1005: "TokenExpired",
 		1006: "SessionNotFound",
 		1007: "PlayerNotOnline",
+		1008: "InvalidParams",
 		2001: "AlreadyInMatch",
 		2002: "MatchNotFound",
 		3001: "BattleNotFound",
@@ -74,6 +76,7 @@ var (
 		"TokenExpired":        1005,
 		"SessionNotFound":     1006,
 		"PlayerNotOnline":     1007,
+		"InvalidParams":       1008,
 		"AlreadyInMatch":      2001,
 		"MatchNotFound":       2002,
 		"BattleNotFound":      3001,
@@ -114,7 +117,7 @@ var File_api_error_v1_errors_proto protoreflect.FileDescriptor
 
 const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\xf0\x02\n" +
+	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\x8a\x03\n" +
 	"\vErrorReason\x12\b\n" +
 	"\x04None\x10\x00\x12\x19\n" +
 	"\x0ePlayerNotFound\x10\xe9\a\x1a\x04\xa8E\x94\x03\x12\x1e\n" +
@@ -123,7 +126,8 @@ const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\rKickedOffline\x10\xec\a\x1a\x04\xa8E\x91\x03\x12\x17\n" +
 	"\fTokenExpired\x10\xed\a\x1a\x04\xa8E\x91\x03\x12\x1a\n" +
 	"\x0fSessionNotFound\x10\xee\a\x1a\x04\xa8E\x94\x03\x12\x1a\n" +
-	"\x0fPlayerNotOnline\x10\xef\a\x1a\x04\xa8E\x94\x03\x12\x19\n" +
+	"\x0fPlayerNotOnline\x10\xef\a\x1a\x04\xa8E\x94\x03\x12\x18\n" +
+	"\rInvalidParams\x10\xf0\a\x1a\x04\xa8E\x90\x03\x12\x19\n" +
 	"\x0eAlreadyInMatch\x10\xd1\x0f\x1a\x04\xa8E\x99\x03\x12\x18\n" +
 	"\rMatchNotFound\x10\xd2\x0f\x1a\x04\xa8E\x94\x03\x12\x19\n" +
 	"\x0eBattleNotFound\x10\xb9\x17\x1a\x04\xa8E\x94\x03\x12\x15\n" +

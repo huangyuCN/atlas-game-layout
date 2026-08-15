@@ -21,12 +21,14 @@ const _ = tcpt.SupportPackageIsVersion1
 // Operation 常量定义 TCP 调用使用的完整方法名。
 const OperationGatewayAuthHeartbeatTCP = "/gateway.v1.GatewayAuth/Heartbeat"
 const OperationGatewayAuthLoginTCP = "/gateway.v1.GatewayAuth/Login"
+const OperationGatewayAuthLogoutTCP = "/gateway.v1.GatewayAuth/Logout"
 const OperationGatewayAuthRegisterTCP = "/gateway.v1.GatewayAuth/Register"
 
 // GatewayAuthTCPClient 定义通过 TCP 调用服务的方法集合。
 type GatewayAuthTCPClient interface {
-	Heartbeat(ctx context.Context, req *Ping) (*Pong, error)
+	Heartbeat(ctx context.Context, req *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(ctx context.Context, req *LoginRequest) (*LoginReply, error)
+	Logout(ctx context.Context, req *LogoutRequest) (*LogoutReply, error)
 	Register(ctx context.Context, req *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -39,8 +41,8 @@ func NewGatewayAuthTCPClient(cc *tcpt.Client) GatewayAuthTCPClient {
 	return &gatewayAuthTCPClient{cc: cc}
 }
 
-func (c *gatewayAuthTCPClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, error) {
-	var out Pong
+func (c *gatewayAuthTCPClient) Heartbeat(ctx context.Context, in *HeartbeatRequest) (*HeartbeatReply, error) {
+	var out HeartbeatReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthHeartbeatTCP, in, &out); err != nil {
 		return nil, err
 	}
@@ -50,6 +52,14 @@ func (c *gatewayAuthTCPClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, 
 func (c *gatewayAuthTCPClient) Login(ctx context.Context, in *LoginRequest) (*LoginReply, error) {
 	var out LoginReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthLoginTCP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayAuthTCPClient) Logout(ctx context.Context, in *LogoutRequest) (*LogoutReply, error) {
+	var out LogoutReply
+	if err := c.cc.Invoke(ctx, OperationGatewayAuthLogoutTCP, in, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -65,8 +75,9 @@ func (c *gatewayAuthTCPClient) Register(ctx context.Context, in *RegisterRequest
 
 // GatewayAuthTCPServer 定义需要由用户实现的服务端接口。
 type GatewayAuthTCPServer interface {
-	Heartbeat(context.Context, *Ping) (*Pong, error)
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(context.Context, *LoginRequest) (*LoginReply, error)
+	Logout(context.Context, *LogoutRequest) (*LogoutReply, error)
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -79,6 +90,9 @@ func RegisterGatewayAuthTCPServer(s *tcpt.Server, srv GatewayAuthTCPServer) erro
 		return err
 	}
 	if err := s.Subscribe(OperationGatewayAuthHeartbeatTCP, _GatewayAuth_Heartbeat0_TCP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayAuthLogoutTCP, _GatewayAuth_Logout0_TCP_Handler(srv)); err != nil {
 		return err
 	}
 	return nil
@@ -120,11 +134,28 @@ func _GatewayAuth_Login0_TCP_Handler(srv GatewayAuthTCPServer) tcpt.MsgHandler {
 
 func _GatewayAuth_Heartbeat0_TCP_Handler(srv GatewayAuthTCPServer) tcpt.MsgHandler {
 	return func(ctx context.Context, dec tcpt.Decoder, enc tcpt.Encoder) ([]byte, error) {
-		in := new(Ping)
+		in := new(HeartbeatRequest)
 		if err := dec(in); err != nil {
 			return nil, err
 		}
 		out, err := srv.Heartbeat(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayAuth_Logout0_TCP_Handler(srv GatewayAuthTCPServer) tcpt.MsgHandler {
+	return func(ctx context.Context, dec tcpt.Decoder, enc tcpt.Encoder) ([]byte, error) {
+		in := new(LogoutRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.Logout(ctx, in)
 		if err != nil {
 			return nil, err
 		}

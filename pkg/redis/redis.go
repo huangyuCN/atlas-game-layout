@@ -4,6 +4,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -65,7 +66,7 @@ func (c *Client) SetPlayerSession(ctx context.Context, playerID, token string, t
 // GetPlayerSession 读取玩家会话令牌（不存在时返回空串）。
 func (c *Client) GetPlayerSession(ctx context.Context, playerID string) (string, error) {
 	v, err := c.inner.Get(ctx, playerSessionKey(playerID)).Result()
-	if err == goredis.Nil {
+	if errors.Is(err, goredis.Nil) {
 		return "", nil
 	}
 	if err != nil {
@@ -95,7 +96,7 @@ func (c *Client) SetGatewayRoute(ctx context.Context, playerID, instanceID strin
 // GetGatewayRoute 读取玩家连接所在 gateway 实例（不存在返回空串）。
 func (c *Client) GetGatewayRoute(ctx context.Context, playerID string) (string, error) {
 	v, err := c.inner.Get(ctx, gatewaySessionKey(playerID)).Result()
-	if err == goredis.Nil {
+	if errors.Is(err, goredis.Nil) {
 		return "", nil
 	}
 	return v, err

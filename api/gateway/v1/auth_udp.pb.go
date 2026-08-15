@@ -21,12 +21,14 @@ const _ = udpt.SupportPackageIsVersion1
 // Operation 常量定义 UDP 调用使用的完整方法名。
 const OperationGatewayAuthHeartbeatUDP = "/gateway.v1.GatewayAuth/Heartbeat"
 const OperationGatewayAuthLoginUDP = "/gateway.v1.GatewayAuth/Login"
+const OperationGatewayAuthLogoutUDP = "/gateway.v1.GatewayAuth/Logout"
 const OperationGatewayAuthRegisterUDP = "/gateway.v1.GatewayAuth/Register"
 
 // GatewayAuthUDPClient 定义通过 UDP 调用服务的方法集合。
 type GatewayAuthUDPClient interface {
-	Heartbeat(ctx context.Context, req *Ping) (*Pong, error)
+	Heartbeat(ctx context.Context, req *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(ctx context.Context, req *LoginRequest) (*LoginReply, error)
+	Logout(ctx context.Context, req *LogoutRequest) (*LogoutReply, error)
 	Register(ctx context.Context, req *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -39,8 +41,8 @@ func NewGatewayAuthUDPClient(cc *udpt.Client) GatewayAuthUDPClient {
 	return &gatewayAuthUDPClient{cc: cc}
 }
 
-func (c *gatewayAuthUDPClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, error) {
-	var out Pong
+func (c *gatewayAuthUDPClient) Heartbeat(ctx context.Context, in *HeartbeatRequest) (*HeartbeatReply, error) {
+	var out HeartbeatReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthHeartbeatUDP, in, &out); err != nil {
 		return nil, err
 	}
@@ -50,6 +52,14 @@ func (c *gatewayAuthUDPClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, 
 func (c *gatewayAuthUDPClient) Login(ctx context.Context, in *LoginRequest) (*LoginReply, error) {
 	var out LoginReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthLoginUDP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayAuthUDPClient) Logout(ctx context.Context, in *LogoutRequest) (*LogoutReply, error) {
+	var out LogoutReply
+	if err := c.cc.Invoke(ctx, OperationGatewayAuthLogoutUDP, in, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -65,8 +75,9 @@ func (c *gatewayAuthUDPClient) Register(ctx context.Context, in *RegisterRequest
 
 // GatewayAuthUDPServer 定义需要由用户实现的服务端接口。
 type GatewayAuthUDPServer interface {
-	Heartbeat(context.Context, *Ping) (*Pong, error)
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(context.Context, *LoginRequest) (*LoginReply, error)
+	Logout(context.Context, *LogoutRequest) (*LogoutReply, error)
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -79,6 +90,9 @@ func RegisterGatewayAuthUDPServer(s *udpt.Server, srv GatewayAuthUDPServer) erro
 		return err
 	}
 	if err := s.Subscribe(OperationGatewayAuthHeartbeatUDP, _GatewayAuth_Heartbeat0_UDP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayAuthLogoutUDP, _GatewayAuth_Logout0_UDP_Handler(srv)); err != nil {
 		return err
 	}
 	return nil
@@ -120,11 +134,28 @@ func _GatewayAuth_Login0_UDP_Handler(srv GatewayAuthUDPServer) udpt.MsgHandler {
 
 func _GatewayAuth_Heartbeat0_UDP_Handler(srv GatewayAuthUDPServer) udpt.MsgHandler {
 	return func(ctx context.Context, dec udpt.Decoder, enc udpt.Encoder) ([]byte, error) {
-		in := new(Ping)
+		in := new(HeartbeatRequest)
 		if err := dec(in); err != nil {
 			return nil, err
 		}
 		out, err := srv.Heartbeat(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayAuth_Logout0_UDP_Handler(srv GatewayAuthUDPServer) udpt.MsgHandler {
+	return func(ctx context.Context, dec udpt.Decoder, enc udpt.Encoder) ([]byte, error) {
+		in := new(LogoutRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.Logout(ctx, in)
 		if err != nil {
 			return nil, err
 		}

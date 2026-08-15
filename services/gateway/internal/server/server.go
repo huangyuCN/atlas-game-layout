@@ -1,16 +1,29 @@
-// Package server 负责 gateway 服务的传输层组装：
-// HTTP 健康检查（M1）；tcp/websocket/kcp/udp 五协议接入在 M4 里程碑追加。
+// Package server 负责 gateway 服务的传输层组装与统一 handler：
+// 五协议 Server（tcp/ws/kcp/udp/http）+ 会话绑定 + 挤下线 + 下行推送。
 package server
 
 import (
 	"fmt"
 	"net/http"
+	"time"
 
-	atlashttp "github.com/huangyuCN/atlas/transport/http"
-	"github.com/huangyuCN/atlas/transport"
+	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
+	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
+	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
+	"github.com/huangyuCN/atlas/transport"
+	atlashttp "github.com/huangyuCN/atlas/transport/http"
+	kcpt "github.com/huangyuCN/atlas/transport/kcp"
+	tcpt "github.com/huangyuCN/atlas/transport/tcp"
+	udpt "github.com/huangyuCN/atlas/transport/udp"
+	wst "github.com/huangyuCN/atlas/transport/websocket"
+	natsgo "github.com/nats-io/nats.go"
 	"go.uber.org/fx"
 )
+
+// sessionTTL 是会话路由的默认租期（心跳续租周期）。
+const sessionTTL = 30 * time.Second
 
 // NewHTTPServer 构造 HTTP 服务端（健康检查）。
 func NewHTTPServer(cfg *conf.Bootstrap) (transport.Server, error) {
@@ -25,9 +38,70 @@ func NewHTTPServer(cfg *conf.Bootstrap) (transport.Server, error) {
 	return srv, nil
 }
 
-// Module 是 gateway 服务的传输层装配模块。
+// newRedisClient 装配 redis 客户端（会话路由表后端）。
+func newRedisClient(cfg *conf.Bootstrap) (*pkredis.Client, error) {
+	opts := pkredis.Options{}
+	if d := cfg.GetData(); d != nil && d.GetRedis() != nil {
+		opts.Addr = d.GetRedis().GetAddr()
+	}
+	return pkredis.NewClient(opts)
+}
+
+// newNatsConn 装配 NATS 连接（推送订阅 + 控制通道）。
+func newNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
+	url := ""
+	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
+		url = d.GetNats().GetUrl()
+	}
+	return nats.Connect(nats.Options{URL: url, Name: "gateway"})
+}
+
+// newSessionManager 装配分布式会话管理器。
+func newSessionManager(cfg *conf.Bootstrap, cli *pkredis.Client) *session.Manager {
+	instanceID := ""
+	if r := cfg.GetRuntime(); r != nil {
+		instanceID = r.GetId()
+	}
+	return session.NewManager(session.NewRedisStore(cli), instanceID, sessionTTL)
+}
+
+// newActorClient 装配远程 actor 客户端（M5/M7 前为占位运行时）。
+func newActorClient() *actorclient.Client {
+	return actorclient.NewClient(noopRuntime{})
+}
+
+// newGateway 装配统一 handler 并注册到各协议 Server。
+func newGateway(
+	cfg *conf.Bootstrap,
+	sess *session.Manager,
+	actors *actorclient.Client,
+	nc *natsgo.Conn,
+	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
+) (*Gateway, error) {
+	instanceID := ""
+	if r := cfg.GetRuntime(); r != nil {
+		instanceID = r.GetId()
+	}
+	g := NewGateway(instanceID, sess, actors, nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	if err := registerHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// Module 是 gateway 服务的传输层装配模块（五协议 + 会话 + 推送）。
 var Module = fx.Module("server",
 	fx.Provide(
 		fx.Annotate(NewHTTPServer, fx.ResultTags(`group:"servers"`)),
+		fx.Annotate(NewTCPServer, fx.ResultTags(`group:"servers"`)),
+		fx.Annotate(NewWSServer, fx.ResultTags(`group:"servers"`)),
+		fx.Annotate(NewKCPServer, fx.ResultTags(`group:"servers"`)),
+		fx.Annotate(NewUDPServer, fx.ResultTags(`group:"servers"`)),
+		newRedisClient,
+		newNatsConn,
+		newSessionManager,
+		newActorClient,
+		newGateway,
 	),
+	fx.Invoke(registerRelay),
 )

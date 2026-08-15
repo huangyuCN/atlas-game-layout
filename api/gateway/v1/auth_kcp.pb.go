@@ -21,12 +21,14 @@ const _ = kcpt.SupportPackageIsVersion1
 // Operation 常量定义 KCP 调用使用的完整方法名。
 const OperationGatewayAuthHeartbeatKCP = "/gateway.v1.GatewayAuth/Heartbeat"
 const OperationGatewayAuthLoginKCP = "/gateway.v1.GatewayAuth/Login"
+const OperationGatewayAuthLogoutKCP = "/gateway.v1.GatewayAuth/Logout"
 const OperationGatewayAuthRegisterKCP = "/gateway.v1.GatewayAuth/Register"
 
 // GatewayAuthKCPClient 定义通过 KCP 调用服务的方法集合。
 type GatewayAuthKCPClient interface {
-	Heartbeat(ctx context.Context, req *Ping) (*Pong, error)
+	Heartbeat(ctx context.Context, req *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(ctx context.Context, req *LoginRequest) (*LoginReply, error)
+	Logout(ctx context.Context, req *LogoutRequest) (*LogoutReply, error)
 	Register(ctx context.Context, req *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -39,8 +41,8 @@ func NewGatewayAuthKCPClient(cc *kcpt.Client) GatewayAuthKCPClient {
 	return &gatewayAuthKCPClient{cc: cc}
 }
 
-func (c *gatewayAuthKCPClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, error) {
-	var out Pong
+func (c *gatewayAuthKCPClient) Heartbeat(ctx context.Context, in *HeartbeatRequest) (*HeartbeatReply, error) {
+	var out HeartbeatReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthHeartbeatKCP, in, &out); err != nil {
 		return nil, err
 	}
@@ -50,6 +52,14 @@ func (c *gatewayAuthKCPClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, 
 func (c *gatewayAuthKCPClient) Login(ctx context.Context, in *LoginRequest) (*LoginReply, error) {
 	var out LoginReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthLoginKCP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayAuthKCPClient) Logout(ctx context.Context, in *LogoutRequest) (*LogoutReply, error) {
+	var out LogoutReply
+	if err := c.cc.Invoke(ctx, OperationGatewayAuthLogoutKCP, in, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -65,8 +75,9 @@ func (c *gatewayAuthKCPClient) Register(ctx context.Context, in *RegisterRequest
 
 // GatewayAuthKCPServer 定义需要由用户实现的服务端接口。
 type GatewayAuthKCPServer interface {
-	Heartbeat(context.Context, *Ping) (*Pong, error)
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(context.Context, *LoginRequest) (*LoginReply, error)
+	Logout(context.Context, *LogoutRequest) (*LogoutReply, error)
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -79,6 +90,9 @@ func RegisterGatewayAuthKCPServer(s *kcpt.Server, srv GatewayAuthKCPServer) erro
 		return err
 	}
 	if err := s.Subscribe(OperationGatewayAuthHeartbeatKCP, _GatewayAuth_Heartbeat0_KCP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayAuthLogoutKCP, _GatewayAuth_Logout0_KCP_Handler(srv)); err != nil {
 		return err
 	}
 	return nil
@@ -120,11 +134,28 @@ func _GatewayAuth_Login0_KCP_Handler(srv GatewayAuthKCPServer) kcpt.MsgHandler {
 
 func _GatewayAuth_Heartbeat0_KCP_Handler(srv GatewayAuthKCPServer) kcpt.MsgHandler {
 	return func(ctx context.Context, dec kcpt.Decoder, enc kcpt.Encoder) ([]byte, error) {
-		in := new(Ping)
+		in := new(HeartbeatRequest)
 		if err := dec(in); err != nil {
 			return nil, err
 		}
 		out, err := srv.Heartbeat(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayAuth_Logout0_KCP_Handler(srv GatewayAuthKCPServer) kcpt.MsgHandler {
+	return func(ctx context.Context, dec kcpt.Decoder, enc kcpt.Encoder) ([]byte, error) {
+		in := new(LogoutRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.Logout(ctx, in)
 		if err != nil {
 			return nil, err
 		}

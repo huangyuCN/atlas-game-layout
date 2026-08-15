@@ -21,12 +21,14 @@ const _ = wst.SupportPackageIsVersion1
 // Operation 常量定义 WebSocket 调用使用的完整方法名。
 const OperationGatewayAuthHeartbeatWS = "/gateway.v1.GatewayAuth/Heartbeat"
 const OperationGatewayAuthLoginWS = "/gateway.v1.GatewayAuth/Login"
+const OperationGatewayAuthLogoutWS = "/gateway.v1.GatewayAuth/Logout"
 const OperationGatewayAuthRegisterWS = "/gateway.v1.GatewayAuth/Register"
 
 // GatewayAuthWSClient 定义通过 WebSocket 调用服务的方法集合。
 type GatewayAuthWSClient interface {
-	Heartbeat(ctx context.Context, req *Ping) (*Pong, error)
+	Heartbeat(ctx context.Context, req *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(ctx context.Context, req *LoginRequest) (*LoginReply, error)
+	Logout(ctx context.Context, req *LogoutRequest) (*LogoutReply, error)
 	Register(ctx context.Context, req *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -39,8 +41,8 @@ func NewGatewayAuthWSClient(cc *wst.Client) GatewayAuthWSClient {
 	return &gatewayAuthWSClient{cc: cc}
 }
 
-func (c *gatewayAuthWSClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, error) {
-	var out Pong
+func (c *gatewayAuthWSClient) Heartbeat(ctx context.Context, in *HeartbeatRequest) (*HeartbeatReply, error) {
+	var out HeartbeatReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthHeartbeatWS, in, &out); err != nil {
 		return nil, err
 	}
@@ -50,6 +52,14 @@ func (c *gatewayAuthWSClient) Heartbeat(ctx context.Context, in *Ping) (*Pong, e
 func (c *gatewayAuthWSClient) Login(ctx context.Context, in *LoginRequest) (*LoginReply, error) {
 	var out LoginReply
 	if err := c.cc.Invoke(ctx, OperationGatewayAuthLoginWS, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayAuthWSClient) Logout(ctx context.Context, in *LogoutRequest) (*LogoutReply, error) {
+	var out LogoutReply
+	if err := c.cc.Invoke(ctx, OperationGatewayAuthLogoutWS, in, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -65,8 +75,9 @@ func (c *gatewayAuthWSClient) Register(ctx context.Context, in *RegisterRequest)
 
 // GatewayAuthWSServer 定义需要由用户实现的服务端接口。
 type GatewayAuthWSServer interface {
-	Heartbeat(context.Context, *Ping) (*Pong, error)
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatReply, error)
 	Login(context.Context, *LoginRequest) (*LoginReply, error)
+	Logout(context.Context, *LogoutRequest) (*LogoutReply, error)
 	Register(context.Context, *RegisterRequest) (*RegisterReply, error)
 }
 
@@ -79,6 +90,9 @@ func RegisterGatewayAuthWSServer(s *wst.Server, srv GatewayAuthWSServer) error {
 		return err
 	}
 	if err := s.Subscribe(OperationGatewayAuthHeartbeatWS, _GatewayAuth_Heartbeat0_WS_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayAuthLogoutWS, _GatewayAuth_Logout0_WS_Handler(srv)); err != nil {
 		return err
 	}
 	return nil
@@ -120,11 +134,28 @@ func _GatewayAuth_Login0_WS_Handler(srv GatewayAuthWSServer) wst.MsgHandler {
 
 func _GatewayAuth_Heartbeat0_WS_Handler(srv GatewayAuthWSServer) wst.MsgHandler {
 	return func(ctx context.Context, dec wst.Decoder, enc wst.Encoder) ([]byte, error) {
-		in := new(Ping)
+		in := new(HeartbeatRequest)
 		if err := dec(in); err != nil {
 			return nil, err
 		}
 		out, err := srv.Heartbeat(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayAuth_Logout0_WS_Handler(srv GatewayAuthWSServer) wst.MsgHandler {
+	return func(ctx context.Context, dec wst.Decoder, enc wst.Encoder) ([]byte, error) {
+		in := new(LogoutRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.Logout(ctx, in)
 		if err != nil {
 			return nil, err
 		}

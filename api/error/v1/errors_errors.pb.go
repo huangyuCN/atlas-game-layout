@@ -347,6 +347,54 @@ func WrapPlayerNotOnline(cause error, format string, args ...interface{}) *error
 	return ErrPlayerNotOnline(format, args...).WithCause(cause)
 }
 
+// 参数非法
+func IsInvalidParams(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "INVALID_PARAMS" || e.Code != 400 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1008"
+}
+
+// 参数非法
+func ErrInvalidParams(format string, args ...interface{}) *errors.Error {
+	return errors.New(400, "INVALID_PARAMS", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1008",
+		"biz_reason": "InvalidParams",
+	})
+}
+
+// ReasonInvalidParams 返回当前错误的 reason 常量值。
+func ReasonInvalidParams() string {
+	return "INVALID_PARAMS"
+}
+
+// CodeInvalidParams 返回当前错误对应的 HTTP 状态码。
+func CodeInvalidParams() int {
+	return 400
+}
+
+// BizCodeInvalidParams 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeInvalidParams() int32 {
+	return 1008
+}
+
+// NewInvalidParams 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewInvalidParams(message string) *errors.Error {
+	return errors.New(400, "INVALID_PARAMS", message).WithMetadata(map[string]string{
+		"biz_code":   "1008",
+		"biz_reason": "InvalidParams",
+	})
+}
+
+// WrapInvalidParams 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapInvalidParams(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrInvalidParams(format, args...).WithCause(cause)
+}
+
 // 匹配
 func IsAlreadyInMatch(err error) bool {
 	if err == nil {
@@ -685,6 +733,9 @@ func matchKnown(e *errors.Error) (*errors.Error, bool) {
 		return e, true
 	}
 	if IsPlayerNotOnline(e) {
+		return e, true
+	}
+	if IsInvalidParams(e) {
 		return e, true
 	}
 	if IsAlreadyInMatch(e) {
