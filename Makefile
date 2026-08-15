@@ -44,7 +44,9 @@ clean:
 	rm -rf $(BIN_DIR)
 
 # proto 生成：Atlas 插件来自 ATLAS_BIN（本地开发=../atlas/bin，用户项目=atlas upgrade 安装目录）。
-# proto-tools 会把全家桶插件复制到本仓库 ./bin，用户项目生成时不再依赖 Atlas 源码仓库。
+# proto 生成：Atlas 插件来自 ATLAS_BIN（本地开发=../atlas/bin，用户项目=atlas upgrade
+# 安装目录，如 `make proto ATLAS_BIN="$(go env GOBIN)"`）。proto-tools 优先收集现成
+# 插件，缺插件且存在 Atlas 源码时回退到源码构建——用户项目不依赖 Atlas 源码仓库。
 PROTO_INC := -I. -Ithird_party
 ATLAS_BIN ?= ../atlas/bin
 ATLAS_DIR ?= $(dir $(ATLAS_BIN))
@@ -54,10 +56,19 @@ API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/match
 
 .PHONY: proto proto-tools
 
-proto-tools: ## 构建/收集 protoc 插件到 ./bin（Atlas 全家桶 + go/go-grpc/openapi）
+proto-tools: ## 收集/构建 protoc 插件到 ./bin（Atlas 全家桶 + go/go-grpc/openapi）
 	@mkdir -p $(BIN_DIR)
-	@$(MAKE) -C $(abspath $(ATLAS_DIR)) proto-tools
-	@cp $(abspath $(ATLAS_DIR))/bin/protoc-gen-atlas-* $(BIN_DIR)/ 2>/dev/null || true
+	@if [ -f "$(ATLAS_BIN)/protoc-gen-atlas-http" ]; then \
+		echo "atlas 插件：从 $(ATLAS_BIN) 收集"; \
+		cp $(ATLAS_BIN)/protoc-gen-atlas-* $(BIN_DIR)/ 2>/dev/null || true; \
+	elif [ -d "$(abspath $(ATLAS_DIR))" ]; then \
+		echo "atlas 插件：从 $(abspath $(ATLAS_DIR)) 源码构建"; \
+		$(MAKE) -C $(abspath $(ATLAS_DIR)) proto-tools; \
+		cp $(abspath $(ATLAS_DIR))/bin/protoc-gen-atlas-* $(BIN_DIR)/ 2>/dev/null || true; \
+	else \
+		echo "错误：ATLAS_BIN 缺插件且无 Atlas 源码；请先执行 atlas upgrade 并以 ATLAS_BIN=$$(go env GOPATH)/bin 重试" >&2; \
+		exit 1; \
+	fi
 	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install github.com/google/gnostic/cmd/protoc-gen-openapi@latest
