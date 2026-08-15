@@ -37,7 +37,7 @@ func Load(path string, v proto.Message) error {
 }
 
 // FromService 按服务名加载 services/<name>/configs/config.yaml
-//（相对仓库根运行；服务内配置自包含，路径约定见包注释）。
+// （相对仓库根运行；服务内配置自包含，路径约定见包注释）。
 func FromService(name string, v proto.Message) error {
 	if name == "" {
 		return fmt.Errorf("config: 服务名不能为空")

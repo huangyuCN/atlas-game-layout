@@ -25,7 +25,7 @@ env: test
 		t.Fatalf("Load() 错误 = %v", err)
 	}
 	if got.Name != "demo" || got.Id != "demo-1" || got.Version != "v1.0.0" || got.Env != "test" {
-		t.Fatalf("解组结果不符合预期: %+v", got)
+		t.Fatalf("解组结果不符合预期: %+v", &got)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestLoadNested(t *testing.T) {
 	}
 	eps := got.GetEtcd().GetEndpoints()
 	if len(eps) != 2 || eps[0] != "127.0.0.1:12379" {
-		t.Fatalf("嵌套解组结果不符合预期: %+v", got)
+		t.Fatalf("嵌套解组结果不符合预期: %+v", &got)
 	}
 }
 
@@ -109,6 +109,6 @@ func TestFromService(t *testing.T) {
 		t.Fatalf("FromService() 错误 = %v", err)
 	}
 	if got.Name != "demo" {
-		t.Fatalf("FromService 加载结果不符合预期: %+v", got)
+		t.Fatalf("FromService 加载结果不符合预期: %+v", &got)
 	}
 }

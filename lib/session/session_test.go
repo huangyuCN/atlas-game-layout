@@ -22,8 +22,8 @@ func TestNewToken(t *testing.T) {
 // TestValid 验证非法令牌拒绝。
 func TestValid(t *testing.T) {
 	cases := map[string]bool{
-		"":                        false,
-		"short":                   false,
+		"":      false,
+		"short": false,
 		"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz": false, // 非 hex
 		"abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234": true,  // 64 hex
 	}

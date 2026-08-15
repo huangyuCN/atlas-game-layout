@@ -1,0 +1,91 @@
+# 模板 CI：格式 / 静态检查 / 单测 / 构建 + 集成测试（SSH 集成服务器）。
+#
+# 约定（与仓库 AGENTS.md 一致）：
+# - 单元与构建在 GitHub runner 上执行；Atlas/cow 依赖经本地 replace 指向源码树，
+#   由本 workflow 检出到工作区同级目录后编译。
+# - 集成测试（test/e2e，真中间件）经 SSH 在集成服务器（10.10.9.36）执行，
+#   该服务器常驻 etcd 12379 / redis 16379 / nats 14222；mongo 由 job 起一次性容器。
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  # Atlas/cow 检出版本（远端仓库可访问后按需改为 tag/commit）。
+  ATLAS_REF: main
+  COW_REF: main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 模板仓库
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Checkout Atlas（replace ../atlas）
+        uses: actions/checkout@v4
+        with:
+          repository: huangyuCN/atlas
+          ref: ${{ env.ATLAS_REF }}
+          path: ../atlas
+
+      - name: Checkout cow（replace ../cow）
+        uses: actions/checkout@v4
+        with:
+          repository: huangyuCN/cow
+          ref: ${{ env.COW_REF }}
+          path: ../cow
+
+      - name: gofmt 检查
+        run: |
+          out="$(gofmt -l . | grep -v '^third_party/' || true)"
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: 单元测试
+        run: go test -count=1 ./...
+
+      - name: 四服务构建
+        run: make build
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout 模板仓库
+        uses: actions/checkout@v4
+
+      - name: 同步代码到集成服务器
+        uses: easingthemes/ssh-deploy@v5
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.IT_SSH_PRIVATE_KEY }}
+          REMOTE_HOST: ${{ secrets.IT_HOST }}
+          REMOTE_USER: ${{ secrets.IT_USER }}
+          TARGET: ~/atlas-game-layout
+          EXCLUDE: "/.git/, /bin/"
+          ARGS: "-rlgoDzvc --delete"
+
+      - name: 集成服务器执行 e2e（真中间件）
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.IT_HOST }}
+          username: ${{ secrets.IT_USER }}
+          key: ${{ secrets.IT_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            # 集成依赖：etcd/redis/nats 常驻；mongo 一次性容器（已存在则复用）
+            docker start it-mongo >/dev/null 2>&1 || \
+              docker run -d --name it-mongo -p 27018:27017 mongo:7
+            cd ~/atlas-game-layout
+            go test -count=1 ./test/e2e/

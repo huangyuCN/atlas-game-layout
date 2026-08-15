@@ -3,12 +3,12 @@ package bootstrap
 import (
 	"fmt"
 
-	"github.com/huangyuCN/atlas/registry"
-	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
-	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
+	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
+	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	"github.com/huangyuCN/atlas/registry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/fx"
 	"google.golang.org/protobuf/proto"
