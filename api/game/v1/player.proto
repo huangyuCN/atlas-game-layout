@@ -9,17 +9,84 @@ option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
 import "api/common/v1/common.proto";
 import "google/api/annotations.proto";
 
-// LoginActorReq 是 PlayerActor 的登录/注册消息（actor Ask 载荷）。
-message LoginActorReq {
+// RegisterActorReq 是 PlayerActor 的注册消息（注册与登录两段式，D8/D9）：
+// 玩家数据不存在则创建并回执，客户端仍需 Login 建立会话。
+message RegisterActorReq {
   string account = 1;
-  string token = 2;
-  string gateway_instance = 3;
+  string password = 2;
+  string nickname = 3;
+  string gateway_instance = 4;
+}
+
+message RegisterActorReply {
+  bool ok = 1;
+  string error_reason = 2;
+  string player_id = 3;
+  common.v1.PlayerSummary player = 4;
+}
+
+// LoginActorReq 是 PlayerActor 的登录消息（actor Ask 载荷）。
+// 玩家 ID 由注册回执获得（注册与登录两段式，D8）；token 由 gateway 预签发；
+// PlayerActor 校验玩家数据并做会话令牌裁决（D10 兜底）。
+message LoginActorReq {
+  string player_id = 1;
+  string password = 2;
+  string token = 3;
+  string gateway_instance = 4;
 }
 
 message LoginActorReply {
   bool ok = 1;
   string error_reason = 2;
   common.v1.PlayerSummary player = 3;
+}
+
+// LogoutActorMsg 是 PlayerActor 的登出/挤下线退出消息（Tell 载荷）：
+// PlayerActor 校验令牌后停止自身（Locator 移除，D10 联动）。
+message LogoutActorMsg {
+  string token = 1;
+  string reason = 2;
+}
+
+// GrantItemActorReq 背包发放（经 PlayerActor 聚合根 undo 写，grpc 转发）。
+message GrantItemActorReq {
+  uint32 item_id = 1;
+  uint32 count = 2;
+  string reason = 3;
+}
+
+message GrantItemActorReply {
+  bool ok = 1;
+  string error_reason = 2;
+}
+
+// GetBackpackActorReq/Reply 背包查询（聚合根内存快照，grpc 转发）。
+message GetBackpackActorReq {}
+
+message GetBackpackActorReply {
+  bool ok = 1;
+  repeated BackpackItem items = 2;
+}
+
+// GetPlayerActorReq/Reply 玩家摘要查询（聚合根内存快照，grpc 转发）。
+message GetPlayerActorReq {}
+
+message GetPlayerActorReply {
+  bool ok = 1;
+  common.v1.PlayerSummary player = 2;
+}
+
+// PlayerActorMsg 是 PlayerActor 的消息信封：跨节点传输的 payload 为
+// 序列化字节（集群约定），oneof 区分具体消息类型。
+message PlayerActorMsg {
+  oneof kind {
+    RegisterActorReq register = 1;
+    LoginActorReq login = 2;
+    LogoutActorMsg logout = 3;
+    GrantItemActorReq grant_item = 4;
+    GetBackpackActorReq get_backpack = 5;
+    GetPlayerActorReq get_player = 6;
+  }
 }
 
 // GetPlayerRequest/Reply 玩家信息查询。

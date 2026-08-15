@@ -18,9 +18,9 @@ message RegisterReply {
   string player_id = 1;
 }
 
-// LoginRequest 登录：账号存在则建立会话。
+// LoginRequest 登录：凭注册回执的玩家 ID 建立会话（注册与登录两段式，D8）。
 message LoginRequest {
-  string account = 1;
+  string player_id = 1;
   string password = 2;
 }
 

@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"time"
 
-	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	libsession "github.com/huangyuCN/atlas-game-layout/lib/session"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/transport"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	"github.com/nats-io/nats.go"
@@ -103,28 +104,60 @@ func (g *Gateway) connFrom(ctx context.Context) *session.Conn {
 	}
 }
 
-// Register 注册：玩家数据创建在 game 服务（D9，M5 里程碑接入），当前返回未接入错误。
+// Register 注册：经 actor 转发 game PlayerActor（懒激活），创建玩家数据并回执（D9）。
 func (g *Gateway) Register(ctx context.Context, req *gatewayv1.RegisterRequest) (*gatewayv1.RegisterReply, error) {
 	if req.GetAccount() == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("账号与口令不能为空")
 	}
-	return nil, errorv1.ErrInternal("注册链路需 game 服务接入（M5 里程碑）")
+	playerID := req.GetAccount()
+	reply := new(gamev1.RegisterActorReply)
+	err := g.actors.AskPlayerProto(ctx, playerID, &gamev1.PlayerActorMsg{
+		Kind: &gamev1.PlayerActorMsg_Register{Register: &gamev1.RegisterActorReq{
+			Account:         req.GetAccount(),
+			Password:        req.GetPassword(),
+			Nickname:        req.GetNickname(),
+			GatewayInstance: g.instanceID,
+		}},
+	}, reply)
+	if err != nil {
+		return nil, errorv1.ErrInternal("注册请求失败")
+	}
+	if !reply.GetOk() {
+		return nil, actorReplyError(reply.GetErrorReason())
+	}
+	return &gatewayv1.RegisterReply{PlayerId: reply.GetPlayerId()}, nil
 }
 
-// Login 登录：建立会话（签发令牌 + 绑定通道 + 路由登记），并触发旧会话挤下线。
-// M5 里程碑将替换为「actor 转发 game PlayerActor 裁决」；M4 为连接级最小实现。
+// Login 登录：经 actor 转发 game PlayerActor 裁决（玩家数据 + 会话令牌，D9/D10），
+// 成功后建立网关会话（签发令牌 + 绑定通道 + 路由登记）并触发旧会话挤下线。
 func (g *Gateway) Login(ctx context.Context, req *gatewayv1.LoginRequest) (*gatewayv1.LoginReply, error) {
 	conn := g.connFrom(ctx)
 	if conn == nil {
 		return nil, errorv1.ErrInvalidToken("请求缺少连接上下文")
 	}
-	playerID := req.GetAccount()
+	playerID := req.GetPlayerId()
 	if playerID == "" || req.GetPassword() == "" {
-		return nil, errorv1.ErrInvalidParams("账号与口令不能为空")
+		return nil, errorv1.ErrInvalidParams("玩家与口令不能为空")
 	}
 	token, err := libsession.NewToken()
 	if err != nil {
 		return nil, errorv1.ErrInternal("签发会话令牌失败")
+	}
+	// 先经 actor 裁决（玩家数据校验 + 会话令牌覆盖），成功后再绑定网关会话。
+	reply := new(gamev1.LoginActorReply)
+	err = g.actors.AskPlayerProto(ctx, playerID, &gamev1.PlayerActorMsg{
+		Kind: &gamev1.PlayerActorMsg_Login{Login: &gamev1.LoginActorReq{
+			PlayerId:        playerID,
+			Password:        req.GetPassword(),
+			Token:           token,
+			GatewayInstance: g.instanceID,
+		}},
+	}, reply)
+	if err != nil {
+		return nil, errorv1.ErrInternal("登录请求失败")
+	}
+	if !reply.GetOk() {
+		return nil, actorReplyError(reply.GetErrorReason())
 	}
 	// 绑定前快照旧会话（本实例挤下线推送用），随后原子覆盖路由。
 	oldSess, _ := g.sess.LocalSession(playerID)
@@ -137,11 +170,11 @@ func (g *Gateway) Login(ctx context.Context, req *gatewayv1.LoginRequest) (*gate
 	return &gatewayv1.LoginReply{
 		PlayerId: playerID,
 		Token:    token,
-		Player:   &commonv1.PlayerSummary{PlayerId: playerID, Nickname: req.GetAccount()},
+		Player:   reply.GetPlayer(),
 	}, nil
 }
 
-// Logout 登出：清理会话与路由。
+// Logout 登出：清理会话与路由，并联动 game PlayerActor 停止（Locator 移除）。
 func (g *Gateway) Logout(ctx context.Context, req *gatewayv1.LogoutRequest) (*gatewayv1.LogoutReply, error) {
 	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
 	if err != nil {
@@ -153,6 +186,10 @@ func (g *Gateway) Logout(ctx context.Context, req *gatewayv1.LogoutRequest) (*ga
 	if conn := g.connFrom(ctx); conn != nil {
 		g.sess.Unbind(ctx, req.GetPlayerId(), conn.ID)
 	}
+	// 联动 game PlayerActor：令牌匹配才清理会话并停止（异步投递）。
+	_ = g.actors.TellPlayerProto(ctx, req.GetPlayerId(), &gamev1.PlayerActorMsg{
+		Kind: &gamev1.PlayerActorMsg_Logout{Logout: &gamev1.LogoutActorMsg{Token: req.GetToken(), Reason: "logout"}},
+	})
 	return &gatewayv1.LogoutReply{}, nil
 }
 
@@ -226,5 +263,21 @@ func (g *Gateway) pushKicked(sess *session.Session) {
 		if c != nil {
 			_ = c.Send(PushOpKickedOffline, payload)
 		}
+	}
+}
+
+// actorReplyError 把 game PlayerActor 回执的 error_reason 映射为结构化错误。
+func actorReplyError(reason string) *atlaserrors.Error {
+	switch reason {
+	case errorv1.ReasonPlayerNotFound():
+		return errorv1.ErrPlayerNotFound("玩家不存在，请先注册")
+	case errorv1.ReasonPlayerAlreadyExists():
+		return errorv1.ErrPlayerAlreadyExists("账号已存在")
+	case errorv1.ReasonPasswordWrong():
+		return errorv1.ErrPasswordWrong("口令错误")
+	case errorv1.ReasonInvalidParams():
+		return errorv1.ErrInvalidParams("参数非法")
+	default:
+		return errorv1.ErrInternal("业务处理失败: %s", reason)
 	}
 }

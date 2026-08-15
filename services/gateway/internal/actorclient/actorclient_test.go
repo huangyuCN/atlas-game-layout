@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
+	"google.golang.org/protobuf/proto"
 )
 
 // mockRuntime 记录调用并返回预置结果。
@@ -86,5 +88,47 @@ func TestAskPlayerRoutesToGame(t *testing.T) {
 	}
 	if len(rt.asks) != 1 || rt.asks[0].String() != "player:p-2" {
 		t.Fatalf("Ask 路由不符: %v", rt.asks)
+	}
+}
+
+// TestAskPlayerProto 验证 proto 信封请求与字节回执解析（跨节点形态）。
+func TestAskPlayerProto(t *testing.T) {
+	replyBytes, err := proto.Marshal(&gamev1.LoginActorReply{Ok: true})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	rt := &mockRuntime{reply: replyBytes}
+	c := NewClient(rt)
+
+	out := new(gamev1.LoginActorReply)
+	if err := c.AskPlayerProto(context.Background(), "p-3", &gamev1.PlayerActorMsg{}, out); err != nil {
+		t.Fatalf("AskPlayerProto: %v", err)
+	}
+	if !out.GetOk() {
+		t.Fatal("回执解析失败")
+	}
+	if len(rt.asks) != 1 || rt.asks[0].String() != "player:p-3" {
+		t.Fatalf("Ask 路由不符: %v", rt.asks)
+	}
+}
+
+// TestAskPlayerProtoRejectsObjectReply 验证非字节回执被拒绝。
+func TestAskPlayerProtoRejectsObjectReply(t *testing.T) {
+	rt := &mockRuntime{reply: "not-bytes"}
+	c := NewClient(rt)
+	if err := c.AskPlayerProto(context.Background(), "p-3", &gamev1.PlayerActorMsg{}, new(gamev1.LoginActorReply)); err == nil {
+		t.Fatal("非字节回执应报错")
+	}
+}
+
+// TestTellPlayerProto 验证 proto 登出投递路由。
+func TestTellPlayerProto(t *testing.T) {
+	rt := &mockRuntime{}
+	c := NewClient(rt)
+	if err := c.TellPlayerProto(context.Background(), "p-4", &gamev1.PlayerActorMsg{}); err != nil {
+		t.Fatalf("TellPlayerProto: %v", err)
+	}
+	if len(rt.tells) != 1 || rt.tells[0].String() != "player:p-4" {
+		t.Fatalf("Tell 路由不符: %v", rt.tells)
 	}
 }

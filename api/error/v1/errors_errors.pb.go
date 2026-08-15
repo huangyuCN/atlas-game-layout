@@ -395,6 +395,54 @@ func WrapInvalidParams(cause error, format string, args ...interface{}) *errors.
 	return ErrInvalidParams(format, args...).WithCause(cause)
 }
 
+// 口令错误
+func IsPasswordWrong(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "PASSWORD_WRONG" || e.Code != 401 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1009"
+}
+
+// 口令错误
+func ErrPasswordWrong(format string, args ...interface{}) *errors.Error {
+	return errors.New(401, "PASSWORD_WRONG", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1009",
+		"biz_reason": "PasswordWrong",
+	})
+}
+
+// ReasonPasswordWrong 返回当前错误的 reason 常量值。
+func ReasonPasswordWrong() string {
+	return "PASSWORD_WRONG"
+}
+
+// CodePasswordWrong 返回当前错误对应的 HTTP 状态码。
+func CodePasswordWrong() int {
+	return 401
+}
+
+// BizCodePasswordWrong 返回当前错误对应的业务错误码（枚举值）。
+func BizCodePasswordWrong() int32 {
+	return 1009
+}
+
+// NewPasswordWrong 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewPasswordWrong(message string) *errors.Error {
+	return errors.New(401, "PASSWORD_WRONG", message).WithMetadata(map[string]string{
+		"biz_code":   "1009",
+		"biz_reason": "PasswordWrong",
+	})
+}
+
+// WrapPasswordWrong 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapPasswordWrong(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrPasswordWrong(format, args...).WithCause(cause)
+}
+
 // 匹配
 func IsAlreadyInMatch(err error) bool {
 	if err == nil {
@@ -736,6 +784,9 @@ func matchKnown(e *errors.Error) (*errors.Error, bool) {
 		return e, true
 	}
 	if IsInvalidParams(e) {
+		return e, true
+	}
+	if IsPasswordWrong(e) {
 		return e, true
 	}
 	if IsAlreadyInMatch(e) {

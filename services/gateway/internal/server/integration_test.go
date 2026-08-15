@@ -58,7 +58,7 @@ func TestIntegrationKickCrossInstance(t *testing.T) {
 	defer cancel()
 
 	cliA, authA := envA.newTCPAuthClient(t)
-	loginA, err := authA.Login(ctx, &gatewayv1.LoginRequest{Account: "it-p-1", Password: "x"})
+	loginA, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-1", Password: "x"})
 	if err != nil {
 		t.Fatalf("A 登录: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestIntegrationKickCrossInstance(t *testing.T) {
 	})
 
 	_, authB := envB.newTCPAuthClient(t)
-	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{Account: "it-p-1", Password: "x"}); err != nil {
+	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-1", Password: "x"}); err != nil {
 		t.Fatalf("B 登录: %v", err)
 	}
 	select {
@@ -98,11 +98,11 @@ func TestIntegrationPushOnlyOwnerDelivers(t *testing.T) {
 	defer cancel()
 
 	cliA, authA := envA.newTCPAuthClient(t)
-	if _, err := authA.Login(ctx, &gatewayv1.LoginRequest{Account: "it-p-1", Password: "x"}); err != nil {
+	if _, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-1", Password: "x"}); err != nil {
 		t.Fatalf("A 登录: %v", err)
 	}
 	cliB, authB := envB.newTCPAuthClient(t)
-	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{Account: "it-p-2", Password: "x"}); err != nil {
+	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-2", Password: "x"}); err != nil {
 		t.Fatalf("B 登录: %v", err)
 	}
 	gotA := make(chan struct{}, 1)

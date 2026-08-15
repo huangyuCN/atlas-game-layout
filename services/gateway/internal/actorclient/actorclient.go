@@ -9,6 +9,7 @@ import (
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
+	"google.golang.org/protobuf/proto"
 )
 
 // Runtime 是 actorclient 依赖的最小运行时接口（pkg/actor.Runtime 满足，测试可注入实现）。
@@ -60,6 +61,55 @@ func (c *Client) AskPlayer(ctx context.Context, playerID string, req any) (any, 
 		return nil, err
 	}
 	return c.rt.Ask(ctx, pid, req)
+}
+
+// AskPlayerProto 以 proto 信封向玩家 actor 请求并解析 proto 响应。
+// 跨节点响应为序列化字节（集群约定），本地注入实现须同样返回字节。
+func (c *Client) AskPlayerProto(ctx context.Context, playerID string, req, out proto.Message) error {
+	reply, err := c.AskPlayer(ctx, playerID, req)
+	if err != nil {
+		return err
+	}
+	return decodeReply(reply, out)
+}
+
+// TellPlayerProto 以 proto 消息向玩家 actor 投递（登出等异步联动）。
+func (c *Client) TellPlayerProto(ctx context.Context, playerID string, msg proto.Message) error {
+	return c.TellPlayer(ctx, playerID, msg)
+}
+
+// Starter 是带生命周期能力的运行时（pkg/actor.Runtime 满足；测试桩可忽略）。
+type Starter interface {
+	Start(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+}
+
+// Start 启动底层集群运行时（未实现 Starter 时为空操作）。
+func (c *Client) Start(ctx context.Context) error {
+	if s, ok := c.rt.(Starter); ok {
+		return s.Start(ctx)
+	}
+	return nil
+}
+
+// Shutdown 停止底层集群运行时（未实现 Starter 时为空操作）。
+func (c *Client) Shutdown(ctx context.Context) error {
+	if s, ok := c.rt.(Starter); ok {
+		return s.Shutdown(ctx)
+	}
+	return nil
+}
+
+// decodeReply 解析跨节点响应：字节反序列化；对象类型不符报错。
+func decodeReply(reply any, out proto.Message) error {
+	b, ok := reply.([]byte)
+	if !ok {
+		return fmt.Errorf("actorclient: 响应类型 %T 非字节", reply)
+	}
+	if err := proto.Unmarshal(b, out); err != nil {
+		return fmt.Errorf("actorclient: 响应解码失败: %w", err)
+	}
+	return nil
 }
 
 // TellBattle 向战斗 actor 投递消息（帧输入等，不等待响应）。

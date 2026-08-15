@@ -129,10 +129,10 @@ func (x *RegisterReply) GetPlayerId() string {
 	return ""
 }
 
-// LoginRequest 登录：账号存在则建立会话。
+// LoginRequest 登录：凭注册回执的玩家 ID 建立会话（注册与登录两段式，D8）。
 type LoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Account       string                 `protobuf:"bytes,1,opt,name=account,proto3" json:"account,omitempty"`
+	PlayerId      string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
 	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -168,9 +168,9 @@ func (*LoginRequest) Descriptor() ([]byte, []int) {
 	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *LoginRequest) GetAccount() string {
+func (x *LoginRequest) GetPlayerId() string {
 	if x != nil {
-		return x.Account
+		return x.PlayerId
 	}
 	return ""
 }
@@ -502,9 +502,9 @@ const file_api_gateway_v1_auth_proto_rawDesc = "" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1a\n" +
 	"\bnickname\x18\x03 \x01(\tR\bnickname\",\n" +
 	"\rRegisterReply\x12\x1b\n" +
-	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"D\n" +
-	"\fLoginRequest\x12\x18\n" +
-	"\aaccount\x18\x01 \x01(\tR\aaccount\x12\x1a\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"G\n" +
+	"\fLoginRequest\x12\x1b\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\"q\n" +
 	"\n" +
 	"LoginReply\x12\x1b\n" +

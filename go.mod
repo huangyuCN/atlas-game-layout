@@ -6,6 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/google/uuid v1.6.0
 	github.com/huangyuCN/atlas v0.0.0-20260814083043-7f4feca
+	github.com/huangyuCN/cow v0.0.0-00010101000000-000000000000
 	github.com/nats-io/nats-server/v2 v2.14.5
 	github.com/nats-io/nats.go v1.52.0
 	github.com/redis/go-redis/v9 v9.21.0
@@ -57,13 +58,18 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.48.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260715232425-e75dac1f907d // indirect
 )
 
 // 本地开发：指向相邻的 Atlas 仓库；atlas new 生成后请改为你的 Atlas 路径
 replace github.com/huangyuCN/atlas => ../atlas
+
+// 本地开发：指向相邻的 cow 仓库；模板发布后按需调整
+replace github.com/huangyuCN/cow => ../cow

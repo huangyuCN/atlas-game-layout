@@ -24,6 +24,19 @@ func NewEtcd(client *clientv3.Client, opts Options) (registry.Registrar, error) 
 	if client == nil {
 		return nil, fmt.Errorf("registry: etcd 客户端不能为空")
 	}
+	return newEtcdRegistry(client, opts)
+}
+
+// NewEtcdDiscovery 基于 etcd 客户端构造服务发现（actor 集群懒激活选节点用）。
+func NewEtcdDiscovery(client *clientv3.Client, opts Options) (registry.Discovery, error) {
+	if client == nil {
+		return nil, fmt.Errorf("registry: etcd 客户端不能为空")
+	}
+	return newEtcdRegistry(client, opts)
+}
+
+// newEtcdRegistry 构造底层 etcd 注册器（同一对象同时实现 Registrar 与 Discovery）。
+func newEtcdRegistry(client *clientv3.Client, opts Options) (*etcdreg.Registry, error) {
 	eo := make([]etcdreg.Option, 0, 2)
 	if opts.Namespace != "" {
 		eo = append(eo, etcdreg.Namespace(opts.Namespace))

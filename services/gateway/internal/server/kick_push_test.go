@@ -19,7 +19,7 @@ func TestKickCrossInstance(t *testing.T) {
 	defer cancel()
 
 	cliA, authA := envA.newTCPAuthClient(t)
-	loginA, err := authA.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"})
+	loginA, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
 	if err != nil {
 		t.Fatalf("A 登录: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestKickCrossInstance(t *testing.T) {
 
 	// 实例 B 登录同一玩家，触发跨实例挤下线。
 	_, authB := envB.newTCPAuthClient(t)
-	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"}); err != nil {
+	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
 		t.Fatalf("B 登录: %v", err)
 	}
 	select {
@@ -67,11 +67,11 @@ func TestPushOnlyOwnerDelivers(t *testing.T) {
 	defer cancel()
 
 	cliA, authA := envA.newTCPAuthClient(t)
-	if _, err := authA.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"}); err != nil {
+	if _, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
 		t.Fatalf("A 登录 p-1: %v", err)
 	}
 	cliB, authB := envB.newTCPAuthClient(t)
-	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{Account: "p-2", Password: "x"}); err != nil {
+	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-2", Password: "x"}); err != nil {
 		t.Fatalf("B 登录 p-2: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestKickCrossInstanceKeepsNewRoute(t *testing.T) {
 	defer cancel()
 
 	cliA, authA := envA.newTCPAuthClient(t)
-	if _, err := authA.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"}); err != nil {
+	if _, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
 		t.Fatalf("A 登录: %v", err)
 	}
 	kicked := make(chan struct{}, 1)
@@ -133,7 +133,7 @@ func TestKickCrossInstanceKeepsNewRoute(t *testing.T) {
 		}
 	})
 	_, authB := envB.newTCPAuthClient(t)
-	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"}); err != nil {
+	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
 		t.Fatalf("B 登录: %v", err)
 	}
 	select {

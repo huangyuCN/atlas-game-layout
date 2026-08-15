@@ -92,8 +92,8 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 	}
 
 	sess := session.NewManager(session.NewRedisStore(cli), id, 30*time.Second)
-	g := NewGateway(id, sess, actorclient.NewClient(noopRuntime{}), nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
-	if err := registerHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
+	g := NewGateway(id, sess, actorclient.NewClient(newMockActorRuntime()), nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	if err := RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
 		t.Fatalf("registerHandlers: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestLoginHeartbeatLogout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"})
+	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestKickSameInstance(t *testing.T) {
 	defer cancel()
 
 	oldCli, oldAuth := env.newTCPAuthClient(t)
-	login1, err := oldAuth.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"})
+	login1, err := oldAuth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
 	if err != nil {
 		t.Fatalf("首次登录: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestKickSameInstance(t *testing.T) {
 		}
 	})
 	_, newAuth := env.newTCPAuthClient(t)
-	if _, err := newAuth.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"}); err != nil {
+	if _, err := newAuth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
 		t.Fatalf("二次登录: %v", err)
 	}
 	select {
@@ -232,7 +232,7 @@ func TestJoinBattleBindsChannel(t *testing.T) {
 	defer cancel()
 
 	cli, auth, battle := env.newWSClients(t)
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{Account: "p-1", Password: "x"})
+	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
