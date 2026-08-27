@@ -32,16 +32,29 @@ jobs:
           cache: true
 
       - name: Checkout Atlas（replace ../atlas）
-        run: |
-          parent="$(dirname "$GITHUB_WORKSPACE")"
-          rm -rf "$parent/atlas"
-          git clone --depth 1 --branch "${{ env.ATLAS_REF }}" https://github.com/huangyuCN/atlas.git "$parent/atlas"
+        uses: actions/checkout@v5
+        with:
+          repository: huangyuCN/atlas
+          ref: ${{ env.ATLAS_REF }}
+          path: .ci-deps/atlas
+          token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Checkout cow（replace ../cow）
+        uses: actions/checkout@v5
+        with:
+          repository: huangyuCN/cow
+          ref: ${{ env.COW_REF }}
+          path: .ci-deps/cow
+          token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: 移动 Atlas/cow 到 replace 路径
         run: |
           parent="$(dirname "$GITHUB_WORKSPACE")"
-          rm -rf "$parent/cow"
-          git clone --depth 1 --branch "${{ env.COW_REF }}" https://github.com/huangyuCN/cow.git "$parent/cow"
+          rm -rf "$parent/atlas" "$parent/cow"
+          mv "$GITHUB_WORKSPACE/.ci-deps/atlas" "$parent/atlas"
+          mv "$GITHUB_WORKSPACE/.ci-deps/cow" "$parent/cow"
+          rmdir "$GITHUB_WORKSPACE/.ci-deps" 2>/dev/null || true
+          ls -l "$parent/atlas/go.mod" "$parent/cow/go.mod"
 
       - name: gofmt 检查
         run: |
