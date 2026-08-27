@@ -32,20 +32,39 @@ jobs:
           cache: true
 
       - name: Checkout Atlas（replace ../atlas）
+        id: checkout-atlas
+        continue-on-error: true
         uses: actions/checkout@v5
         with:
           repository: huangyuCN/atlas
           ref: ${{ env.ATLAS_REF }}
           path: .ci-deps/atlas
-          token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Checkout cow（replace ../cow）
+        id: checkout-cow
+        continue-on-error: true
         uses: actions/checkout@v5
         with:
           repository: huangyuCN/cow
           ref: ${{ env.COW_REF }}
           path: .ci-deps/cow
-          token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: 校验 Atlas/cow 检出（私有仓库需 PAT）
+        run: |
+          if [ ! -f "$GITHUB_WORKSPACE/.ci-deps/atlas/go.mod" ]; then
+            echo "::error::无法检出 huangyuCN/atlas（Repository not found）"
+            echo "  原因：atlas 为私有仓库，GITHUB_TOKEN 无权跨仓库读取。"
+            echo "  解决：请在 atlas-game-layout 仓库 Settings → Secrets and variables → Actions 中新增”
+            echo "        ATLAS_PAT（或 GH_PAT / CI_PAT）—— 一个有 huangyuCN/atlas 与 huangyuCN/cow 读权限的 fine-grained PAT（Contents: Read）"
+            echo "        或将 atlas/cow 设为 public / internal。"
+            exit 1
+          fi
+          if [ ! -f "$GITHUB_WORKSPACE/.ci-deps/cow/go.mod" ]; then
+            echo "::error::无法检出 huangyuCN/cow"
+            exit 1
+          fi
 
       - name: 移动 Atlas/cow 到 replace 路径
         run: |
