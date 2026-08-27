@@ -23,27 +23,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout 模板仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Checkout Atlas（replace ../atlas）
-        uses: actions/checkout@v4
-        with:
-          repository: huangyuCN/atlas
-          ref: ${{ env.ATLAS_REF }}
-          path: ../atlas
+        run: |
+          parent="$(dirname "$GITHUB_WORKSPACE")"
+          rm -rf "$parent/atlas"
+          git clone --depth 1 --branch "${{ env.ATLAS_REF }}" https://github.com/huangyuCN/atlas.git "$parent/atlas"
 
       - name: Checkout cow（replace ../cow）
-        uses: actions/checkout@v4
-        with:
-          repository: huangyuCN/cow
-          ref: ${{ env.COW_REF }}
-          path: ../cow
+        run: |
+          parent="$(dirname "$GITHUB_WORKSPACE")"
+          rm -rf "$parent/cow"
+          git clone --depth 1 --branch "${{ env.COW_REF }}" https://github.com/huangyuCN/cow.git "$parent/cow"
 
       - name: gofmt 检查
         run: |
@@ -64,7 +62,7 @@ jobs:
     needs: test
     steps:
       - name: Checkout 模板仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 同步代码到集成服务器
         uses: easingthemes/ssh-deploy@v5
