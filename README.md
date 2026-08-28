@@ -27,13 +27,16 @@ make e2e -e E2E_MODE=single       # WS 单通道
 ```
 api/            # 协议定义（proto + 生成代码），按服务分目录
 lib/            # 代码级公共定义：consts / idgen / session / errors / gametime
-pkg/            # 每服务公共装配（fx.Module 化）：actor / redis / nats / mongo / etcd / registry / bootstrap
+pkg/            # 每服务公共装配（fx.Module 化）：actor / redis / nats / mongo / etcd / registry /
+                # bootstrap（配置加载+日志+App 组装） / fxkit（跨服务 fx 泛型提供器） / serverutil
 services/       # 四服务：
                 #   gateway  —— 五协议接入 + 分布式会话 + 挤下线 + 下行推送
                 #   game     —— 玩家业务（cow 聚合根 + 三级缓存）
                 #   matcher  —— 撮合（matchmaker + 等级相近规则）
                 #   battle   —— 战斗（actor + lockstep 会话 + 结算）
-                # 每服务：internal/{conf,infra,biz,data,server} 分层 + assemble 可编程装配
+                # 每服务统一「唯一装配之家」形态：internal/app 集中列出全部组件清单，
+                # 进程形态（atlas.App）与嵌入式形态（assemble，fx 编程式启动）共用同一张
+                # 依赖图；internal/{conf,infra,biz,data,server} 只做各自职责，不含装配逻辑。
 deploy/         # 中间件 docker-compose
 scripts/e2e     # 双客户端闭环脚本（双形态）
 scripts/loadtest# 帧通道压测（KCP vs WS）
@@ -77,6 +80,8 @@ CI（`.github/workflows/ci.yml`）：gofmt / vet / 单测 / 构建；集成测�
 ## 依赖约定
 
 - Go 1.26+、Docker、`protoc`、Atlas CLI（`atlas upgrade` 安装工具链）
-- `go.mod` 以本地 replace 指向 Atlas 源码树（`../atlas`）与 [cow](https://github.com/huangyuCN/cow)（`../cow`）；
+- Atlas 源码树当前以 **feat/actor 分支**为编译基准（模板使用 actor 新命名、Notify 帧下行等能力，
+  该分支领先 main；主树 `git checkout feat/actor` 即可），`go.mod` 以本地 replace 指向
+  Atlas（`../atlas`）与 [cow](https://github.com/huangyuCN/cow)（`../cow`）；
   CI 中由 workflow 按固定版本检出替换，发布到远端仓库时请改用对应伪版本
 - 中间件端口约定见 `deploy/docker-compose/compose.yaml` 与 `services/*/configs/config.yaml`

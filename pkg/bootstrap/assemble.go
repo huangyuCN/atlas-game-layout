@@ -4,12 +4,8 @@ import (
 	"fmt"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
-	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
-	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
-	"github.com/huangyuCN/atlas/registry"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/fx"
 	"google.golang.org/protobuf/proto"
 )
@@ -25,8 +21,10 @@ type BootstrapLike interface {
 
 // Assemble 按服务名加载配置并装配通用模块：
 // 配置加载（services/<name>/configs/config.yaml）、日志初始化、
-// etcd 客户端与注册器（可选）、Atlas App 装配（Module）。
-// extra 用于追加服务自定义的 fx 模块。
+// Atlas App 装配（Module）。extra 用于追加服务自定义的 fx 模块。
+//
+// 注册中心（etcd 客户端 / Registrar）由各服务的 fx 模块自行声明，
+// 可直接复用 pkg/fxkit 的泛型提供器。
 func Assemble(name string, cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) {
 	if name == "" {
 		return nil, fmt.Errorf("bootstrap: 服务名不能为空")
@@ -59,23 +57,8 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 
 	opts := []fx.Option{
 		fx.Supply(cfg),
+		Module(Options{Name: runtime.GetName(), ID: runtime.GetId()}),
 	}
-	// etcd 配置存在时才装配注册中心（本地开发可省略）。
-	var endpoints []string
-	if r := like.GetRegistry(); r != nil && r.GetEtcd() != nil {
-		endpoints = r.GetEtcd().GetEndpoints()
-	}
-	if len(endpoints) > 0 {
-		opts = append(opts,
-			fx.Provide(func() (*clientv3.Client, error) {
-				return etcd.NewClient(etcd.Options{Endpoints: endpoints})
-			}),
-			fx.Provide(func(c *clientv3.Client) (registry.Registrar, error) {
-				return pkgregistry.NewEtcd(c, pkgregistry.Options{})
-			}),
-		)
-	}
-	opts = append(opts, Module(Options{Name: runtime.GetName(), ID: runtime.GetId()}))
 	opts = append(opts, extra...)
 	return opts, nil
 }

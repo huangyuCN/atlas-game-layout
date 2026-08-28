@@ -1,5 +1,7 @@
-// Package assemble 提供 matcher 服务的可编程装配入口：
-// 供集成测试、工具链与将来「嵌入式部署」复用（fx 模块化装配的进程内形态，D2）。
+// Package assemble 提供 matcher 服务的进程内（嵌入式）装配入口：
+// 与生产形态共用 internal/app 的同一张 fx 依赖图，仅驱动方式不同
+// （进程形态由 atlas.App 管信号与启停；本形态以 fx 编程式 Start/Stop
+// + serverutil.ServeAsync 驱动），供集成测试与嵌入式部署复用。
 package assemble
 
 import (
@@ -8,82 +10,78 @@ import (
 	"net/url"
 	"time"
 
-	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
-	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
-	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
-	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
-	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
+	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	matcherapp "github.com/huangyuCN/atlas-game-layout/services/matcher/internal/app"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
-	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
-	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
-	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
 	"github.com/huangyuCN/atlas/matchmaker"
-	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	natsgo "github.com/nats-io/nats.go"
-	clientv3 "go.etcd.io/etcd/client/v3"
+	"github.com/huangyuCN/atlas/transport"
+	"go.uber.org/fx"
 )
 
-// Options 是 matcher 服务的装配参数。
+// ServiceVersion 是注册到注册中心的服务版本（进程内形态固定值）。
+const ServiceVersion = "0.1.0"
+
+// Options 是进程内装配参数。
 type Options struct {
 	NodeID        string
 	EtcdEndpoints []string
 	NatsURL       string
 	RedisAddr     string
-	GRPCAddr      string // 空则 127.0.0.1:0（随机端口）
-	// SinkOverride 是成局观察方的测试注入点（nil 时用默认组合：nats 发布 + actor 开局）。
+	// SinkOverride 是成局观察方的测试注入点
+	//（nil 时用默认组合：nats 发布 + actor 开局调用，见 internal/app newSink）。
 	SinkOverride biz.MatchEventSink
 }
 
 // Matcher 是装配完成的 matcher 服务句柄。
 type Matcher struct {
-	GRPCURL string
+	GRPCURL string             // host:port（battle/测试直连用）
 	Service matchmaker.Service // 撮合运行时 API（测试/观测用）
 	stop    func(ctx context.Context) error
 }
 
-// New 装配并启动 matcher 服务（撮合运行时 + grpc + actor 集群客户端）。
-func New(ctx context.Context, opts Options) (*Matcher, error) {
-	if opts.GRPCAddr == "" {
-		opts.GRPCAddr = "127.0.0.1:0"
-	}
-	backends, err := newBackends(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	mm, err := startMatchmaker(ctx, backends.cli)
-	if err != nil {
-		backends.close()
-		return nil, err
-	}
-	sink := opts.SinkOverride
-	if sink == nil {
-		sink = infra.NewSink(backends.nc, backends.rt)
-	}
-	svc := handler.NewMatcherHandler(
-		mm.Service,
-		infra.NewRedisPlayerTicketMapper(backends.cli),
-		sink,
-		infra.NewRedisSettleDeduper(backends.cli),
-	)
-	grpcSrv, ep, grpcStop, err := startGRPC(ctx, opts.GRPCAddr, svc)
-	if err != nil {
-		_ = mm.Stop(ctx)
-		backends.close()
-		return nil, err
-	}
-	stop := func(ctx context.Context) error {
-		grpcStop()
-		_ = grpcSrv.Stop(ctx)
-		_ = mm.Stop(ctx)
-		return backends.close()
-	}
-	return &Matcher{GRPCURL: ep.Host, Service: mm.Service, stop: stop}, nil
+// graphHandles 从依赖图回捞句柄所需组件（含 servers 值组）。
+type graphHandles struct {
+	fx.In
+
+	Service matchmaker.Service
+	Servers []transport.Server `group:"servers"`
 }
 
-// Stop 停止 matcher 服务并释放全部资源。
+// New 装配并启动 matcher 服务：映射配置 → 启动 fx 依赖图
+// （含撮合 tick 循环与 actor 客户端生命周期）→ 后台起传输层。
+// matcher 无自注册需求（battle 经服务发现被本服务调用，反向不需要）。
+func New(ctx context.Context, o Options) (*Matcher, error) {
+	var h graphHandles
+	root := fx.New(
+		fx.NopLogger,
+		fx.Supply(newBootstrap(o)),
+		overrideSink(o.SinkOverride),
+		matcherapp.Module,
+		fx.Populate(&h),
+	)
+	if err := root.Err(); err != nil {
+		return nil, fmt.Errorf("assemble: 依赖图校验失败: %w", err)
+	}
+	if err := root.Start(ctx); err != nil {
+		return nil, fmt.Errorf("assemble: 启动组件失败: %w", err)
+	}
+
+	stopServers, err := startServers(h.Servers)
+	if err != nil {
+		_ = root.Stop(context.Background())
+		return nil, err
+	}
+
+	m := &Matcher{GRPCURL: grpcHostOf(h.Servers), Service: h.Service}
+	m.stop = func(ctx context.Context) error {
+		return stopServers(ctx)
+	}
+	return m, nil
+}
+
+// Stop 停止 matcher 服务并释放全部资源（停服务器 → 组件逆序回收）。
 func (m *Matcher) Stop(ctx context.Context) error {
 	if m.stop == nil {
 		return nil
@@ -91,109 +89,56 @@ func (m *Matcher) Stop(ctx context.Context) error {
 	return m.stop(ctx)
 }
 
-// backends 是底层资源句柄集合（关闭顺序：actor → etcd → nats → redis）。
-type backends struct {
-	cli *pkredis.Client
-	nc  *natsgo.Conn
-	ec  *clientv3.Client
-	rt  *pkgactor.Runtime
-}
-
-// close 释放全部底层资源。
-func (b *backends) close() error {
-	if b.rt != nil {
-		_ = b.rt.Shutdown(context.Background())
-	}
-	if b.ec != nil {
-		_ = b.ec.Close()
-	}
-	if b.nc != nil {
-		b.nc.Close()
-	}
-	if b.cli != nil {
-		return b.cli.Close()
-	}
-	return nil
-}
-
-// newBackends 建立 redis/nats/etcd 与 actor 集群客户端。
-func newBackends(ctx context.Context, opts Options) (*backends, error) {
-	cli, err := pkredis.NewClient(pkredis.Options{Addr: opts.RedisAddr})
-	if err != nil {
-		return nil, fmt.Errorf("assemble: redis: %w", err)
-	}
-	nc, err := nats.Connect(nats.Options{URL: opts.NatsURL, Name: "matcher"})
-	if err != nil {
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: nats: %w", err)
-	}
-	ec, err := etcd.NewClient(etcd.Options{Endpoints: opts.EtcdEndpoints})
-	if err != nil {
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: etcd: %w", err)
-	}
-	disc, err := pkgregistry.NewEtcdDiscovery(ec, pkgregistry.Options{})
-	if err != nil {
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: 服务发现: %w", err)
-	}
-	rt, err := pkgactor.NewRuntime(pkgactor.Options{
-		NodeID:        opts.NodeID,
-		ServiceName:   consts.ServiceBattle, // 懒激活在 battle 节点执行（M7）
-		EtcdEndpoints: opts.EtcdEndpoints,
-		NatsURL:       opts.NatsURL,
-		Discovery:     disc,
+// overrideSink 以 fx.Decorate 覆盖依赖图中的成局观察方默认组合；
+// override 为 nil 时透传基础值（装饰器恒挂载、行为零差异）。
+func overrideSink(override biz.MatchEventSink) fx.Option {
+	return fx.Decorate(func(base biz.MatchEventSink) biz.MatchEventSink {
+		if override != nil {
+			return override
+		}
+		return base
 	})
-	if err != nil {
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: actor 运行时: %w", err)
-	}
-	if err := pkgactor.RegisterBattleReplica(rt); err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: 懒激活副本: %w", err)
-	}
-	if err := rt.Start(ctx); err != nil {
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: actor 启动: %w", err)
-	}
-	return &backends{cli: cli, nc: nc, ec: ec, rt: rt}, nil
 }
 
-// startMatchmaker 装配并启动撮合运行时。
-func startMatchmaker(ctx context.Context, cli *pkredis.Client) (*matchredis.Runtime, error) {
-	mm, err := infra.NewMatchmakerRuntime(cli)
+// startServers 以进程内形态后台启动全部传输层（gRPC + HTTP 健康端）。
+func startServers(servers []transport.Server) (func(context.Context) error, error) {
+	_, stop, err := serverutil.ServeAsync(5*time.Second, servers...)
 	if err != nil {
-		return nil, fmt.Errorf("assemble: 撮合运行时: %w", err)
+		return nil, fmt.Errorf("assemble: 启动传输层: %w", err)
 	}
-	if err := mm.Start(ctx); err != nil {
-		return nil, fmt.Errorf("assemble: 撮合启动: %w", err)
-	}
-	return mm, nil
+	return stop, nil
 }
 
-// startGRPC 装配并启动 grpc 服务，返回停止函数与端点。
-func startGRPC(ctx context.Context, addr string, svc *handler.MatcherHandler) (*atlasgrpc.Server, *url.URL, func(), error) {
-	grpcSrv, err := atlasgrpc.NewServer(atlasgrpc.WithAddress(addr))
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("assemble: grpc: %w", err)
+// grpcHostOf 从 servers 值组中找 gRPC 端点（fx 值组不保证提供顺序，
+// 不能依赖下标；缺端点说明图装配异常，返回空串由调用方观测）。
+func grpcHostOf(servers []transport.Server) string {
+	for _, srv := range servers {
+		if ep, ok := srv.(interface{ Endpoint() (*url.URL, error) }); ok {
+			if u, err := ep.Endpoint(); err == nil && u.Scheme == "grpc" {
+				return u.Host
+			}
+		}
 	}
-	matcherv1.RegisterMatcherServer(grpcSrv, svc)
-	gctx, gcancel := context.WithCancel(context.Background())
-	go func() { _ = grpcSrv.Start(gctx) }()
-	ep, err := serverutil.WaitEndpoint(grpcSrv, 2*time.Second)
-	if err != nil {
-		gcancel()
-		return nil, nil, nil, fmt.Errorf("assemble: grpc 启动: %w", err)
+	return ""
+}
+
+// newBootstrap 把进程内装配参数映射为服务配置：
+// 装配图只认 *conf.Bootstrap 一种输入，两种驱动形态因此共享全部构造函数。
+// 监听地址固定随机端口（进程内形态不做端口管理）。
+func newBootstrap(o Options) *conf.Bootstrap {
+	const randomPort = "127.0.0.1:0"
+	return &conf.Bootstrap{
+		Runtime: &configspb.Runtime{Name: "matcher", Id: o.NodeID},
+		Registry: &configspb.Registry{
+			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+		},
+		Server: &configspb.Server{
+			Grpc: &configspb.Server_GRPC{Addr: randomPort},
+			Http: &configspb.Server_HTTP{Addr: randomPort},
+		},
+		Data: &configspb.Data{
+			Redis: &configspb.Data_Redis{Addr: o.RedisAddr},
+			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
+		},
 	}
-	return grpcSrv, ep, gcancel, nil
 }

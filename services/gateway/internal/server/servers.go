@@ -1,17 +1,14 @@
 package server
 
 import (
-	"context"
 	"fmt"
 
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
-	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
-	"go.uber.org/fx"
 )
 
 // NewTCPServer 构造 TCP 业务通道服务端。
@@ -85,26 +82,4 @@ func RegisterGatewayHandlers(tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcp
 		return fmt.Errorf("server: 注册 UDP 战斗协议失败: %w", err)
 	}
 	return nil
-}
-
-// registerRelay 把推送订阅与心跳清扫接入 fx 生命周期。
-func registerRelay(lc fx.Lifecycle, g *Gateway, sess *session.Manager) {
-	var cancel context.CancelFunc
-	lc.Append(fx.Hook{
-		OnStart: func(context.Context) error {
-			ctx, c := context.WithCancel(context.Background())
-			cancel = c
-			if err := g.StartRelay(ctx); err != nil {
-				return fmt.Errorf("server: 启动推送订阅失败: %w", err)
-			}
-			sess.Start(ctx)
-			return nil
-		},
-		OnStop: func(context.Context) error {
-			if cancel != nil {
-				cancel()
-			}
-			return nil
-		},
-	})
 }

@@ -1,36 +1,31 @@
-// Package assemble 提供 game 服务的可编程装配入口：
-// 供集成测试、工具链与将来「嵌入式部署」复用（fx 模块化装配的进程内形态，D2）。
+// Package assemble 提供 game 服务的进程内（嵌入式）装配入口：
+// 与生产形态共用 internal/app 的同一张 fx 依赖图，仅驱动方式不同
+// （进程形态由 atlas.App 管信号与启停；本形态以 fx 编程式 Start/Stop
+// + serverutil.ServeAsync 驱动），供集成测试与嵌入式部署复用，
+// 装配逻辑只此一份、不再手工重复接线。
 package assemble
 
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
-	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
-	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
-	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
-	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	"github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
-	gameactor "github.com/huangyuCN/atlas-game-layout/services/game/internal/actor"
-	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
-	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/handler"
-	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
+	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	gameapp "github.com/huangyuCN/atlas-game-layout/services/game/internal/app"
+	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
 	"github.com/huangyuCN/atlas/registry"
-	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	atlashttp "github.com/huangyuCN/atlas/transport/http"
+	"github.com/huangyuCN/atlas/transport"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/fx"
 )
 
-// 快照参数（与 server 装配对齐）。
-const (
-	snapshotTTL  = 5 * time.Minute
-	snapshotTick = 10 * time.Second
-)
+// ServiceVersion 是注册到注册中心的服务版本（进程内形态固定值）。
+const ServiceVersion = "0.1.0"
 
-// Options 是 game 服务的装配参数。
+// Options 是进程内装配参数。
 type Options struct {
 	NodeID        string
 	EtcdEndpoints []string
@@ -38,182 +33,147 @@ type Options struct {
 	RedisAddr     string
 	MongoURI      string
 	MongoDB       string
-	GRPCAddr      string        // 空则 127.0.0.1:0（随机端口）
-	SessionTTL    time.Duration // 0 则默认 30s
 }
 
 // Game 是装配完成的 game 服务句柄。
 type Game struct {
-	Runtime *pkgactor.Runtime
-	GRPCURL string
-	HTTPURL string // 健康检查 + 玩家业务 REST 管理接口
+	Runtime *actor.Runtime
+	GRPCURL string // host:port（gRPC 直连用）
+	HTTPURL string // host:port（健康检查 + 玩家 REST 管理接口）
 	stop    func(ctx context.Context) error
 }
 
-// New 装配并启动 game 服务（actor 集群运行时 + 业务 + gRPC）。
-func New(ctx context.Context, opts Options) (*Game, error) {
-	if opts.SessionTTL <= 0 {
-		opts.SessionTTL = 30 * time.Second
-	}
-	if opts.GRPCAddr == "" {
-		opts.GRPCAddr = "127.0.0.1:0"
-	}
+// graphHandles 从依赖图回捞句柄所需组件（含 servers 值组）。
+type graphHandles struct {
+	fx.In
 
-	ec, err := etcd.NewClient(etcd.Options{Endpoints: opts.EtcdEndpoints})
-	if err != nil {
-		return nil, fmt.Errorf("assemble: etcd: %w", err)
-	}
-	disc, err := pkgregistry.NewEtcdDiscovery(ec, pkgregistry.Options{})
-	if err != nil {
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: 服务发现: %w", err)
-	}
-	rt, err := pkgactor.NewRuntime(pkgactor.Options{
-		NodeID:        opts.NodeID,
-		ServiceName:   "game",
-		EtcdEndpoints: opts.EtcdEndpoints,
-		NatsURL:       opts.NatsURL,
-		Discovery:     disc,
-	})
-	if err != nil {
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: actor 运行时: %w", err)
-	}
-
-	mc, err := pkgmongo.NewClient(ctx, pkgmongo.Options{URI: opts.MongoURI, Database: opts.MongoDB})
-	if err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: mongo: %w", err)
-	}
-	persist, err := repo.NewMongoPlayerRepo(ctx, mc)
-	if err != nil {
-		_ = mc.Close(ctx)
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: 玩家仓储: %w", err)
-	}
-	rcli, err := pkredis.NewClient(pkredis.Options{Addr: opts.RedisAddr})
-	if err != nil {
-		_ = mc.Close(ctx)
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: redis: %w", err)
-	}
-	store := repo.NewPlayerStore(repo.NewRedisPlayerCache(rcli), persist)
-	svc := handler.NewPlayerHandler(store, repo.NewRedisSessionStore(rcli), biz.PlayerServiceOptions{
-		SessionTTL: opts.SessionTTL,
-	})
-	if err := rt.Register(gameactor.NewProps(svc, store, snapshotTTL, snapshotTick)); err != nil {
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: 注册 PlayerActor: %w", err)
-	}
-	if err := rt.Start(ctx); err != nil {
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: actor 启动: %w", err)
-	}
-
-	grpcSrv, err := atlasgrpc.NewServer(atlasgrpc.WithAddress(opts.GRPCAddr))
-	if err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: grpc: %w", err)
-	}
-	gameSvc := handler.NewGameHandler(gameactor.NewPlayerClient(rt))
-	gamev1.RegisterPlayerServer(grpcSrv, gameSvc)
-	gctx, gcancel := context.WithCancel(context.Background())
-	// Atlas gRPC Server.Start 为阻塞式 serve（生命周期由 App.Run 管理），
-	// 进程内装配需在后台启动并轮询端点就绪。
-	go func() { _ = grpcSrv.Start(gctx) }()
-	ep, err := serverutil.WaitEndpoint(grpcSrv, 2*time.Second)
-	if err != nil {
-		gcancel()
-		_ = rt.Shutdown(ctx)
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: grpc 启动: %w", err)
-	}
-
-	// 注册 game 服务实例：actor 集群懒激活按服务发现选节点，
-	// 实例 ID 必须与 actor NodeID 一致（见 cluster.placement.serviceInstanceToNode）。
-	reg, err := pkgregistry.NewEtcd(ec, pkgregistry.Options{})
-	if err != nil {
-		gcancel()
-		_ = rt.Shutdown(ctx)
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: 注册中心: %w", err)
-	}
-	instance := &registry.ServiceInstance{
-		ID:        opts.NodeID,
-		Name:      "game",
-		Version:   "0.1.0",
-		Endpoints: []string{"grpc://" + ep.Host},
-	}
-	if err := reg.Register(ctx, instance); err != nil {
-		gcancel()
-		_ = rt.Shutdown(ctx)
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: 注册服务: %w", err)
-	}
-
-	// HTTP：健康检查 + 玩家业务 REST 管理接口（grpc/http 双形态接入验证）。
-	httpSrv, err := atlashttp.NewServer(atlashttp.WithAddress("127.0.0.1:0"))
-	if err != nil {
-		gcancel()
-		_ = rt.Shutdown(ctx)
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: http: %w", err)
-	}
-	httpSrv.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","service":"game"}`))
-	})
-	gamev1.RegisterPlayerHTTPServer(httpSrv, gameSvc)
-	hctx, hcancel := context.WithCancel(context.Background())
-	go func() { _ = httpSrv.Start(hctx) }()
-	httpEP, err := serverutil.WaitEndpoint(httpSrv, 2*time.Second)
-	if err != nil {
-		hcancel()
-		gcancel()
-		_ = rt.Shutdown(ctx)
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		_ = ec.Close()
-		return nil, fmt.Errorf("assemble: http 启动: %w", err)
-	}
-
-	stop := func(ctx context.Context) error {
-		_ = reg.Deregister(ctx, instance)
-		hcancel()
-		_ = httpSrv.Stop(ctx)
-		gcancel()
-		_ = grpcSrv.Stop(ctx)
-		_ = rt.Shutdown(ctx)
-		_ = rcli.Close()
-		_ = mc.Close(ctx)
-		return ec.Close()
-	}
-	return &Game{Runtime: rt, GRPCURL: ep.Host, HTTPURL: httpEP.Host, stop: stop}, nil
+	Runtime *actor.Runtime
+	Etcd    *clientv3.Client
+	Servers []transport.Server `group:"servers"`
 }
 
-// Stop 停止 game 服务并释放全部资源。
+// New 装配并启动 game 服务：映射配置 → 启动 fx 依赖图（含 actor 运行时）
+// → 后台起传输层 → 注册服务实例。实例 ID 必须 == actor NodeID
+// （集群懒激活按服务实例选节点，见 cluster placement 的硬约束）。
+func New(ctx context.Context, o Options) (*Game, error) {
+	var h graphHandles
+	root := fx.New(
+		fx.NopLogger,
+		fx.Supply(newBootstrap(o)),
+		gameapp.Module,
+		fx.Populate(&h),
+	)
+	if err := root.Err(); err != nil {
+		return nil, fmt.Errorf("assemble: 依赖图校验失败: %w", err)
+	}
+	if err := root.Start(ctx); err != nil {
+		// 组件图失败时 fx 已按逆序回收已构造组件（含资源关闭钩子）。
+		return nil, fmt.Errorf("assemble: 启动组件失败: %w", err)
+	}
+
+	urls, stopServers, err := startServers(h.Servers)
+	if err != nil {
+		_ = root.Stop(context.Background())
+		return nil, err
+	}
+	reg, err := registerInstance(ctx, o.NodeID, h.Etcd, urls)
+	if err != nil {
+		_ = stopServers(context.Background())
+		_ = root.Stop(context.Background())
+		return nil, err
+	}
+
+	g := &Game{Runtime: h.Runtime, GRPCURL: urls.grpc, HTTPURL: urls.http}
+	g.stop = func(ctx context.Context) error {
+		firstErr := reg.Deregister(ctx, instanceOf(o.NodeID, urls))
+		if err := stopServers(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if err := root.Stop(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		return firstErr
+	}
+	return g, nil
+}
+
+// Stop 停止 game 服务并释放全部资源（注销实例 → 停服务器 → 组件逆序回收）。
 func (g *Game) Stop(ctx context.Context) error {
 	if g.stop == nil {
 		return nil
 	}
 	return g.stop(ctx)
+}
+
+// serverURLs 是两台传输层的就绪端点（host:port）。
+type serverURLs struct {
+	grpc string
+	http string
+}
+
+// startServers 以进程内形态后台启动全部传输层，并按 scheme 分派端点
+// （fx 值组不保证提供顺序，不能依赖下标）。
+func startServers(servers []transport.Server) (serverURLs, func(context.Context) error, error) {
+	eps, stop, err := serverutil.ServeAsync(5*time.Second, servers...)
+	if err != nil {
+		return serverURLs{}, nil, fmt.Errorf("assemble: 启动传输层: %w", err)
+	}
+	var urls serverURLs
+	for _, ep := range eps {
+		switch ep.Scheme {
+		case "grpc":
+			urls.grpc = ep.Host
+		case "http":
+			urls.http = ep.Host
+		}
+	}
+	if urls.grpc == "" || urls.http == "" {
+		_ = stop(context.Background())
+		return serverURLs{}, nil, fmt.Errorf("assemble: 未识别的传输层端点集: %v", eps)
+	}
+	return urls, stop, nil
+}
+
+// registerInstance 构造注册中心并注册服务实例。
+func registerInstance(ctx context.Context, nodeID string, ec *clientv3.Client, urls serverURLs) (registry.Registrar, error) {
+	reg, err := pkgregistry.NewEtcd(ec, pkgregistry.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("assemble: 构造注册中心: %w", err)
+	}
+	if err := reg.Register(ctx, instanceOf(nodeID, urls)); err != nil {
+		return nil, fmt.Errorf("assemble: 注册服务实例: %w", err)
+	}
+	return reg, nil
+}
+
+// instanceOf 构造注册实例（etcd 注册端点带 grpc:// scheme，供发现方解析拨号）。
+func instanceOf(nodeID string, urls serverURLs) *registry.ServiceInstance {
+	return &registry.ServiceInstance{
+		ID:        nodeID,
+		Name:      "game",
+		Version:   ServiceVersion,
+		Endpoints: []string{"grpc://" + urls.grpc},
+	}
+}
+
+// newBootstrap 把进程内装配参数映射为服务配置：
+// 装配图只认 *conf.Bootstrap 一种输入，两种驱动形态因此共享全部构造函数。
+// 监听地址固定随机端口（进程内形态不做端口管理）。
+func newBootstrap(o Options) *conf.Bootstrap {
+	const randomPort = "127.0.0.1:0"
+	return &conf.Bootstrap{
+		Runtime: &configspb.Runtime{Name: "game", Id: o.NodeID},
+		Registry: &configspb.Registry{
+			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+		},
+		Server: &configspb.Server{
+			Grpc: &configspb.Server_GRPC{Addr: randomPort},
+			Http: &configspb.Server_HTTP{Addr: randomPort},
+		},
+		Data: &configspb.Data{
+			Redis: &configspb.Data_Redis{Addr: o.RedisAddr},
+			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
+			Mongo: &configspb.Data_Mongo{Uri: o.MongoURI, Database: o.MongoDB},
+		},
+	}
 }

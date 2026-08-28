@@ -1,5 +1,11 @@
-// Package assemble 提供 gateway 服务的可编程装配入口：
-// 供集成测试、工具链与将来「嵌入式部署」复用（fx 模块化装配的进程内形态，D2）。
+// Package assemble 提供 gateway 服务的进程内（嵌入式）装配入口：
+// 与生产形态共用 internal/app 的同一张 fx 依赖图，仅驱动方式不同
+// （进程形态由 atlas.App 管信号与启停；本形态以 fx 编程式 Start/Stop
+// + serverutil.ServeAsync 驱动），供集成测试与嵌入式部署复用。
+//
+// 单通道形态差异：生产形态 WS Server 独立监听；嵌入式形态把
+// WS Handler 挂载在 httptest 的 /ws 路径下（与既有 e2e 约定一致），
+// 因此依赖图的 embed_servers 子组不包含 WS。
 package assemble
 
 import (
@@ -10,284 +16,152 @@ import (
 	"strings"
 	"time"
 
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
-	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
-	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
-	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
-	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
+	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
-	gwserver "github.com/huangyuCN/atlas-game-layout/services/gateway/internal/server"
-	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
-	atlashttp "github.com/huangyuCN/atlas/transport/http"
-	kcpt "github.com/huangyuCN/atlas/transport/kcp"
-	tcpt "github.com/huangyuCN/atlas/transport/tcp"
-	udpt "github.com/huangyuCN/atlas/transport/udp"
+	gwapp "github.com/huangyuCN/atlas-game-layout/services/gateway/internal/app"
+	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
+	"github.com/huangyuCN/atlas/transport"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
+	"go.uber.org/fx"
 )
 
-// Options 是 gateway 实例的装配参数。
+// Options 是进程内装配参数。
 type Options struct {
 	ID            string
 	EtcdEndpoints []string
 	NatsURL       string
 	RedisAddr     string
-	TCPAddr       string // 空则 127.0.0.1:0（随机端口）
-	SessionTTL    time.Duration
 }
 
 // Gateway 是装配完成的 gateway 实例句柄。
 type Gateway struct {
-	TCPURL  string              // 业务通道（tcp）
-	WSURL   string              // 单通道形态（ws，业务+战斗共用）
-	KCPURL  string              // 战斗通道（kcp）
-	UDPURL  string              // 战斗通道（udp）
-	HTTPURL string              // 健康检查（http）
+	TCPURL  string              // 业务通道（tcp，host:port）
+	WSURL   string              // 单通道形态（ws://host:port/ws，业务+战斗共用）
+	KCPURL  string              // 战斗通道（kcp，host:port）
+	UDPURL  string              // 战斗通道（udp，host:port）
+	HTTPURL string              // 健康检查（http，host:port）
 	Actors  *actorclient.Client // 远程 actor 客户端（测试/观测用）
 	stop    func(ctx context.Context) error
 }
 
-// New 装配并启动一个 gateway 实例（五协议 + 分布式会话 + actor 集群客户端）。
-func New(ctx context.Context, opts Options) (*Gateway, error) {
-	if opts.SessionTTL <= 0 {
-		opts.SessionTTL = 30 * time.Second
-	}
-	if opts.TCPAddr == "" {
-		opts.TCPAddr = "127.0.0.1:0"
-	}
+// graphHandles 从依赖图回捞句柄所需组件
+// （WSSrv 具体类型用于 WS 的 /ws 包装；embed_servers 为四台可独立启停的子组）。
+type graphHandles struct {
+	fx.In
 
-	cli, err := pkredis.NewClient(pkredis.Options{Addr: opts.RedisAddr})
-	if err != nil {
-		return nil, fmt.Errorf("assemble: redis: %w", err)
-	}
-	nc, err := pkgnats.Connect(pkgnats.Options{URL: opts.NatsURL, Name: "gw-" + opts.ID})
-	if err != nil {
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: nats: %w", err)
-	}
-	ec, err := etcd.NewClient(etcd.Options{Endpoints: opts.EtcdEndpoints})
-	if err != nil {
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: etcd: %w", err)
-	}
-	disc, err := pkgregistry.NewEtcdDiscovery(ec, pkgregistry.Options{})
-	if err != nil {
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: 服务发现: %w", err)
-	}
-	rt, err := pkgactor.NewRuntime(pkgactor.Options{
-		NodeID:        "gw-" + opts.ID,
-		ServiceName:   "game", // 懒激活在 game 节点执行（PlayerActor 宿主）
-		EtcdEndpoints: opts.EtcdEndpoints,
-		NatsURL:       opts.NatsURL,
-		Discovery:     disc,
-	})
-	if err != nil {
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: actor 运行时: %w", err)
-	}
-	if err := rt.Start(ctx); err != nil {
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: actor 启动: %w", err)
-	}
-	if err := pkgactor.RegisterPlayerReplica(rt); err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: 懒激活副本: %w", err)
-	}
-	actors := actorclient.NewClient(rt)
-
-	tcpSrv, err := tcpt.NewServer(tcpt.WithAddress(opts.TCPAddr))
-	if err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: tcp: %w", err)
-	}
-	wsSrv, err := wst.NewServer(wst.WithAddress("127.0.0.1:0"))
-	if err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: ws: %w", err)
-	}
-	kcpSrv, err := kcpt.NewServer(kcpt.WithAddress("127.0.0.1:0"))
-	if err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: kcp: %w", err)
-	}
-	udpSrv, err := udpt.NewServer(udpt.WithAddress("127.0.0.1:0"))
-	if err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: udp: %w", err)
-	}
-	sess := session.NewManager(session.NewRedisStore(cli), "gw-"+opts.ID, opts.SessionTTL)
-	g := gwserver.NewGateway("gw-"+opts.ID, sess, actors, nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
-	if err := gwserver.RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: 注册协议: %w", err)
-	}
-	relayCtx, relayCancel := context.WithCancel(context.Background())
-	if err := g.StartRelay(relayCtx); err != nil {
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: 推送订阅: %w", err)
-	}
-	sess.Start(relayCtx)
-
-	sctx, scancel := context.WithCancel(context.Background())
-	if err := tcpSrv.Start(sctx); err != nil {
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: tcp 启动: %w", err)
-	}
-	ep, err := tcpSrv.Endpoint()
-	if err != nil {
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: tcp 端点: %w", err)
-	}
-
-	// WebSocket：httptest 包装（单通道形态，业务与战斗共用）。
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", wsSrv.Handler())
-	wsHTTP := httptest.NewServer(mux)
-
-	// KCP/UDP 战斗通道启动并取地址。
-	if err := kcpSrv.Start(sctx); err != nil {
-		wsHTTP.Close()
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: kcp 启动: %w", err)
-	}
-	kcpEP, err := kcpSrv.Endpoint()
-	if err != nil {
-		wsHTTP.Close()
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: kcp 端点: %w", err)
-	}
-	if err := udpSrv.Start(sctx); err != nil {
-		wsHTTP.Close()
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: udp 启动: %w", err)
-	}
-	udpEP, err := udpSrv.Endpoint()
-	if err != nil {
-		wsHTTP.Close()
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: udp 端点: %w", err)
-	}
-
-	// HTTP 健康检查。
-	httpSrv, err := atlashttp.NewServer(atlashttp.WithAddress("127.0.0.1:0"))
-	if err != nil {
-		wsHTTP.Close()
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: http: %w", err)
-	}
-	httpSrv.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","service":"gateway"}`))
-	})
-	hctx, hcancel := context.WithCancel(context.Background())
-	go func() { _ = httpSrv.Start(hctx) }()
-	httpEP, err := serverutil.WaitEndpoint(httpSrv, 2*time.Second)
-	if err != nil {
-		hcancel()
-		wsHTTP.Close()
-		scancel()
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		_ = cli.Close()
-		return nil, fmt.Errorf("assemble: http 启动: %w", err)
-	}
-
-	stop := func(ctx context.Context) error {
-		hcancel()
-		_ = httpSrv.Stop(ctx)
-		wsHTTP.Close()
-		scancel()
-		_ = tcpSrv.Stop(ctx)
-		_ = kcpSrv.Stop(ctx)
-		_ = udpSrv.Stop(ctx)
-		relayCancel()
-		_ = rt.Shutdown(ctx)
-		_ = ec.Close()
-		nc.Close()
-		return cli.Close()
-	}
-	return &Gateway{
-		TCPURL:  ep.Host,
-		WSURL:   "ws" + strings.TrimPrefix(wsHTTP.URL, "http") + "/ws",
-		KCPURL:  kcpEP.Host,
-		UDPURL:  udpEP.Host,
-		HTTPURL: httpEP.Host,
-		Actors:  actors,
-		stop:    stop,
-	}, nil
+	Actors  *actorclient.Client
+	WSSrv   *wst.Server
+	Servers []transport.Server `group:"embed_servers"`
 }
 
-// Stop 停止 gateway 实例并释放全部资源。
+// New 装配并启动一个 gateway 实例：映射配置 → 启动 fx 依赖图
+// （含推送订阅与会话清扫生命周期）→ 后台起四协议传输层 →
+// 以 /ws 路径包装 WS 单通道。
+func New(ctx context.Context, o Options) (*Gateway, error) {
+	var h graphHandles
+	root := fx.New(
+		fx.NopLogger,
+		fx.Supply(newBootstrap(o)),
+		gwapp.Module,
+		fx.Populate(&h),
+	)
+	if err := root.Err(); err != nil {
+		return nil, fmt.Errorf("assemble: 依赖图校验失败: %w", err)
+	}
+	if err := root.Start(ctx); err != nil {
+		return nil, fmt.Errorf("assemble: 启动组件失败: %w", err)
+	}
+
+	urls, stopServers, err := startServers(h.Servers)
+	if err != nil {
+		_ = root.Stop(context.Background())
+		return nil, err
+	}
+	wsHTTP, wsURL, err := wrapWSHandler(h.WSSrv)
+	if err != nil {
+		_ = stopServers(context.Background())
+		_ = root.Stop(context.Background())
+		return nil, err
+	}
+
+	g := &Gateway{
+		TCPURL:  urls["tcp"],
+		WSURL:   wsURL,
+		KCPURL:  urls["kcp"],
+		UDPURL:  urls["udp"],
+		HTTPURL: urls["http"],
+		Actors:  h.Actors,
+	}
+	g.stop = func(ctx context.Context) error {
+		wsHTTP.Close()
+		if err := stopServers(ctx); err != nil {
+			return err
+		}
+		return root.Stop(ctx)
+	}
+	return g, nil
+}
+
+// Stop 停止 gateway 实例并释放全部资源（停 WS 包装 → 停四协议 → 组件逆序回收）。
 func (g *Gateway) Stop(ctx context.Context) error {
 	if g.stop == nil {
 		return nil
 	}
 	return g.stop(ctx)
+}
+
+// startServers 以进程内形态后台启动嵌入式传输层子组，
+// 并按 scheme 归集端点（fx 值组不保证提供顺序，不能依赖下标）。
+func startServers(servers []transport.Server) (map[string]string, func(context.Context) error, error) {
+	eps, stop, err := serverutil.ServeAsync(5*time.Second, servers...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("assemble: 启动传输层: %w", err)
+	}
+	urls := make(map[string]string, len(eps))
+	for _, ep := range eps {
+		urls[ep.Scheme] = ep.Host
+	}
+	for _, scheme := range []string{"tcp", "kcp", "udp", "http"} {
+		if urls[scheme] == "" {
+			_ = stop(context.Background())
+			return nil, nil, fmt.Errorf("assemble: 缺少 %s 端点: %v", scheme, eps)
+		}
+	}
+	return urls, stop, nil
+}
+
+// wrapWSHandler 把 WS Server 的 Handler 挂载到 httptest 的 /ws 路径
+// （单通道形态约定：客户端拨 ws://<host>/ws）。
+func wrapWSHandler(wsSrv *wst.Server) (*httptest.Server, string, error) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", wsSrv.Handler())
+	wsHTTP := httptest.NewServer(mux)
+	return wsHTTP, "ws" + strings.TrimPrefix(wsHTTP.URL, "http") + "/ws", nil
+}
+
+// newBootstrap 把进程内装配参数映射为服务配置：
+// 装配图只认 *conf.Bootstrap 一种输入，两种驱动形态因此共享全部构造函数。
+// 实例 ID 加 gw- 前缀（会话路由与跨实例踢人依赖该约定）；
+// 监听地址固定随机端口（进程内形态不做端口管理）。
+func newBootstrap(o Options) *conf.Bootstrap {
+	const randomPort = "127.0.0.1:0"
+	return &conf.Bootstrap{
+		Runtime: &configspb.Runtime{Name: "gateway", Id: "gw-" + o.ID},
+		Registry: &configspb.Registry{
+			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+		},
+		Server: &configspb.Server{
+			Grpc: &configspb.Server_GRPC{Addr: randomPort},
+			Http: &configspb.Server_HTTP{Addr: randomPort},
+		},
+		Tcp:       &conf.Bootstrap_Net{Addr: randomPort},
+		Websocket: &conf.Bootstrap_Net{Addr: randomPort},
+		Kcp:       &conf.Bootstrap_Net{Addr: randomPort},
+		Udp:       &conf.Bootstrap_Net{Addr: randomPort},
+		Data: &configspb.Data{
+			Redis: &configspb.Data_Redis{Addr: o.RedisAddr},
+			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
+		},
+	}
 }

@@ -3,14 +3,14 @@ package main
 
 import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
+	"github.com/huangyuCN/atlas-game-layout/services/game/internal/app"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
-	"github.com/huangyuCN/atlas-game-layout/services/game/internal/server"
 	"go.uber.org/fx"
 )
 
 func main() {
 	var cfg conf.Bootstrap
-	opts, err := bootstrap.Assemble("game", &cfg, server.Module)
+	opts, err := bootstrap.Assemble("game", &cfg, app.Module)
 	if err != nil {
 		panic(err)
 	}

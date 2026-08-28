@@ -21,7 +21,13 @@ type mockServer struct {
 }
 
 func newMockServer() *mockServer {
-	return &mockServer{started: make(chan struct{}), stopCh: make(chan struct{})}
+	return &mockServer{
+		started: make(chan struct{}),
+		stopCh:  make(chan struct{}),
+		// 端点必须非空：atlas App.Run → buildInstance 会对实现
+		// Endpointer 的 Server 直接调用 Endpoint().String()。
+		endpoint: &url.URL{Scheme: "grpc", Host: "127.0.0.1:0"},
+	}
 }
 
 func (m *mockServer) Start(context.Context) error {

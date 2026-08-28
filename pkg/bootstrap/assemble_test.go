@@ -41,6 +41,8 @@ func writeConf(t *testing.T, dir, content string) {
 }
 
 // TestAssembleLoaded 验证装配分支：日志初始化、模块数量。
+// 注册中心装配已下沉到各服务 fx 模块（pkg/fxkit），
+// 因此无论是否配置 registry.etcd，bootstrap 均产出固定数量的模块。
 func TestAssembleLoaded(t *testing.T) {
 	cfg := &testBootstrap{
 		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1"},
@@ -51,12 +53,13 @@ func TestAssembleLoaded(t *testing.T) {
 		t.Fatalf("AssembleLoaded() 错误 = %v", err)
 	}
 	if len(opts) != 2 {
-		t.Fatalf("无 etcd 时应为 2 个模块（供应/App 打包模块），实际 %d 个", len(opts))
+		t.Fatalf("应为 2 个模块（供应/App 打包模块），实际 %d 个", len(opts))
 	}
 }
 
-// TestAssembleLoadedWithEtcd 验证 etcd 配置追加客户端与注册器模块。
-func TestAssembleLoadedWithEtcd(t *testing.T) {
+// TestAssembleLoadedIgnoresRegistry 验证 bootstrap 不再处理 etcd 配置段：
+// 含 registry.etcd 的配置同样只产出固定模块（etcd 由服务模块自行声明）。
+func TestAssembleLoadedIgnoresRegistry(t *testing.T) {
 	cfg := &testBootstrap{
 		Runtime: &configspb.Runtime{Name: "demo"},
 		reg: &configspb.Registry{
@@ -67,8 +70,8 @@ func TestAssembleLoadedWithEtcd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleLoaded() 错误 = %v", err)
 	}
-	if len(opts) != 4 {
-		t.Fatalf("含 etcd 时应为 4 个模块（供应/etcd/registry/App 打包模块），实际 %d 个", len(opts))
+	if len(opts) != 2 {
+		t.Fatalf("registry 段不应改变模块数量，期望 2 个，实际 %d 个", len(opts))
 	}
 }
 

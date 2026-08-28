@@ -1,6 +1,4 @@
-// Package infra 提供 game 服务的外部依赖装配：
-// redis（会话 + 玩家快照缓存）、mongo（玩家持久化）、nats/etcd（actor 集群）。
-package infra
+package app
 
 import (
 	"context"
@@ -15,7 +13,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/fx"
 )
 
 // NewRedisClient 装配 redis 客户端（会话令牌 + 玩家快照缓存）。
@@ -24,37 +21,52 @@ func NewRedisClient(cfg *conf.Bootstrap) (*pkredis.Client, error) {
 	if d := cfg.GetData(); d != nil && d.GetRedis() != nil {
 		opts.Addr = d.GetRedis().GetAddr()
 	}
-	return pkredis.NewClient(opts)
+	cli, err := pkredis.NewClient(opts)
+	if err != nil {
+		return nil, fmt.Errorf("app: 构造 redis 客户端失败: %w", err)
+	}
+	return cli, nil
 }
 
 // NewNatsConn 装配 NATS 连接（actor 集群传输）。
 func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 	url := ""
+	name := consts.ServiceGame
+	if r := cfg.GetRuntime(); r != nil && r.GetName() != "" {
+		name = r.GetName()
+	}
 	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
 		url = d.GetNats().GetUrl()
 	}
-	return nats.Connect(nats.Options{URL: url, Name: "game"})
+	conn, err := nats.Connect(nats.Options{URL: url, Name: name})
+	if err != nil {
+		return nil, fmt.Errorf("app: 构造 NATS 连接失败: %w", err)
+	}
+	return conn, nil
 }
 
 // NewMongoClient 装配 MongoDB 客户端（玩家持久化）。
+// fx 无法注入裸 context.Context，这里以进程级上下文构造
+// （仅索引初始化等启动期使用）。
 func NewMongoClient(cfg *conf.Bootstrap) (*mongo.Client, error) {
 	opts := mongo.Options{}
 	if d := cfg.GetData(); d != nil && d.GetMongo() != nil {
 		opts.URI = d.GetMongo().GetUri()
 		opts.Database = d.GetMongo().GetDatabase()
 	}
-	return mongo.NewClient(context.Background(), opts)
+	cli, err := mongo.NewClient(context.Background(), opts)
+	if err != nil {
+		return nil, fmt.Errorf("app: 构造 mongo 客户端失败: %w", err)
+	}
+	return cli, nil
 }
 
-// NewActorRuntime 装配 actor 集群运行时（Locator=etcd、传输=NATS、懒激活选 game 节点）。
+// NewActorRuntime 装配 actor 集群运行时
+// （Locator=etcd、传输=NATS、懒激活按服务发现选 game 节点）。
 func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtime, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
-	}
-	natsURL := ""
-	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
-		natsURL = d.GetNats().GetUrl()
 	}
 	nodeID := ""
 	if r := cfg.GetRuntime(); r != nil {
@@ -62,23 +74,25 @@ func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtim
 	}
 	discovery, err := pkgregistry.NewEtcdDiscovery(ec, pkgregistry.Options{})
 	if err != nil {
-		return nil, fmt.Errorf("infra: 构造服务发现失败: %w", err)
+		return nil, fmt.Errorf("app: 构造服务发现失败: %w", err)
 	}
-	return pkgactor.NewRuntime(pkgactor.Options{
+	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,
 		ServiceName:   consts.ServiceGame,
 		EtcdEndpoints: endpoints,
-		NatsURL:       natsURL,
+		NatsURL:       natsURLOf(cfg),
 		Discovery:     discovery,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("app: 构造 actor 运行时失败: %w", err)
+	}
+	return rt, nil
 }
 
-// RegisterRuntimeLifecycle 把集群运行时接入 fx 生命周期。
-func RegisterRuntimeLifecycle(lc fx.Lifecycle, rt *pkgactor.Runtime) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error { return rt.Start(ctx) },
-		OnStop:  func(ctx context.Context) error { return rt.Shutdown(ctx) },
-	})
+// natsURLOf 提取 data.nats.url。
+func natsURLOf(cfg *conf.Bootstrap) string {
+	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
+		return d.GetNats().GetUrl()
+	}
+	return ""
 }
-
-// 快照 TTL 与心跳等时间参数集中声明（biz 层引用）。
