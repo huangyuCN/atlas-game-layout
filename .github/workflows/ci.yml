@@ -14,8 +14,8 @@ on:
     branches: [main, master]
 
 env:
-  # Atlas/cow 检出版本（远端仓库可访问后按需改为 tag/commit）。
-  ATLAS_REF: main
+  # Atlas/cow 检出版本：模板当前以 atlas feat/actor 分支为编译基准（README 有说明）。
+  ATLAS_REF: feat/actor
   COW_REF: main
 
 jobs:
@@ -39,6 +39,7 @@ jobs:
           repository: huangyuCN/atlas
           ref: ${{ env.ATLAS_REF }}
           path: .ci-deps/atlas
+          persist-credentials: false
           token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Checkout cow（replace ../cow）
@@ -49,6 +50,7 @@ jobs:
           repository: huangyuCN/cow
           ref: ${{ env.COW_REF }}
           path: .ci-deps/cow
+          persist-credentials: false
           token: ${{ secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
 
       - name: 校验 Atlas/cow 检出（私有仓库需 PAT）
@@ -56,7 +58,7 @@ jobs:
           if [ ! -f "$GITHUB_WORKSPACE/.ci-deps/atlas/go.mod" ]; then
             echo "::error::无法检出 huangyuCN/atlas（Repository not found）"
             echo "  原因：atlas 为私有仓库，GITHUB_TOKEN 无权跨仓库读取。"
-            echo "  解决：请在 atlas-game-layout 仓库 Settings → Secrets and variables → Actions 中新增”
+            echo "  解决：请在 atlas-game-layout 仓库 Settings → Secrets and variables → Actions 中新增"
             echo "        ATLAS_PAT（或 GH_PAT / CI_PAT）—— 一个有 huangyuCN/atlas 与 huangyuCN/cow 读权限的 fine-grained PAT（Contents: Read）"
             echo "        或将 atlas/cow 设为 public / internal。"
             exit 1
