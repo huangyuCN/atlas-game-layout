@@ -76,7 +76,14 @@ func New(ctx context.Context, o Options) (*Matcher, error) {
 
 	m := &Matcher{GRPCURL: grpcHostOf(h.Servers), Service: h.Service}
 	m.stop = func(ctx context.Context) error {
-		return stopServers(ctx)
+		// 先停服务器，再走 fx 根应用逆序回收（撮合循环/actor/外部资源）。
+		// 服务器已停时 stopServers 返回错误不应阻断资源回收。
+		sErr := stopServers(ctx)
+		rErr := root.Stop(ctx)
+		if sErr != nil {
+			return sErr
+		}
+		return rErr
 	}
 	return m, nil
 }

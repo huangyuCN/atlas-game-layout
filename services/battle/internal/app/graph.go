@@ -50,8 +50,8 @@ var Module = fx.Module("battle",
 		fx.Annotate(server.NewGRPCServer, fx.ResultTags(`group:"servers"`)),
 	),
 	fx.Invoke(
-		registerActor,
 		registerResources,
+		registerActor,
 	),
 )
 

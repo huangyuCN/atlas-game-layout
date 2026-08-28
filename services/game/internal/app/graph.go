@@ -21,7 +21,8 @@ import (
 // 进程内形态由 assemble 以 Options 映射出配置后 Supply。
 //
 // 注册中心、集群运行时与业务 actor 均在 fx.Invoke 中接入生命周期，
-// 组件逆序回收（服务器停机 → actor 停机 → 客户端关闭）由 registerResources 完成。
+// fx.OnStop 逆序执行：registerResources 先注册，其 OnStop 最后运行——
+// 即先停 actor/relay/撮合循环，最后才关闭外部资源（Mongo/Redis/NATS/etcd）。
 var Module = fx.Module("game",
 	fx.Provide(
 		DefaultTuning,
@@ -46,8 +47,8 @@ var Module = fx.Module("game",
 		fx.Annotate(server.NewGRPCServer, fx.ResultTags(`group:"servers"`)),
 	),
 	fx.Invoke(
-		registerActor,
 		registerResources,
+		registerActor,
 	),
 )
 

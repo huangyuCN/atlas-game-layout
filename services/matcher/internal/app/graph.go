@@ -46,9 +46,9 @@ var Module = fx.Module("matcher",
 		fx.Annotate(server.NewGRPCServer, fx.ResultTags(`group:"servers"`)),
 	),
 	fx.Invoke(
+		registerResources,
 		registerRuntime,
 		registerActorLifecycle,
-		registerResources,
 	),
 )
 

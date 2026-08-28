@@ -40,18 +40,39 @@ func WaitEndpoint(srv interface{ Endpoint() (*url.URL, error) }, timeout time.Du
 func ServeAsync(timeout time.Duration, servers ...transport.Server) ([]*url.URL, func(context.Context) error, error) {
 	sctx, cancel := context.WithCancel(context.Background())
 	eps := make([]*url.URL, len(servers))
+	type startResult struct {
+		err error
+	}
+	// startErrs[i] 在对应 Server 的 Start 返回时接收错误（端口占用等即时失败）。
+	startErrs := make([]chan startResult, len(servers))
+	for i := range startErrs {
+		startErrs[i] = make(chan startResult, 1)
+	}
 	for i, srv := range servers {
 		endpoint, ok := srv.(Endpointer)
 		if !ok {
 			cancel()
 			return nil, nil, fmt.Errorf("serverutil: server[%d] 未实现 transport.Endpointer，无法就绪探测", i)
 		}
-		go func() { _ = srv.Start(sctx) }()
+		go func(i int, srv transport.Server) {
+			startErrs[i] <- startResult{err: srv.Start(sctx)}
+		}(i, srv)
 		ep, err := WaitEndpoint(endpoint, timeout)
 		if err != nil {
 			cancel()
 			stopAll(context.Background(), servers[:i+1])
 			return nil, nil, fmt.Errorf("serverutil: %w", err)
+		}
+		// 端点已就绪但 Start 可能已带错误退出（如端点探测间发生崩溃）：
+		// 非阻塞检查一次，避免把已失败的服务端误判为启动成功。
+		select {
+		case r := <-startErrs[i]:
+			if r.err != nil {
+				cancel()
+				stopAll(context.Background(), servers[:i+1])
+				return nil, nil, fmt.Errorf("serverutil: server[%d] 启动失败: %w", i, r.err)
+			}
+		default:
 		}
 		eps[i] = ep
 	}

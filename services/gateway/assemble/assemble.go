@@ -95,10 +95,13 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 	}
 	g.stop = func(ctx context.Context) error {
 		wsHTTP.Close()
-		if err := stopServers(ctx); err != nil {
-			return err
+		// 某个协议服务停止失败不应阻断后续清理：仍需停 actor/relay 并关闭外部资源。
+		sErr := stopServers(ctx)
+		rErr := root.Stop(ctx)
+		if sErr != nil {
+			return sErr
 		}
-		return root.Stop(ctx)
+		return rErr
 	}
 	return g, nil
 }

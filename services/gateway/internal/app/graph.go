@@ -52,9 +52,9 @@ var Module = fx.Module("gateway",
 		newGateway,
 	),
 	fx.Invoke(
+		registerResources,
 		registerRelay,
 		registerActorLifecycle,
-		registerResources,
 	),
 )
 
