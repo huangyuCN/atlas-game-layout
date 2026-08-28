@@ -5,6 +5,7 @@ import (
 
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
+	"github.com/huangyuCN/atlas/transport"
 	"go.uber.org/fx"
 )
 
@@ -19,6 +20,11 @@ func TestGraphStaticValidation(t *testing.T) {
 	if err := fx.ValidateApp(
 		fx.Supply(cfg),
 		Module,
+		// 消费 servers 组：强制 ValidateApp 展开传输层构造依赖链
+		fx.Invoke(fx.Annotate(
+			func([]transport.Server) {},
+			fx.ParamTags(`group:"servers"`),
+		)),
 	); err != nil {
 		t.Fatalf("依赖图静态校验失败: %v", err)
 	}

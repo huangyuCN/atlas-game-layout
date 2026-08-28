@@ -10,6 +10,7 @@ import (
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
@@ -34,6 +35,8 @@ var Module = fx.Module("matcher",
 		NewMatchmakerRuntime,
 		infra.NewRedisPlayerTicketMapper,
 		infra.NewRedisSettleDeduper,
+		ticketMapperOf,
+		settleDeduperOf,
 		// ── biz：撮合 API 绑定 + 成局观察方 + grpc handler ──
 		serviceOf,
 		newSink,
@@ -48,6 +51,12 @@ var Module = fx.Module("matcher",
 		registerResources,
 	),
 )
+
+// ticketMapperOf 把 redis 票据映射实现绑定为 biz 接口（供 fx 按接口注入）。
+func ticketMapperOf(m *infra.RedisPlayerTicketMapper) biz.PlayerTicketMapper { return m }
+
+// settleDeduperOf 把 redis 结算去重实现绑定为 biz 接口。
+func settleDeduperOf(d *infra.RedisSettleDeduper) biz.MatchSettleDeduper { return d }
 
 // registerRuntime 把撮合运行时接入生命周期。
 // 注意：tick 循环是长驻 goroutine，不能用 fx OnStart 的 ctx（15s 超时取消会杀掉循环），
