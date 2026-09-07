@@ -56,7 +56,7 @@ Atlas 类型仅在 `pkg/` 装配层使用。`go.mod` 以本地 `replace` 指向 
   - **单函数**：同一函数**不超过 50 行**（含空行与注释）；超出则拆分为多个函数或提取步骤，避免单块过长。
   - **调用链追踪自检（跨模块/跨服务变更必须执行）**：修改跨模块、跨进程（如集群路由、消息投递、RPC 调用）的逻辑后，**必须**从入口点出发，跟踪完整的调用链并验证每一跳的关键假设（PID 格式、地址映射、消息编解码、端口/主题命名等）是否匹配。仅 `go build` 通过不足以证明链路正确。
   - **公共抽象**：多处重复或可被清晰命名的逻辑，**必须**提取为包内/跨包的**公共函数**（或小型类型与方法），避免复制粘贴；提取时保持命名与现有代码风格一致。
-  - **命名不得以包名开头**：包内导出的函数名、类型名、变量名杜绝以包名作为前缀。调用侧在使用时本身带有包名限定（如 `session.NewManager`），若函数名再以包名开头将形成冗余（`session.SessionNewManager`），且会触发 IDE 警告 "Name starts with the package name"。正确做法：`session.NewManager`（而非 `session.SessionNewManager`）。
+  - **命名不得以包名开头**：包内导出的函数名、类型名、变量名杜绝以包名作为前缀。调用侧在使用时本身带有包名限定（如 `session.NewManager`），若函数名再以包名开头将形成冗余（`session.SessionNewManager`），且会触发 IDE 警告 "Name starts with the package name"。正确做法：`session.NewManager`（而非 `session.SessionNewManager`）。提交前可用 `make lint`（scripts/check-pkgname）自动检查全部导出标识符（函数/类型/变量/方法）是否以包名开头。
 - **代码注释语言**：所有手写代码注释必须使用中文，包括 Go doc 注释、行内注释、复杂逻辑说明和测试意图说明。允许保留英文的情况仅限专有协议字段、外部标准名、错误码、指标名、trace attribute 名、第三方 API 原文，以及 protobuf/OpenAPI/工具生成文件中的生成注释。
 
 ---
@@ -170,6 +170,7 @@ make compose              # 起中间件（etcd/redis/nats/mongo）
 # 测试
 go test ./...             # 单元测试（内存/内嵌中间件）
 go test ./test/e2e/       # 端到端（需真中间件；不可达自动跳过）
+make lint                 # 命名规范检查（导出标识符不得以包名开头）
 
 # e2e 闭环 / 压测
 make e2e                          # TCP 业务 + KCP 战斗（dual 形态）
