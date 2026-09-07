@@ -9,7 +9,7 @@ import (
 )
 
 // testBootstrap 是手写的测试配置：内嵌 Runtime 提供 proto.Message，
-// 另存 Registry/Log 实现 BootstrapLike（无需 protojson 解组）。
+// 另存 Registry/Log 实现 ConfigLike（无需 protojson 解组）。
 type testBootstrap struct {
 	*configspb.Runtime
 	reg *configspb.Registry

@@ -331,8 +331,8 @@ func (m *Manager) Start(ctx context.Context) {
 	}()
 }
 
-// SessionCount 返回本实例当前会话数（测试与可观测用）。
-func (m *Manager) SessionCount() int {
+// Count 返回本实例当前会话数（测试与可观测用）。
+func (m *Manager) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.local)

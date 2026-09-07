@@ -56,8 +56,8 @@ func TestKickCrossInstance(t *testing.T) {
 		t.Fatal("A 旧令牌心跳应失败")
 	}
 	// A 本地会话已清理（控制通道处理完成）。
-	if envA.sess.SessionCount() != 0 {
-		t.Fatalf("A 本地会话数 = %d, want 0", envA.sess.SessionCount())
+	if envA.sess.Count() != 0 {
+		t.Fatalf("A 本地会话数 = %d, want 0", envA.sess.Count())
 	}
 }
 

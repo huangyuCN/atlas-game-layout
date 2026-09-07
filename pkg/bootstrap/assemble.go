@@ -10,10 +10,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// BootstrapLike 是各服务配置 Bootstrap 的公共 getter 子集：
+// ConfigLike 是各服务配置 Bootstrap 的公共 getter 子集：
 // 所有服务的 internal/conf/conf.proto 都引用公共配置消息，
 // 生成的 *Bootstrap 自动满足该接口。
-type BootstrapLike interface {
+type ConfigLike interface {
 	GetRuntime() *configspb.Runtime
 	GetRegistry() *configspb.Registry
 	GetLog() *configspb.Log
@@ -37,7 +37,7 @@ func Assemble(name string, cfg proto.Message, extra ...fx.Option) ([]fx.Option, 
 
 // AssembleLoaded 对已加载的配置装配通用模块（拆分出来便于单测）。
 func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) {
-	like, ok := cfg.(BootstrapLike)
+	like, ok := cfg.(ConfigLike)
 	if !ok {
 		return nil, fmt.Errorf("bootstrap: 配置类型 %T 未引用公共配置消息", cfg)
 	}
