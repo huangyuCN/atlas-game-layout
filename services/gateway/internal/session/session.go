@@ -91,8 +91,21 @@ func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Ch
 	}
 	now := time.Now()
 
-	// 本地表：每次绑定生成新的会话快照（旧快照保持不可变，供挤下线等外部引用安全使用）。
+	// 本地表更新（内部加锁）与路由表同步分开：
+	// 前者只改内存态，后者是单命令原子远端写（SET ... GET，见 RedisStore）。
+	next, err := m.bindLocal(playerID, c, channel, token, now)
+	if err != nil {
+		return nil, err
+	}
+	return m.persistRoute(ctx, playerID, next, now)
+}
+
+// bindLocal 更新本地会话表与反向索引（内部加锁），返回本次会话快照。
+// 每次绑定生成新的会话快照（旧快照保持不可变，供挤下线等外部引用安全使用）；
+// 新连接登记 refs，被替换/移除的旧连接注销（防旧连接残留身份）。
+func (m *Manager) bindLocal(playerID string, c *Conn, channel Channel, token string, now time.Time) (*Session, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	prev := m.local[playerID]
 	next := &Session{PlayerID: playerID, LastHeartbeat: now}
 	if prev != nil {
@@ -106,18 +119,19 @@ func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Ch
 	case ChannelBattle:
 		next.Battle = c
 	default:
-		m.mu.Unlock()
 		return nil, fmt.Errorf("session: 未知通道类别 %q", channel)
 	}
 	m.local[playerID] = next
-	// 反向索引：新连接登记；被替换/移除的旧连接注销（防旧连接残留身份）。
 	m.dropStaleRefs(prev, next)
 	if c.Ref != "" {
 		m.refs[c.Ref] = playerID
 	}
-	m.mu.Unlock()
+	return next, nil
+}
 
-	// 路由表：单命令原子「写新值 + 设 TTL + 取旧值」（SET ... GET，见 RedisStore）。
+// persistRoute 将会话快照同步到 redis 路由表（单命令原子「写新值 + 设 TTL + 取旧值」）。
+// 返回绑定前的旧路由（nil 表示首次登录），供挤下线判断。
+func (m *Manager) persistRoute(ctx context.Context, playerID string, next *Session, now time.Time) (*Route, error) {
 	r := Route{
 		InstanceID: m.instanceID,
 		Token:      next.Token,
@@ -129,11 +143,7 @@ func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Ch
 	if next.Battle != nil {
 		r.BattleConnID, r.BattleKind = next.Battle.ID, next.Battle.Kind
 	}
-	old, err := m.store.GetSet(ctx, playerID, &r, m.ttl)
-	if err != nil {
-		return nil, err
-	}
-	return old, nil
+	return m.store.GetSet(ctx, playerID, &r, m.ttl)
 }
 
 // Unbind 解绑玩家会话（登出/挤下线清理）。

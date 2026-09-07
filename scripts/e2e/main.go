@@ -224,48 +224,69 @@ func (p *player) waitEnd() (string, error) {
 
 // run 执行闭环；返回错误则脚本非零退出。
 func run(ctx context.Context, mode, tcpAddr, kcpAddr, wsAddr, matcherAddr string, frames uint64) error {
-	var ps [2]*player
-	var err error
-	if mode == "single" {
-		for i := range ps {
-			if ps[i], err = newSinglePlayer(ctx, wsAddr); err != nil {
-				return err
-			}
+	ps, err := connectPlayers(ctx, mode, tcpAddr, kcpAddr, wsAddr)
+	if err != nil {
+		return err
+	}
+	battleID, err := matchAndStart(ctx, matcherAddr, ps)
+	if err != nil {
+		return err
+	}
+	if err := sendBattleInputs(ctx, ps, battleID, frames); err != nil {
+		return err
+	}
+	return verifySettlement(ps)
+}
+
+// connectPlayers 按形态建立双客户端连接：single 走 WS 单通道，否则走 TCP+KCP 双通道。
+func connectPlayers(ctx context.Context, mode, tcpAddr, kcpAddr, wsAddr string) (ps [2]*player, err error) {
+	for i := range ps {
+		if mode == "single" {
+			ps[i], err = newSinglePlayer(ctx, wsAddr)
+		} else {
+			ps[i], err = newDualPlayer(ctx, tcpAddr, kcpAddr)
 		}
-	} else {
-		for i := range ps {
-			if ps[i], err = newDualPlayer(ctx, tcpAddr, kcpAddr); err != nil {
-				return err
-			}
+		if err != nil {
+			return ps, err
 		}
 	}
+	return ps, nil
+}
 
+// matchAndStart 双玩家注册登录后入队，等待撮合成局并返回 battleID。
+func matchAndStart(ctx context.Context, matcherAddr string, ps [2]*player) (string, error) {
 	for i, p := range ps {
 		if err := p.registerLogin(ctx, byte(i)); err != nil {
-			return err
+			return "", err
 		}
 	}
 	fmt.Println("[匹配] 双玩家入队（等级相近）")
 	if err := queueMatch(ctx, matcherAddr, ps[0], ps[1]); err != nil {
-		return err
+		return "", err
 	}
 	battleID, err := waitStarted(ps[0], ps[1])
 	if err != nil {
-		return err
+		return "", err
 	}
 	fmt.Printf("[开局] battle=%s\n", battleID)
 	for _, p := range ps {
 		if err := p.joinWithRetry(ctx, battleID); err != nil {
-			return err
+			return "", err
 		}
 	}
-	// A 每帧前进 1（率先到终点），B 原地不动。
+	return battleID, nil
+}
+
+// sendBattleInputs 双玩家向战斗发帧：A 每帧前进 1（率先到终点），B 原地不动。
+func sendBattleInputs(ctx context.Context, ps [2]*player, battleID string, frames uint64) error {
 	if err := ps[0].sendInputs(ctx, battleID, frames, 1); err != nil {
 		return err
 	}
-	if err := ps[1].sendInputs(ctx, battleID, frames, 0); err != nil {
-		return err
-	}
+	return ps[1].sendInputs(ctx, battleID, frames, 0)
+}
+
+// verifySettlement 校验双方结算一致：胜者相同且为 A。
+func verifySettlement(ps [2]*player) error {
 	winnerA, err := ps[0].waitEnd()
 	if err != nil {
 		return err

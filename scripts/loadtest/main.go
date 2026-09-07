@@ -207,6 +207,15 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
+	driver, battleID := setupAndOpen(ctx)
+
+	latencies, inputElapsed := measureInputLatency(ctx, driver, battleID)
+	frameMs := observeBroadcast(driver)
+	printSummary(latencies, frameMs, inputElapsed)
+}
+
+// setupAndOpen 建立双玩家连接（driver 实测 + dummy 陪跑）并等待成局，返回 driver 与 battleID。
+func setupAndOpen(ctx context.Context) (*player, string) {
 	// 战斗通道地址按传输形态取默认（kcp 端口 / ws URL）。
 	battleAddr := *battleFlag
 	if battleAddr == "" {
@@ -216,7 +225,6 @@ func main() {
 			battleAddr = "127.0.0.1:9003"
 		}
 	}
-
 	driver, err := newPlayer(ctx, *gwFlag, battleAddr, *transportFlag)
 	if err != nil {
 		fatalf("driver: %v", err)
@@ -228,8 +236,7 @@ func main() {
 	fmt.Printf("[压测] transport=%s driver=%s\n", *transportFlag, driver.id)
 
 	// 开局：双玩家入队并等待成局。
-	matcherAddr := *matcherFlag
-	battleID, err := queueTwo(ctx, matcherAddr, driver, dummy)
+	battleID, err := queueTwo(ctx, *matcherFlag, driver, dummy)
 	if err != nil {
 		fatalf("%v", err)
 	}
@@ -240,9 +247,12 @@ func main() {
 	if err := dummy.joinBattle(ctx, battleID); err != nil {
 		fatalf("%v", err)
 	}
+	return driver, battleID
+}
 
-	// 帧输入往返延迟：driver 顺序发送 N 个帧输入。
-	// payload 步进 0（原地）：避免提前冲线结算，保证广播窗口期战斗持续。
+// measureInputLatency 顺序发送 N 个帧输入并记录每次往返延迟。
+// payload 步进 0（原地）：避免提前冲线结算，保证广播窗口期战斗持续。
+func measureInputLatency(ctx context.Context, driver *player, battleID string) ([]float64, time.Duration) {
 	var latencies []float64
 	start := time.Now()
 	for i := 0; i < *inputsFlag; i++ {
@@ -259,14 +269,22 @@ func main() {
 	}
 	inputElapsed := time.Since(start)
 	fmt.Printf("[输入] %d 次完成，耗时 %v\n", *inputsFlag, inputElapsed)
+	return latencies, inputElapsed
+}
 
-	// 帧广播窗口：观测 window 秒。
+// observeBroadcast 观测 window 秒的帧广播窗口，返回帧广播延迟样本（毫秒）。
+func observeBroadcast(driver *player) []float64 {
 	time.Sleep(*windowFlag)
 	samples := driver.frameLatencies()
 	frameMs := make([]float64, 0, len(samples))
 	for _, s := range samples {
 		frameMs = append(frameMs, float64(s.Microseconds())/1000)
 	}
+	return frameMs
+}
+
+// printSummary 排序并输出压测汇总 JSON（bench 归档用）。
+func printSummary(latencies, frameMs []float64, inputElapsed time.Duration) {
 	sort.Float64s(latencies)
 	sort.Float64s(frameMs)
 	rate := float64(*inputsFlag) / inputElapsed.Seconds()
