@@ -111,6 +111,25 @@ services/<svc>/
 - 进程形态（`atlas.App`）与嵌入式形态（fx 编程式启动）**共用同一张依赖图**（app 与 assemble 同源）；
 - 新增依赖/组件 → 只在 assemble.go 声明，不改各 internal 子包间的直接构造。
 
+## actor 方法组织约定
+
+game/battle 的业务 actor（`services/*/internal/actor/`）采用**按域分文件**组织，同一 receiver 跨文件（Go 原生支持）：
+
+| 文件 | 职责 |
+|------|------|
+| `player.go` / `battle.go` | 类型、装配（NewProps）、生命周期（OnStart/OnStop）、横切钩子 |
+| `player_auth.go` / `battle_session.go` | 认证/会话域方法（Register/Login/Logout / Create/Join/Reconnect/GetState） |
+| `player_bag.go` / `battle_frame.go` | 背包/帧同步域方法（GrantItem/GetBackpack/GetPlayer / FrameInput/onFrameResult/checkSettle） |
+
+**铁律**：
+- 业务 actor **实现生成的 `<Service>Server` 接口**（方法签名 `(ctx core.ActorContext, req *X) (*Y, error)`）；分发由生成桩接管——**不手写 OnTell/OnAsk/switch 分发/decodeEnvelope**；
+- 错误**上抛**（`return nil, err`，结构化 error 经集群 error 通道往返），**不包 `Ok:false` 回执**；
+- 本地消息（如定时快照 `tickSnapshot`）经 `core.WithLocalTell[T]` 类型路由注册；
+- 生命周期（OnStart/OnStop）经生成桩 `DispatchBase` 断言转发；
+- 方法按业务域拆文件，单文件 ≤500 行、单函数 ≤50 行。
+
+**新增 actor 接口三步流程**：① proto 加 `rpc` → ② `make proto`（生成桩）→ ③ 在对应域文件实现方法。
+
 ## api/ — 协议定义
 
 `api/<svc>/v1/*.proto` 是协议事实源（按服务分目录：gateway/game/matcher/battle/common/error）：

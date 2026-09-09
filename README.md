@@ -57,6 +57,22 @@ test/e2e        # 进程内端到端测试（真中间件，不可达自动跳�
 > proto 工具链：`make proto-tools` 优先收集 `ATLAS_BIN` 现成插件（`atlas upgrade` 安装目录），
 > 缺插件且存在 Atlas 源码时回退源码构建；均不可用时按报错指引执行 `atlas upgrade`。
 
+### 新增 actor 接口三步流程
+
+业务 actor（game 的 `PlayerActor`、battle 的 `BattleActor`）的接口同样三步：
+
+1. **定义协议**：在 `api/game/v1/player_actor.proto`（或 `api/battle/v1/battle_actor.proto`）的
+   `service PlayerActor`/`BattleActor` 增加 rpc——**returns 具体消息即 Ask（有回执），
+   returns `google.protobuf.Empty` 即 Tell（单向）**；
+2. **生成代码**：`make proto`（`--atlas-actor_out` 插件生成 `<Service>Server` 接口 +
+   `Unimplemented` 兜底 + client stub）；
+3. **填生成桩**：在 `services/game/internal/actor/player_auth.go`/`player_bag.go`
+   （battle 为 `battle_session.go`/`battle_frame.go`）实现方法，错误直接 `return nil, err` 上抛。
+
+> **注意（wire 不兼容）**：actor 消息已**去信封化**——不再有 `PlayerActorMsg`/`BattleActorMsg`
+> oneof 包装，请求/回执直接是业务消息，业务错误经集群 error 通道往返。**服务端与客户端需整仓同步升级**，
+> 旧信封二进制不兼容，不能混布。
+
 ## 帧通道压测
 
 ```bash
