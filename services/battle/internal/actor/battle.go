@@ -1,30 +1,29 @@
 // Package actor 提供 battle 服务的 actor 装配：BattleActor（集群懒激活）承载
 // 一局战斗：内嵌 lockstep 会话（帧引擎）+ 帧广播下发 + 结算落库与事件（M7）。
+//
+// BattleActor 按业务域分文件：
+//   - battle.go         装配/配置/生命周期（本文件）
+//   - battle_session.go 会话域（Create/Join/Reconnect/GetState）
+//   - battle_frame.go   帧同步/结算域（FrameInput/onFrameResult/checkSettle）
 package actor
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
-	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz/simulator"
-	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/repo"
-	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	lockstepimpl "github.com/huangyuCN/atlas/contrib/lockstep"
 	"github.com/huangyuCN/atlas/lockstep"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Config 是战斗装配参数（Props 工厂用）。
@@ -182,232 +181,4 @@ func lockstepType(battleID string) string {
 func (b *BattleActor) OnStop(ctx core.ActorContext, _ types.ExitReason) error {
 	_ = b.rt.Stop(ctx.Context(), b.sessionPID)
 	return nil
-}
-
-// onFrameResult 帧广播到达（本地类型路由注册项）：下发客户端 + 胜负检查与结算。
-func (b *BattleActor) onFrameResult(ctx core.ActorContext, result lockstep.FrameResult) error {
-	// 帧广播下发全部参战玩家（v1 链路：nats → gateway → 客户端）。
-	frame := &locksteppb.LockstepFrame{
-		FrameId:    uint64(result.Frame),
-		ServerTime: timestamppb.Now(), // 广播时间戳：客户端对时与压测延迟度量
-		Snapshot:   snapshotMeta(result.Snapshot),
-	}
-	for _, in := range result.Inputs {
-		frame.Inputs = append(frame.Inputs, toPBInput(in))
-	}
-	for player := range b.players {
-		_ = b.notifier.PublishFrame(ctx.Context(), player, b.battleID, frame)
-	}
-	// 快照携带胜负状态：分出胜负即结算。
-	if result.Snapshot != nil && !b.settled {
-		b.checkSettle(ctx, result)
-	}
-	return nil
-}
-
-// checkSettle 从快照解出胜负：有胜者即结算；
-// 帧数耗尽即使平局也结算（防无限对局泄漏帧广播与 actor 实例）。
-func (b *BattleActor) checkSettle(ctx core.ActorContext, result lockstep.FrameResult) {
-	var st simulator.State
-	if err := json.Unmarshal(result.Snapshot.State, &st); err != nil {
-		return
-	}
-	if st.Winner == "" && uint64(result.Frame) < b.cfg.MaxFrames {
-		return
-	}
-	b.settled = true
-	res := &models.BattleResult{
-		BattleID:    b.battleID,
-		MatchID:     b.matchID,
-		TotalFrames: uint64(result.Frame),
-		SettledAt:   time.Now().UnixMilli(),
-	}
-	for player := range b.players {
-		res.Players = append(res.Players, models.PlayerResult{
-			PlayerID: player,
-			Win:      player == st.Winner,
-			Score:    st.Scores[player],
-		})
-	}
-	if err := b.resultRepo.Save(ctx.Context(), res); err != nil {
-		ctx.Logger().Error("battle: 结算落库失败", "battle", b.battleID, "err", err)
-	}
-	ev := &battlev1.BattleSettledEvent{BattleId: b.battleID, MatchId: b.matchID}
-	for _, p := range res.Players {
-		ev.Players = append(ev.Players, &battlev1.PlayerResult{PlayerId: p.PlayerID, Win: p.Win, Score: p.Score})
-	}
-	_ = b.publisher.PublishSettled(ctx.Context(), ev)
-	// 战斗结束通知下发全部参战玩家（含胜者），随后自停。
-	for player := range b.players {
-		_ = b.notifier.PublishEnd(ctx.Context(), player, b.battleID, st.Winner)
-	}
-	ctx.Stop(types.ExitNormal())
-}
-
-// Create 实现 battlev1.BattleActorServer：开局登记参战玩家（matcher 成局后调用）。
-func (b *BattleActor) Create(ctx core.ActorContext, req *battlev1.CreateBattleRequest) (*battlev1.CreateBattleReply, error) {
-	b.matchID = req.GetMatchId()
-	for _, p := range req.GetPlayerIds() {
-		b.players[p] = struct{}{}
-	}
-	return &battlev1.CreateBattleReply{BattleId: b.battleID}, nil
-}
-
-// Join 实现 battlev1.BattleActorServer：玩家加入 + lockstep JoinSession + 快照回执。
-func (b *BattleActor) Join(ctx core.ActorContext, req *battlev1.JoinBattleReq) (*battlev1.JoinBattleReply, error) {
-	playerID := req.GetPlayerId()
-	if _, ok := b.players[playerID]; !ok {
-		// 错误语义上移到产生点：gateway 直接透传，对外 reason/code 与现状一致。
-		return nil, errorv1.ErrBattleNotFound("玩家不在该战斗参战名单")
-	}
-	// lockstep 成员加入（幂等）。
-	if err := b.rt.Tell(ctx.Context(), b.sessionPID, lockstep.JoinSession{Player: lockstep.PlayerID(playerID)}); err != nil {
-		return nil, fmt.Errorf("actor: 加入会话失败: %w", err)
-	}
-	reconnect, err := b.askReconnect(ctx, 0)
-	if err != nil {
-		return nil, err
-	}
-	return &battlev1.JoinBattleReply{
-		Meta:         sessionMeta(b.battleID, b.cfg.TickInterval),
-		CurrentFrame: reconnect.GetCurrentFrame(),
-		Snapshot:     reconnect.GetSnapshot(),
-	}, nil
-}
-
-// FrameInput 实现 battlev1.BattleActorServer：帧输入转发 lockstep 会话
-// （非参战玩家输入静默丢弃，与现状一致）。
-func (b *BattleActor) FrameInput(ctx core.ActorContext, req *battlev1.FrameInputReq) (*battlev1.FrameInputReply, error) {
-	if _, ok := b.players[req.GetPlayerId()]; !ok {
-		return &battlev1.FrameInputReply{}, nil
-	}
-	in := req.GetInput()
-	err := b.rt.Tell(ctx.Context(), b.sessionPID, lockstep.PlayerInput{
-		Player:  lockstep.PlayerID(req.GetPlayerId()),
-		Frame:   lockstep.FrameID(in.GetFrameId()),
-		Payload: in.GetPayload(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("actor: 帧输入失败: %w", err)
-	}
-	return &battlev1.FrameInputReply{}, nil
-}
-
-// Reconnect 实现 battlev1.BattleActorServer：按参战名单复核玩家后回执补帧。
-func (b *BattleActor) Reconnect(ctx core.ActorContext, req *battlev1.ReconnectReq) (*battlev1.ReconnectReply, error) {
-	if _, ok := b.players[req.GetPlayerId()]; !ok {
-		return nil, errorv1.ErrInvalidToken("补帧被拒绝：不在参战名单")
-	}
-	reconnect, err := b.askReconnect(ctx, req.GetLastSeenFrame())
-	if err != nil {
-		return nil, err
-	}
-	return &battlev1.ReconnectReply{
-		CurrentFrame: reconnect.GetCurrentFrame(),
-		Snapshot:     reconnect.GetSnapshot(),
-		Missed:       reconnect.GetMissed(),
-	}, nil
-}
-
-// GetState 实现 battlev1.BattleActorServer：状态查询（grpc 管理接口转发）。
-func (b *BattleActor) GetState(ctx core.ActorContext, _ *battlev1.GetStateReq) (*battlev1.GetStateReply, error) {
-	// 同节点会话：lockstep 消息为对象直传（非跨节点 proto 信封）。
-	reply, err := b.rt.Ask(ctx.Context(), b.sessionPID, lockstep.QueryStats{})
-	if err != nil {
-		return nil, fmt.Errorf("actor: 状态查询失败: %w", err)
-	}
-	stats, ok := reply.(lockstep.SessionStats)
-	if !ok {
-		return nil, fmt.Errorf("actor: 状态回执类型 %T 不符", reply)
-	}
-	return &battlev1.GetStateReply{
-		State:        stateName(b.settled),
-		CurrentFrame: uint64(stats.CurrentFrame),
-		PlayerCount:  uint32(stats.PlayerCount),
-	}, nil
-}
-
-// askReconnect 向 lockstep 会话查询补帧信息（同节点对象直传）。
-func (b *BattleActor) askReconnect(ctx core.ActorContext, lastSeen uint64) (*battlev1.ReconnectReply, error) {
-	raw, err := b.rt.Ask(ctx.Context(), b.sessionPID, lockstep.ReconnectRequest{
-		LastSeenFrame: lockstep.FrameID(lastSeen),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("actor: 补帧查询失败: %w", err)
-	}
-	reply, ok := raw.(lockstep.ReconnectResponse)
-	if !ok {
-		return nil, fmt.Errorf("actor: 补帧回执类型 %T 不符", raw)
-	}
-	out := &battlev1.ReconnectReply{CurrentFrame: uint64(reply.CurrentFrame)}
-	if reply.Snapshot != nil {
-		out.Snapshot = &locksteppb.SnapshotMeta{
-			FrameId:    uint64(reply.Snapshot.Frame),
-			StateHash:  hashBytes(reply.Snapshot.Hash),
-			SizeBytes:  uint64(len(reply.Snapshot.State)),
-			StorageKey: snapshotKey(b.battleID),
-		}
-	}
-	for _, ins := range reply.MissedInputs {
-		group := &locksteppb.FrameInputs{}
-		for _, in := range ins {
-			group.Inputs = append(group.Inputs, toPBInput(in))
-		}
-		out.Missed = append(out.Missed, group)
-	}
-	return out, nil
-}
-
-// stateName 映射战斗状态描述。
-func stateName(settled bool) string {
-	if settled {
-		return "settled"
-	}
-	return "running"
-}
-
-
-// frameTopic 是 lockstep 帧广播主题。
-func frameTopic(battleID string) string { return "frame." + battleID }
-
-// snapshotKey 是快照存储键（内存存储仅标识用）。
-func snapshotKey(battleID string) string { return "snap/" + battleID }
-
-// snapshotMeta 组装快照元信息。
-func snapshotMeta(snap *lockstep.Snapshot) *locksteppb.SnapshotMeta {
-	if snap == nil {
-		return nil
-	}
-	return &locksteppb.SnapshotMeta{
-		FrameId:   uint64(snap.Frame),
-		StateHash: hashBytes(snap.Hash),
-		SizeBytes: uint64(len(snap.State)),
-	}
-}
-
-// hashBytes 把状态哈希编码为 8 字节（大端）。
-func hashBytes(h uint64) []byte {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, h)
-	return buf
-}
-
-// sessionMeta 组装会话元信息。
-func sessionMeta(battleID string, tickNanos int64) *locksteppb.SessionMeta {
-	return &locksteppb.SessionMeta{
-		SessionId:        battleID,
-		MaxPlayers:       2,
-		TickMillis:       uint32(tickNanos / 1e6),
-		InputDelayFrames: 0,
-		Mode:             locksteppb.LockstepMode_LOCKSTEP_MODE_SERVER_AUTHORITATIVE,
-	}
-}
-
-// toPBInput 转换 lockstep 输入为协议帧输入（帧广播与补帧共用）。
-func toPBInput(in lockstep.Input) *locksteppb.LockstepInput {
-	return &locksteppb.LockstepInput{
-		FrameId:  uint64(in.Frame),
-		PlayerId: string(in.Player),
-		Payload:  in.Payload,
-	}
 }

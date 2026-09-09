@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/handler"
@@ -295,13 +296,18 @@ func TestDispatchRejectsUnknownMessage(t *testing.T) {
 }
 
 // vetoServer 是验证生成桩前置钩子契约的最小业务实现：
-// OnBeforeAsk 按 veto 标志决定放行或拦截。
+// OnBeforeAsk 按 veto 标志决定放行或拦截；GetPlayer 是放行后分发到的业务方法。
 type vetoServer struct {
 	gamev1.UnimplementedPlayerActorServer
 	veto error
 }
 
 func (s *vetoServer) OnBeforeAsk(_ core.ActorContext, _ any) error { return s.veto }
+
+// GetPlayer 实现 PlayerActorServer：放行后分发到的业务方法（未登录拒查）。
+func (s *vetoServer) GetPlayer(_ core.ActorContext, _ *gamev1.GetPlayerActorReq) (*gamev1.GetPlayerActorReply, error) {
+	return nil, errorv1.ErrPlayerNotOnline("玩家不在线")
+}
 
 // TestDispatchBeforeAskHook 验证生成桩的消息前置钩子契约：
 // 业务实现 OnBeforeAsk 返回错误 → 中断本次 Ask（错误即结果）；

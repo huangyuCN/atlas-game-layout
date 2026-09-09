@@ -7,13 +7,13 @@ import (
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
-	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	lockstepimpl "github.com/huangyuCN/atlas/contrib/lockstep"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 )
 
 // memNotifier 是下行通知的内存实现（帧/结束通知记录）。
@@ -353,7 +353,6 @@ func TestLockstepType(t *testing.T) {
 		}
 	}
 }
-
 
 // TestHashBytes 验证状态哈希编码往返。
 func TestHashBytes(t *testing.T) {
