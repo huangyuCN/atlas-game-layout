@@ -86,8 +86,11 @@ type battleActorDispatch struct {
 	impl BattleActorServer
 }
 
-// OnAsk 分发 Ask 消息：静态 type switch 命中即调用业务方法，未命中回落本地路由。
+// OnAsk 分发 Ask 消息：前置钩子（可选）→ 静态 type switch，未命中回落本地路由。
 func (d *battleActorDispatch) OnAsk(ctx core.ActorContext, req any) (any, error) {
+	if err := d.BeforeAsk(ctx, req); err != nil {
+		return nil, err
+	}
 	switch r := req.(type) {
 	case *CreateBattleRequest:
 		return d.impl.Create(ctx, r)
@@ -104,8 +107,11 @@ func (d *battleActorDispatch) OnAsk(ctx core.ActorContext, req any) (any, error)
 	}
 }
 
-// OnTell 分发 Tell 消息：静态 type switch 命中即调用业务方法，未命中回落本地路由。
+// OnTell 分发 Tell 消息：前置钩子（可选）→ 静态 type switch，未命中回落本地路由。
 func (d *battleActorDispatch) OnTell(ctx core.ActorContext, msg any) error {
+	if err := d.BeforeTell(ctx, msg); err != nil {
+		return err
+	}
 	return d.FallbackTell(ctx, msg)
 }
 

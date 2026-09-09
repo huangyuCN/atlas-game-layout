@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	atlaslog "github.com/huangyuCN/atlas/log"
+
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
@@ -75,6 +77,26 @@ func (p *PlayerActor) OnStop(ctx core.ActorContext, reason types.ExitReason) err
 		}
 		p.player = nil
 	}
+	return nil
+}
+
+// ---- 消息前置钩子（示例，可整体删除）----
+//
+// OnBeforeTell/OnBeforeAsk 实现 core.BeforeTellHook/BeforeAskHook 可选接口：
+// proto 消息与本地消息在分发到具体业务方法之前都会经过这里，适合打印、埋点、
+// 鉴权、限流等前置操作。返回 nil 继续正常分发；返回非 nil error 中断本次处理
+// （该错误即本次投递/Ask 的结果，业务错误经集群 error 通道回传调用方）。
+// 不实现这两个方法时生成桩自动跳过，零成本。
+
+// OnBeforeTell Tell 消息分发前置钩子（示例）：打印消息类型。
+func (p *PlayerActor) OnBeforeTell(ctx core.ActorContext, msg any) error {
+	atlaslog.Debugf("player actor tell 前置: uid=%s msg=%T", ctx.Self().UID(), msg)
+	return nil
+}
+
+// OnBeforeAsk Ask 请求分发前置钩子（示例）：打印请求类型。
+func (p *PlayerActor) OnBeforeAsk(ctx core.ActorContext, req any) error {
+	atlaslog.Debugf("player actor ask 前置: uid=%s req=%T", ctx.Self().UID(), req)
 	return nil
 }
 

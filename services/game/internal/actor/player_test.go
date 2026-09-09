@@ -293,3 +293,31 @@ func TestDispatchRejectsUnknownMessage(t *testing.T) {
 		t.Fatalf("未知消息应返回 ErrUnknownMessage, got %v", err)
 	}
 }
+
+// vetoServer 是验证生成桩前置钩子契约的最小业务实现：
+// OnBeforeAsk 按 veto 标志决定放行或拦截。
+type vetoServer struct {
+	gamev1.UnimplementedPlayerActorServer
+	veto error
+}
+
+func (s *vetoServer) OnBeforeAsk(_ core.ActorContext, _ any) error { return s.veto }
+
+// TestDispatchBeforeAskHook 验证生成桩的消息前置钩子契约：
+// 业务实现 OnBeforeAsk 返回错误 → 中断本次 Ask（错误即结果）；
+// 返回 nil → 继续正常分发到业务方法。
+func TestDispatchBeforeAskHook(t *testing.T) {
+	s := &vetoServer{}
+	h := gamev1.NewPlayerActorServer(s)
+
+	boom := errors.New("钩子拦截")
+	s.veto = boom
+	if _, err := h.OnAsk(nil, &gamev1.GetPlayerActorReq{}); !errors.Is(err, boom) {
+		t.Fatalf("前置钩子拦截应中断 Ask, got %v", err)
+	}
+
+	s.veto = nil
+	if _, err := h.OnAsk(nil, &gamev1.GetPlayerActorReq{}); atlaserrors.Reason(err) != "PLAYER_NOT_ONLINE" {
+		t.Fatalf("钩子放行后应分发到业务方法（未登录拒查）, got %v", err)
+	}
+}
