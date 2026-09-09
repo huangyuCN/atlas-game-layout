@@ -7,7 +7,6 @@ package actor
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
@@ -20,7 +19,6 @@ import (
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/protobuf/proto"
 )
 
 // Options 是 actor 集群装配选项。
@@ -123,45 +121,16 @@ func (r *Runtime) Stop(ctx context.Context, pid types.PID) error {
 }
 
 // Tell 向任意 actor 发送消息（目录路由自动寻址，支持跨节点与懒激活）。
+// 满足 core.ActorInvoker（protoc-gen-atlas-actor 生成 client stub 的发送端依赖）。
 func (r *Runtime) Tell(ctx context.Context, pid types.PID, msg any) error {
 	return r.inner.Local().Tell(ctx, pid, msg)
 }
 
 // Ask 向任意 actor 请求响应（目录路由自动寻址）。
-func (r *Runtime) Ask(ctx context.Context, pid types.PID, req any) (any, error) {
-	return r.inner.Local().Ask(ctx, pid, req)
-}
-
-// AskProto 以 proto 消息请求并解析 proto 响应：
-// 跨节点响应为序列化字节（集群约定），同节点为对象直传，两者均兼容。
-func (r *Runtime) AskProto(ctx context.Context, pid types.PID, req, out proto.Message) error {
-	reply, err := r.Ask(ctx, pid, req)
-	if err != nil {
-		return err
-	}
-	switch v := reply.(type) {
-	case []byte:
-		if err := proto.Unmarshal(v, out); err != nil {
-			return fmt.Errorf("actor: 响应解码失败: %w", err)
-		}
-		return nil
-	case proto.Message:
-		// 同节点对象直传：类型一致时反射赋值。
-		src := reflect.ValueOf(v)
-		dst := reflect.ValueOf(out)
-		if src.Type() != dst.Type() {
-			return fmt.Errorf("actor: 响应类型 %T 与期望 %T 不符", v, out)
-		}
-		dst.Elem().Set(src.Elem())
-		return nil
-	default:
-		return fmt.Errorf("actor: 不支持的响应类型 %T", reply)
-	}
-}
-
-// TellProto 以 proto 消息投递（跨节点自动序列化 + 类型标识）。
-func (r *Runtime) TellProto(ctx context.Context, pid types.PID, msg proto.Message) error {
-	return r.Tell(ctx, pid, msg)
+// 满足 core.ActorInvoker（protoc-gen-atlas-actor 生成 client stub 的发送端依赖）。
+// 业务错误直接以 error 返回：跨节点经集群 error 通道往返（code/reason 保留）。
+func (r *Runtime) Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error) {
+	return r.inner.Local().Ask(ctx, pid, req, opts...)
 }
 
 // ParsePID 解析 PID 字符串（如 "player:p-xxx"）。

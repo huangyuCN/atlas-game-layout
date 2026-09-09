@@ -17,7 +17,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
-	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/transport"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	"github.com/nats-io/nats.go"
@@ -35,6 +34,8 @@ type Gateway struct {
 	instanceID string
 	sess       *session.Manager
 	actors     *actorclient.Client
+	players    *gamev1.PlayerActorClient  // 生成的玩家 actor client stub
+	battles    *battlev1.BattleActorClient // 生成的战斗 actor client stub
 	nc         *nats.Conn
 	pushers    map[transport.Kind]pushServer
 	udpSrv     *udpt.Server // UDP 按 peer 寻址（无 connID 语义）
@@ -53,6 +54,8 @@ func NewGateway(
 		instanceID: instanceID,
 		sess:       sess,
 		actors:     actors,
+		players:    gamev1.NewPlayerActorClient(actors.PlayerInvoker()),
+		battles:    battlev1.NewBattleActorClient(actors.BattleInvoker()),
 		nc:         nc,
 		pushers: map[transport.Kind]pushServer{
 			transport.KindTCP:       tcpSrv,
@@ -112,20 +115,18 @@ func (g *Gateway) Register(ctx context.Context, req *gatewayv1.RegisterRequest) 
 		return nil, errorv1.ErrInvalidParams("账号与口令不能为空")
 	}
 	playerID := req.GetAccount()
-	reply := new(gamev1.RegisterActorReply)
-	err := g.actors.AskPlayerProto(ctx, playerID, &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_Register{Register: &gamev1.RegisterActorReq{
-			Account:         req.GetAccount(),
-			Password:        req.GetPassword(),
-			Nickname:        req.GetNickname(),
-			GatewayInstance: g.instanceID,
-		}},
-	}, reply)
+	pid, err := actorclient.PlayerPID(playerID)
 	if err != nil {
-		return nil, errorv1.ErrInternal("注册请求失败")
+		return nil, err
 	}
-	if !reply.GetOk() {
-		return nil, actorReplyError(reply.GetErrorReason())
+	reply, err := g.players.Register(ctx, pid, &gamev1.RegisterActorReq{
+		Account:         req.GetAccount(),
+		Password:        req.GetPassword(),
+		Nickname:        req.GetNickname(),
+		GatewayInstance: g.instanceID,
+	})
+	if err != nil {
+		return nil, err // 业务错误透传：code/reason 经集群 error 通道往返保留
 	}
 	return &gatewayv1.RegisterReply{PlayerId: reply.GetPlayerId()}, nil
 }
@@ -146,20 +147,18 @@ func (g *Gateway) Login(ctx context.Context, req *gatewayv1.LoginRequest) (*gate
 		return nil, errorv1.ErrInternal("签发会话令牌失败")
 	}
 	// 先经 actor 裁决（玩家数据校验 + 会话令牌覆盖），成功后再绑定网关会话。
-	reply := new(gamev1.LoginActorReply)
-	err = g.actors.AskPlayerProto(ctx, playerID, &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_Login{Login: &gamev1.LoginActorReq{
-			PlayerId:        playerID,
-			Password:        req.GetPassword(),
-			Token:           token,
-			GatewayInstance: g.instanceID,
-		}},
-	}, reply)
+	pid, err := actorclient.PlayerPID(playerID)
 	if err != nil {
-		return nil, errorv1.ErrInternal("登录请求失败")
+		return nil, err
 	}
-	if !reply.GetOk() {
-		return nil, actorReplyError(reply.GetErrorReason())
+	reply, err := g.players.Login(ctx, pid, &gamev1.LoginActorReq{
+		PlayerId:        playerID,
+		Password:        req.GetPassword(),
+		Token:           token,
+		GatewayInstance: g.instanceID,
+	})
+	if err != nil {
+		return nil, err // 业务错误透传（PLAYER_NOT_FOUND / PASSWORD_WRONG 等语义不变）
 	}
 	// 绑定前快照旧会话（本实例挤下线推送用），随后原子覆盖路由。
 	oldSess, _ := g.sess.LocalSession(playerID)
@@ -189,9 +188,9 @@ func (g *Gateway) Logout(ctx context.Context, req *gatewayv1.LogoutRequest) (*ga
 		g.sess.Unbind(ctx, req.GetPlayerId(), conn.ID)
 	}
 	// 联动 game PlayerActor：令牌匹配才清理会话并停止（异步投递）。
-	_ = g.actors.TellPlayerProto(ctx, req.GetPlayerId(), &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_Logout{Logout: &gamev1.LogoutActorMsg{Token: req.GetToken(), Reason: "logout"}},
-	})
+	if pid, perr := actorclient.PlayerPID(req.GetPlayerId()); perr == nil {
+		_ = g.players.Logout(ctx, pid, &gamev1.LogoutActorMsg{Token: req.GetToken(), Reason: "logout"})
+	}
 	return &gatewayv1.LogoutReply{}, nil
 }
 
@@ -221,15 +220,13 @@ func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleReque
 		return nil, errorv1.ErrInvalidToken("请求缺少连接上下文")
 	}
 	// battle actor 裁决参战资格（懒激活）并回执会话元信息/当前帧/快照。
-	reply := new(battlev1.JoinBattleReply)
-	err = g.actors.AskBattleProto(ctx, req.GetBattleId(), &battlev1.BattleActorMsg{
-		Kind: &battlev1.BattleActorMsg_Join{Join: &battlev1.JoinBattleReq{PlayerId: req.GetPlayerId()}},
-	}, reply)
+	pid, err := actorclient.BattlePID(req.GetBattleId())
 	if err != nil {
-		return nil, errorv1.ErrInternal("加入战斗请求失败")
+		return nil, err
 	}
-	if !reply.GetOk() {
-		return nil, actorBattleError(reply.GetErrorReason())
+	reply, err := g.battles.Join(ctx, pid, &battlev1.JoinBattleReq{PlayerId: req.GetPlayerId()})
+	if err != nil {
+		return nil, err // BATTLE_NOT_FOUND 等业务错误透传（产生点即语义，与现状对外一致）
 	}
 	if _, err := g.sess.Bind(ctx, req.GetPlayerId(), conn, session.ChannelBattle, req.GetToken()); err != nil {
 		return nil, errorv1.ErrInternal("战斗通道绑定失败")
@@ -254,15 +251,12 @@ func (g *Gateway) SendFrameInput(ctx context.Context, req *gatewayv1.SendFrameIn
 		return nil, errorv1.ErrInvalidParams("战斗 ID 与输入不能为空")
 	}
 	in.PlayerId = playerID
-	reply := new(battlev1.FrameInputReply)
-	err = g.actors.AskBattleProto(ctx, req.GetBattleId(), &battlev1.BattleActorMsg{
-		Kind: &battlev1.BattleActorMsg_FrameInput{FrameInput: &battlev1.FrameInputReq{
-			PlayerId: playerID,
-			Input:    in,
-		}},
-	}, reply)
+	pid, err := actorclient.BattlePID(req.GetBattleId())
 	if err != nil {
-		return nil, errorv1.ErrInternal("帧输入请求失败")
+		return nil, err
+	}
+	if _, err := g.battles.FrameInput(ctx, pid, &battlev1.FrameInputReq{PlayerId: playerID, Input: in}); err != nil {
+		return nil, err
 	}
 	return &gatewayv1.SendFrameInputReply{}, nil
 }
@@ -274,18 +268,16 @@ func (g *Gateway) SyncFrames(ctx context.Context, req *locksteppb.SyncFrameReque
 	if err != nil {
 		return nil, err
 	}
-	reply := new(battlev1.ReconnectReply)
-	err = g.actors.AskBattleProto(ctx, req.GetSessionId(), &battlev1.BattleActorMsg{
-		Kind: &battlev1.BattleActorMsg_Reconnect{Reconnect: &battlev1.ReconnectReq{
-			PlayerId:      playerID,
-			LastSeenFrame: req.GetFromFrameId(),
-		}},
-	}, reply)
+	pid, err := actorclient.BattlePID(req.GetSessionId())
 	if err != nil {
-		return nil, errorv1.ErrInternal("补帧请求失败")
+		return nil, err
 	}
-	if !reply.GetOk() {
-		return nil, errorv1.ErrInvalidToken("补帧被拒绝：不在参战名单")
+	reply, err := g.battles.Reconnect(ctx, pid, &battlev1.ReconnectReq{
+		PlayerId:      playerID,
+		LastSeenFrame: req.GetFromFrameId(),
+	})
+	if err != nil {
+		return nil, err // INVALID_TOKEN 等业务错误透传（battle 产生点即语义）
 	}
 	out := &locksteppb.SyncFrameReply{
 		Frames:           make([]*locksteppb.LockstepFrame, 0, len(reply.GetMissed())),
@@ -311,16 +303,6 @@ func (g *Gateway) playerFromConn(ctx context.Context) (string, error) {
 		return "", errorv1.ErrInvalidToken("战斗通道未绑定玩家身份")
 	}
 	return playerID, nil
-}
-
-// actorBattleError 把 battle 战斗 actor 回执的 error_reason 映射为结构化错误。
-func actorBattleError(reason string) *atlaserrors.Error {
-	switch reason {
-	case "PLAYER_NOT_IN_BATTLE":
-		return errorv1.ErrBattleNotFound("玩家不在该战斗参战名单")
-	default:
-		return errorv1.ErrInternal("加入战斗失败: %s", reason)
-	}
 }
 
 // kickOld 处理挤下线（D10+D13）：新登录覆盖旧路由后，
@@ -352,21 +334,5 @@ func (g *Gateway) pushKicked(sess *session.Session) {
 		if c != nil {
 			_ = c.Send(consts.PushOpKickedOffline, payload)
 		}
-	}
-}
-
-// actorReplyError 把 game PlayerActor 回执的 error_reason 映射为结构化错误。
-func actorReplyError(reason string) *atlaserrors.Error {
-	switch reason {
-	case errorv1.ReasonPlayerNotFound():
-		return errorv1.ErrPlayerNotFound("玩家不存在，请先注册")
-	case errorv1.ReasonPlayerAlreadyExists():
-		return errorv1.ErrPlayerAlreadyExists("账号已存在")
-	case errorv1.ReasonPasswordWrong():
-		return errorv1.ErrPasswordWrong("口令错误")
-	case errorv1.ReasonInvalidParams():
-		return errorv1.ErrInvalidParams("参数非法")
-	default:
-		return errorv1.ErrInternal("业务处理失败: %s", reason)
 	}
 }

@@ -1,0 +1,20 @@
+// PlayerActor 的 actor 消息契约（唯一事实源，独立文件规避 go-grpc 同名接口冲突）：
+// returns 具体消息即 Ask，returns google.protobuf.Empty 即 Tell（单向）。
+// 业务错误由业务方法直接上抛，经集群 error 通道往返（code/reason 保留）。
+syntax = "proto3";
+
+package game.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
+
+import "api/game/v1/player.proto";
+import "google/protobuf/empty.proto";
+
+service PlayerActor {
+  rpc Register (RegisterActorReq) returns (RegisterActorReply);
+  rpc Login (LoginActorReq) returns (LoginActorReply);
+  rpc Logout (LogoutActorMsg) returns (google.protobuf.Empty);
+  rpc GrantItem (GrantItemActorReq) returns (GrantItemActorReply);
+  rpc GetBackpack (GetBackpackActorReq) returns (GetBackpackActorReply);
+  rpc GetPlayer (GetPlayerActorReq) returns (GetPlayerActorReply);
+}

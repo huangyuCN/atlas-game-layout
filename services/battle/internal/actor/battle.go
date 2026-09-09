@@ -11,6 +11,7 @@ import (
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
@@ -23,7 +24,6 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	lockstepimpl "github.com/huangyuCN/atlas/contrib/lockstep"
 	"github.com/huangyuCN/atlas/lockstep"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -60,7 +60,7 @@ type Runtime interface {
 	Spawn(ctx context.Context, pid types.PID) (core.Ref, error)
 	Stop(ctx context.Context, pid types.PID) error
 	Tell(ctx context.Context, pid types.PID, msg any) error
-	Ask(ctx context.Context, pid types.PID, req any) (any, error)
+	Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error)
 }
 
 // Props 是 BattleActor 的注册规格（SpawnAuto 懒激活，matcher 开局拉起）。
@@ -102,7 +102,7 @@ func NewProps(p Props) core.Props {
 	return core.Props{
 		Type: consts.ActorTypeBattle,
 		NewHandler: func(pid types.PID) core.Handler {
-			return &BattleActor{
+			b := &BattleActor{
 				pid:        pid,
 				rt:         p.Rt,
 				registry:   p.Registry,
@@ -113,10 +113,12 @@ func NewProps(p Props) core.Props {
 				cfg:        p.Cfg,
 				players:    make(map[string]struct{}),
 			}
+			return battlev1.NewBattleActorServer(b, core.WithLocalTell(b.onFrameResult))
 		},
-		SpawnMode: core.SpawnAuto,
-		Tell:      pkgactor.DefaultTellChain(),
-		Ask:       pkgactor.DefaultAskChain(),
+		SpawnMode:     core.SpawnAuto,
+		Tell:          pkgactor.DefaultTellChain(),
+		Ask:           pkgactor.DefaultAskChain(),
+		DecodeInbound: battlev1.NewBattleActorDecodeInbound(),
 	}
 }
 
@@ -182,12 +184,8 @@ func (b *BattleActor) OnStop(ctx core.ActorContext, _ types.ExitReason) error {
 	return nil
 }
 
-// OnTell 实现 core.Handler：帧广播到达 → 下发客户端 + 胜负检查与结算。
-func (b *BattleActor) OnTell(ctx core.ActorContext, msg any) error {
-	result, ok := msg.(lockstep.FrameResult)
-	if !ok {
-		return nil
-	}
+// onFrameResult 帧广播到达（本地类型路由注册项）：下发客户端 + 胜负检查与结算。
+func (b *BattleActor) onFrameResult(ctx core.ActorContext, result lockstep.FrameResult) error {
 	// 帧广播下发全部参战玩家（v1 链路：nats → gateway → 客户端）。
 	frame := &locksteppb.LockstepFrame{
 		FrameId:    uint64(result.Frame),
@@ -246,30 +244,8 @@ func (b *BattleActor) checkSettle(ctx core.ActorContext, result lockstep.FrameRe
 	ctx.Stop(types.ExitNormal())
 }
 
-// OnAsk 实现 core.Handler：信封分发（开局/加入/帧输入/补帧/状态）。
-func (b *BattleActor) OnAsk(ctx core.ActorContext, req any) (any, error) {
-	env, err := decodeEnvelope(req)
-	if err != nil {
-		return nil, err
-	}
-	switch k := env.GetKind().(type) {
-	case *battlev1.BattleActorMsg_Create:
-		return b.onCreate(ctx, k.Create)
-	case *battlev1.BattleActorMsg_Join:
-		return b.onJoin(ctx, k.Join)
-	case *battlev1.BattleActorMsg_FrameInput:
-		return b.onFrameInput(ctx, k.FrameInput)
-	case *battlev1.BattleActorMsg_Reconnect:
-		return b.onReconnect(ctx, k.Reconnect)
-	case *battlev1.BattleActorMsg_GetState:
-		return b.onGetState(ctx)
-	default:
-		return nil, fmt.Errorf("actor: 未知战斗消息")
-	}
-}
-
-// onCreate 开局：登记参战玩家（matcher 成局后调用）。
-func (b *BattleActor) onCreate(ctx core.ActorContext, req *battlev1.CreateBattleRequest) (any, error) {
+// Create 实现 battlev1.BattleActorServer：开局登记参战玩家（matcher 成局后调用）。
+func (b *BattleActor) Create(ctx core.ActorContext, req *battlev1.CreateBattleRequest) (*battlev1.CreateBattleReply, error) {
 	b.matchID = req.GetMatchId()
 	for _, p := range req.GetPlayerIds() {
 		b.players[p] = struct{}{}
@@ -277,11 +253,12 @@ func (b *BattleActor) onCreate(ctx core.ActorContext, req *battlev1.CreateBattle
 	return &battlev1.CreateBattleReply{BattleId: b.battleID}, nil
 }
 
-// onJoin 玩家加入：登记 + lockstep JoinSession + 快照回执（断线重连恢复）。
-func (b *BattleActor) onJoin(ctx core.ActorContext, req *battlev1.JoinBattleReq) (any, error) {
+// Join 实现 battlev1.BattleActorServer：玩家加入 + lockstep JoinSession + 快照回执。
+func (b *BattleActor) Join(ctx core.ActorContext, req *battlev1.JoinBattleReq) (*battlev1.JoinBattleReply, error) {
 	playerID := req.GetPlayerId()
 	if _, ok := b.players[playerID]; !ok {
-		return &battlev1.JoinBattleReply{Ok: false, ErrorReason: "PLAYER_NOT_IN_BATTLE"}, nil
+		// 错误语义上移到产生点：gateway 直接透传，对外 reason/code 与现状一致。
+		return nil, errorv1.ErrBattleNotFound("玩家不在该战斗参战名单")
 	}
 	// lockstep 成员加入（幂等）。
 	if err := b.rt.Tell(ctx.Context(), b.sessionPID, lockstep.JoinSession{Player: lockstep.PlayerID(playerID)}); err != nil {
@@ -292,15 +269,15 @@ func (b *BattleActor) onJoin(ctx core.ActorContext, req *battlev1.JoinBattleReq)
 		return nil, err
 	}
 	return &battlev1.JoinBattleReply{
-		Ok:           true,
 		Meta:         sessionMeta(b.battleID, b.cfg.TickInterval),
 		CurrentFrame: reconnect.GetCurrentFrame(),
 		Snapshot:     reconnect.GetSnapshot(),
 	}, nil
 }
 
-// onFrameInput 帧输入：转发 lockstep 会话。
-func (b *BattleActor) onFrameInput(ctx core.ActorContext, req *battlev1.FrameInputReq) (any, error) {
+// FrameInput 实现 battlev1.BattleActorServer：帧输入转发 lockstep 会话
+// （非参战玩家输入静默丢弃，与现状一致）。
+func (b *BattleActor) FrameInput(ctx core.ActorContext, req *battlev1.FrameInputReq) (*battlev1.FrameInputReply, error) {
 	if _, ok := b.players[req.GetPlayerId()]; !ok {
 		return &battlev1.FrameInputReply{}, nil
 	}
@@ -316,25 +293,24 @@ func (b *BattleActor) onFrameInput(ctx core.ActorContext, req *battlev1.FrameInp
 	return &battlev1.FrameInputReply{}, nil
 }
 
-// onReconnect 断线重连：按参战名单复核玩家后回执补帧。
-func (b *BattleActor) onReconnect(ctx core.ActorContext, req *battlev1.ReconnectReq) (any, error) {
+// Reconnect 实现 battlev1.BattleActorServer：按参战名单复核玩家后回执补帧。
+func (b *BattleActor) Reconnect(ctx core.ActorContext, req *battlev1.ReconnectReq) (*battlev1.ReconnectReply, error) {
 	if _, ok := b.players[req.GetPlayerId()]; !ok {
-		return &battlev1.ReconnectReply{Ok: false}, nil
+		return nil, errorv1.ErrInvalidToken("补帧被拒绝：不在参战名单")
 	}
 	reconnect, err := b.askReconnect(ctx, req.GetLastSeenFrame())
 	if err != nil {
 		return nil, err
 	}
 	return &battlev1.ReconnectReply{
-		Ok:           true,
 		CurrentFrame: reconnect.GetCurrentFrame(),
 		Snapshot:     reconnect.GetSnapshot(),
 		Missed:       reconnect.GetMissed(),
 	}, nil
 }
 
-// onGetState 状态查询（grpc 管理接口转发）。
-func (b *BattleActor) onGetState(ctx core.ActorContext) (any, error) {
+// GetState 实现 battlev1.BattleActorServer：状态查询（grpc 管理接口转发）。
+func (b *BattleActor) GetState(ctx core.ActorContext, _ *battlev1.GetStateReq) (*battlev1.GetStateReply, error) {
 	// 同节点会话：lockstep 消息为对象直传（非跨节点 proto 信封）。
 	reply, err := b.rt.Ask(ctx.Context(), b.sessionPID, lockstep.QueryStats{})
 	if err != nil {
@@ -345,7 +321,6 @@ func (b *BattleActor) onGetState(ctx core.ActorContext) (any, error) {
 		return nil, fmt.Errorf("actor: 状态回执类型 %T 不符", reply)
 	}
 	return &battlev1.GetStateReply{
-		Ok:           true,
 		State:        stateName(b.settled),
 		CurrentFrame: uint64(stats.CurrentFrame),
 		PlayerCount:  uint32(stats.PlayerCount),
@@ -364,7 +339,7 @@ func (b *BattleActor) askReconnect(ctx core.ActorContext, lastSeen uint64) (*bat
 	if !ok {
 		return nil, fmt.Errorf("actor: 补帧回执类型 %T 不符", raw)
 	}
-	out := &battlev1.ReconnectReply{Ok: true, CurrentFrame: uint64(reply.CurrentFrame)}
+	out := &battlev1.ReconnectReply{CurrentFrame: uint64(reply.CurrentFrame)}
 	if reply.Snapshot != nil {
 		out.Snapshot = &locksteppb.SnapshotMeta{
 			FrameId:    uint64(reply.Snapshot.Frame),
@@ -391,21 +366,6 @@ func stateName(settled bool) string {
 	return "running"
 }
 
-// decodeEnvelope 还原消息信封（跨节点字节 / 同节点对象）。
-func decodeEnvelope(req any) (*battlev1.BattleActorMsg, error) {
-	switch v := req.(type) {
-	case *battlev1.BattleActorMsg:
-		return v, nil
-	case []byte:
-		env := new(battlev1.BattleActorMsg)
-		if err := proto.Unmarshal(v, env); err != nil {
-			return nil, fmt.Errorf("actor: 战斗消息解码失败: %w", err)
-		}
-		return env, nil
-	default:
-		return nil, fmt.Errorf("actor: 不支持的战斗消息类型 %T", req)
-	}
-}
 
 // frameTopic 是 lockstep 帧广播主题。
 func frameTopic(battleID string) string { return "frame." + battleID }

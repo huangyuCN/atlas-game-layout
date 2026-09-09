@@ -6,16 +6,18 @@ import (
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
+	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
-	"google.golang.org/protobuf/proto"
 )
 
 // mockActorRuntime 模拟 game PlayerActor 与 battle 战斗 actor（gateway 单测装置）：
-// 注册/登录恒成功回执（player_id 取 PID uid）；加入战斗按 joinOK 裁决；帧输入/补帧记录投递。
+// 消息为具体对象直传（生成的桩 switch 直接命中），回执直接返回对象（同节点形态）；
+// 注册/登录恒成功（player_id 取 PID uid）；加入战斗按 joinOK 裁决；帧输入/补帧记录投递。
 type mockActorRuntime struct {
-	tells       []*gamev1.PlayerActorMsg
+	logoutMsgs  []*gamev1.LogoutActorMsg            // 登出投递记录
 	joinOK      bool                                 // 加入战斗裁决（默认放行）
 	frameInputs map[string][]*battlev1.FrameInputReq // battleID → 帧输入序列
 	reconnects  map[string][]*battlev1.ReconnectReq  // battleID → 补帧请求序列
@@ -31,52 +33,29 @@ func newMockActorRuntime() *mockActorRuntime {
 
 // Tell 实现 actorclient.Runtime（记录登出投递）。
 func (m *mockActorRuntime) Tell(_ context.Context, _ types.PID, msg any) error {
-	if env, ok := msg.(*gamev1.PlayerActorMsg); ok {
-		m.tells = append(m.tells, env)
+	if lg, ok := msg.(*gamev1.LogoutActorMsg); ok {
+		m.logoutMsgs = append(m.logoutMsgs, lg)
 	}
 	return nil
 }
 
-// Ask 实现 actorclient.Runtime：按信封类型返回序列化回执（跨节点形态）。
-func (m *mockActorRuntime) Ask(_ context.Context, pid types.PID, req any) (any, error) {
-	switch env := req.(type) {
-	case *gamev1.PlayerActorMsg:
-		return m.askPlayer(pid, env)
-	case *battlev1.BattleActorMsg:
-		return m.askBattle(pid, env)
-	default:
-		return nil, fmt.Errorf("mock: 未知请求类型 %T", req)
-	}
-}
-
-// askPlayer 模拟 game PlayerActor 的注册/登录裁决。
-func (m *mockActorRuntime) askPlayer(pid types.PID, env *gamev1.PlayerActorMsg) (any, error) {
-	switch k := env.GetKind().(type) {
-	case *gamev1.PlayerActorMsg_Register:
-		return proto.Marshal(&gamev1.RegisterActorReply{
-			Ok:       true,
+// Ask 实现 actorclient.Runtime：按具体消息类型返回对象回执（同节点直传形态）。
+func (m *mockActorRuntime) Ask(_ context.Context, pid types.PID, req any, _ ...core.SendOption) (any, error) {
+	switch r := req.(type) {
+	case *gamev1.RegisterActorReq:
+		return &gamev1.RegisterActorReply{
 			PlayerId: pid.UID(),
-			Player:   &commonv1.PlayerSummary{PlayerId: pid.UID(), Nickname: k.Register.GetAccount()},
-		})
-	case *gamev1.PlayerActorMsg_Login:
-		return proto.Marshal(&gamev1.LoginActorReply{
-			Ok:     true,
-			Player: &commonv1.PlayerSummary{PlayerId: pid.UID(), Nickname: k.Login.GetPlayerId()},
-		})
-	default:
-		return proto.Marshal(&gamev1.LoginActorReply{Ok: false, ErrorReason: "UNKNOWN"})
-	}
-}
-
-// askBattle 模拟 battle 战斗 actor：加入按 joinOK 裁决、帧输入/补帧记录。
-func (m *mockActorRuntime) askBattle(pid types.PID, env *battlev1.BattleActorMsg) (any, error) {
-	switch k := env.GetKind().(type) {
-	case *battlev1.BattleActorMsg_Join:
+			Player:   &commonv1.PlayerSummary{PlayerId: pid.UID(), Nickname: r.GetAccount()},
+		}, nil
+	case *gamev1.LoginActorReq:
+		return &gamev1.LoginActorReply{
+			Player: &commonv1.PlayerSummary{PlayerId: pid.UID(), Nickname: r.GetPlayerId()},
+		}, nil
+	case *battlev1.JoinBattleReq:
 		if !m.joinOK {
-			return proto.Marshal(&battlev1.JoinBattleReply{Ok: false, ErrorReason: "PLAYER_NOT_IN_BATTLE"})
+			return nil, errorv1.ErrBattleNotFound("玩家不在该战斗参战名单")
 		}
-		return proto.Marshal(&battlev1.JoinBattleReply{
-			Ok: true,
+		return &battlev1.JoinBattleReply{
 			Meta: &locksteppb.SessionMeta{
 				SessionId:        pid.UID(),
 				MaxPlayers:       2,
@@ -90,24 +69,23 @@ func (m *mockActorRuntime) askBattle(pid types.PID, env *battlev1.BattleActorMsg
 				StateHash: []byte("hash"),
 				SizeBytes: 8,
 			},
-		})
-	case *battlev1.BattleActorMsg_FrameInput:
-		m.frameInputs[pid.UID()] = append(m.frameInputs[pid.UID()], k.FrameInput)
-		return proto.Marshal(&battlev1.FrameInputReply{})
-	case *battlev1.BattleActorMsg_Reconnect:
-		m.reconnects[pid.UID()] = append(m.reconnects[pid.UID()], k.Reconnect)
-		return proto.Marshal(&battlev1.ReconnectReply{
-			Ok:           true,
+		}, nil
+	case *battlev1.FrameInputReq:
+		m.frameInputs[pid.UID()] = append(m.frameInputs[pid.UID()], r)
+		return &battlev1.FrameInputReply{}, nil
+	case *battlev1.ReconnectReq:
+		m.reconnects[pid.UID()] = append(m.reconnects[pid.UID()], r)
+		return &battlev1.ReconnectReply{
 			CurrentFrame: 5,
 			Missed: []*locksteppb.FrameInputs{
 				{FrameId: 4, Inputs: []*locksteppb.LockstepInput{
 					{FrameId: 4, PlayerId: "p-1", Payload: []byte("x")},
 				}},
 			},
-		})
-	case *battlev1.BattleActorMsg_Create:
-		return proto.Marshal(&battlev1.CreateBattleReply{BattleId: pid.UID()})
+		}, nil
+	case *battlev1.CreateBattleRequest:
+		return &battlev1.CreateBattleReply{BattleId: pid.UID()}, nil
 	default:
-		return proto.Marshal(&battlev1.JoinBattleReply{Ok: false, ErrorReason: "UNKNOWN"})
+		return nil, fmt.Errorf("mock: 未知请求类型 %T", req)
 	}
 }

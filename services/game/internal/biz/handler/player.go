@@ -56,7 +56,6 @@ func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterActorR
 		return nil, errorv1.ErrInternal("创建玩家失败")
 	}
 	return &gamev1.RegisterActorReply{
-		Ok:       true,
 		PlayerId: player.PlayerID,
 		Player:   usecase.PlayerSummary(player),
 	}, nil
@@ -82,7 +81,6 @@ func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginActorReq) (*
 		return nil, errorv1.ErrInternal("写入会话失败")
 	}
 	return &gamev1.LoginActorReply{
-		Ok:     true,
 		Player: usecase.PlayerSummary(player),
 	}, nil
 }

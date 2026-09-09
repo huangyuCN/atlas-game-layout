@@ -1,0 +1,17 @@
+// BattleActor 的 actor 消息契约（唯一事实源，独立文件规避 go-grpc 同名接口冲突）：
+// returns 具体消息即 Ask，returns google.protobuf.Empty 即 Tell（单向）。
+syntax = "proto3";
+
+package battle.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1";
+
+import "api/battle/v1/battle.proto";
+
+service BattleActor {
+  rpc Create (CreateBattleRequest) returns (CreateBattleReply);
+  rpc Join (JoinBattleReq) returns (JoinBattleReply);
+  rpc FrameInput (FrameInputReq) returns (FrameInputReply);
+  rpc Reconnect (ReconnectReq) returns (ReconnectReply);
+  rpc GetState (GetStateReq) returns (GetStateReply);
+}

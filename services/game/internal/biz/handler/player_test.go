@@ -113,7 +113,7 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if !reply.GetOk() || reply.GetPlayerId() != "p-test" {
+	if reply.GetPlayerId() != "p-test" {
 		t.Fatalf("注册回执不符: %+v", reply)
 	}
 	if _, err := h.Register(ctx, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); reasonOf(t, err) != errorv1.ReasonPlayerAlreadyExists() {
@@ -142,7 +142,7 @@ func TestLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if !reply.GetOk() || reply.GetPlayer().GetPlayerId() != "p-test" || reply.GetPlayer().GetNickname() != "爱丽丝" {
+	if reply.GetPlayer().GetPlayerId() != "p-test" || reply.GetPlayer().GetNickname() != "爱丽丝" {
 		t.Fatalf("登录回执不符: %+v", reply)
 	}
 	if got, _ := sessions.Get(ctx, "p-test"); got != "t1" {

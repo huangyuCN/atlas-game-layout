@@ -49,11 +49,9 @@ message JoinBattleReq {
 
 // JoinBattleReply 加入回执：会话元信息、当前帧与快照（断线重连恢复）。
 message JoinBattleReply {
-  bool ok = 1;
-  string error_reason = 2;
-  atlas.game.lockstep.SessionMeta meta = 3;
-  uint64 current_frame = 4;
-  atlas.game.lockstep.SnapshotMeta snapshot = 5;
+  atlas.game.lockstep.SessionMeta meta = 1;
+  uint64 current_frame = 2;
+  atlas.game.lockstep.SnapshotMeta snapshot = 3;
 }
 
 // FrameInputReq 帧输入（gateway 转发 battle actor 的 lockstep 输入通道）。
@@ -72,32 +70,18 @@ message ReconnectReq {
 
 // ReconnectReply 补帧回执：当前帧、快照与缺失帧输入。
 message ReconnectReply {
-  bool ok = 1;
-  uint64 current_frame = 2;
-  atlas.game.lockstep.SnapshotMeta snapshot = 3;
-  repeated atlas.game.lockstep.FrameInputs missed = 4;
+  uint64 current_frame = 1;
+  atlas.game.lockstep.SnapshotMeta snapshot = 2;
+  repeated atlas.game.lockstep.FrameInputs missed = 3;
 }
 
 // GetStateReq/Reply 战斗状态查询（grpc 管理接口转发）。
 message GetStateReq {}
 
 message GetStateReply {
-  bool ok = 1;
-  string state = 2;
-  uint64 current_frame = 3;
-  uint32 player_count = 4;
-}
-
-// BattleActorMsg 是战斗 actor 的消息信封：跨节点传输的 payload 为
-// 序列化字节（集群约定），oneof 区分具体消息类型。
-message BattleActorMsg {
-  oneof kind {
-    CreateBattleRequest create = 1;
-    JoinBattleReq join = 2;
-    FrameInputReq frame_input = 3;
-    ReconnectReq reconnect = 4;
-    GetStateReq get_state = 5;
-  }
+  string state = 1;
+  uint64 current_frame = 2;
+  uint32 player_count = 3;
 }
 
 // Battle 是战斗管理服务。

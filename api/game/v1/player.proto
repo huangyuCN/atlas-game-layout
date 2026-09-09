@@ -19,10 +19,8 @@ message RegisterActorReq {
 }
 
 message RegisterActorReply {
-  bool ok = 1;
-  string error_reason = 2;
-  string player_id = 3;
-  common.v1.PlayerSummary player = 4;
+  string player_id = 1;
+  common.v1.PlayerSummary player = 2;
 }
 
 // LoginActorReq 是 PlayerActor 的登录消息（actor Ask 载荷）。
@@ -36,9 +34,7 @@ message LoginActorReq {
 }
 
 message LoginActorReply {
-  bool ok = 1;
-  string error_reason = 2;
-  common.v1.PlayerSummary player = 3;
+  common.v1.PlayerSummary player = 1;
 }
 
 // LogoutActorMsg 是 PlayerActor 的登出/挤下线退出消息（Tell 载荷）：
@@ -55,38 +51,20 @@ message GrantItemActorReq {
   string reason = 3;
 }
 
-message GrantItemActorReply {
-  bool ok = 1;
-  string error_reason = 2;
-}
+message GrantItemActorReply {}
 
 // GetBackpackActorReq/Reply 背包查询（聚合根内存快照，grpc 转发）。
 message GetBackpackActorReq {}
 
 message GetBackpackActorReply {
-  bool ok = 1;
-  repeated BackpackItem items = 2;
+  repeated BackpackItem items = 1;
 }
 
 // GetPlayerActorReq/Reply 玩家摘要查询（聚合根内存快照，grpc 转发）。
 message GetPlayerActorReq {}
 
 message GetPlayerActorReply {
-  bool ok = 1;
-  common.v1.PlayerSummary player = 2;
-}
-
-// PlayerActorMsg 是 PlayerActor 的消息信封：跨节点传输的 payload 为
-// 序列化字节（集群约定），oneof 区分具体消息类型。
-message PlayerActorMsg {
-  oneof kind {
-    RegisterActorReq register = 1;
-    LoginActorReq login = 2;
-    LogoutActorMsg logout = 3;
-    GrantItemActorReq grant_item = 4;
-    GetBackpackActorReq get_backpack = 5;
-    GetPlayerActorReq get_player = 6;
-  }
+  common.v1.PlayerSummary player = 1;
 }
 
 // GetPlayerRequest/Reply 玩家信息查询。

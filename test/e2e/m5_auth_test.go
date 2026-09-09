@@ -49,7 +49,10 @@ func TestE2ERegisterLogin(t *testing.T) {
 	if reg.GetPlayerId() == "" {
 		t.Fatal("注册回执缺少 player_id")
 	}
-	// 重复注册被拒。
+	// 重复注册被拒。存量语义：注册临时实例自停并释放目录归属后，同账号重复注册
+	// 在目录未命中窗口内返回 ACTOR_NOT_FOUND（发送侧无该类型 Props 不触发懒激活）；
+	// 该行为改造前后一致。若需重复注册返回 PLAYER_ALREADY_EXISTS，需独立实现
+	// 跨节点懒激活选型（见 2026-09-08-actor-proto-dispatch-codegen-design 已知事项）。
 	if _, err := auth.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"}); err == nil {
 		t.Fatal("重复注册应失败")
 	}

@@ -8,14 +8,14 @@ import (
 	"fmt"
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
-	"google.golang.org/protobuf/proto"
 )
 
 // Runtime 是 actorclient 依赖的最小运行时接口（pkg/actor.Runtime 满足，测试可注入实现）。
 type Runtime interface {
 	Tell(ctx context.Context, pid types.PID, msg any) error
-	Ask(ctx context.Context, pid types.PID, req any) (any, error)
+	Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error)
 }
 
 // Client 是 gateway 的远程 actor 客户端。
@@ -63,21 +63,6 @@ func (c *Client) AskPlayer(ctx context.Context, playerID string, req any) (any, 
 	return c.rt.Ask(ctx, pid, req)
 }
 
-// AskPlayerProto 以 proto 信封向玩家 actor 请求并解析 proto 响应。
-// 跨节点响应为序列化字节（集群约定），本地注入实现须同样返回字节。
-func (c *Client) AskPlayerProto(ctx context.Context, playerID string, req, out proto.Message) error {
-	reply, err := c.AskPlayer(ctx, playerID, req)
-	if err != nil {
-		return err
-	}
-	return decodeReply(reply, out)
-}
-
-// TellPlayerProto 以 proto 消息向玩家 actor 投递（登出等异步联动）。
-func (c *Client) TellPlayerProto(ctx context.Context, playerID string, msg proto.Message) error {
-	return c.TellPlayer(ctx, playerID, msg)
-}
-
 // Starter 是带生命周期能力的运行时（pkg/actor.Runtime 满足；测试桩可忽略）。
 type Starter interface {
 	Start(ctx context.Context) error
@@ -100,18 +85,6 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// decodeReply 解析跨节点响应：字节反序列化；对象类型不符报错。
-func decodeReply(reply any, out proto.Message) error {
-	b, ok := reply.([]byte)
-	if !ok {
-		return fmt.Errorf("actorclient: 响应类型 %T 非字节", reply)
-	}
-	if err := proto.Unmarshal(b, out); err != nil {
-		return fmt.Errorf("actorclient: 响应解码失败: %w", err)
-	}
-	return nil
-}
-
 // TellBattle 向战斗 actor 投递消息（帧输入等，不等待响应）。
 func (c *Client) TellBattle(ctx context.Context, battleID string, msg any) error {
 	pid, err := BattlePID(battleID)
@@ -130,12 +103,29 @@ func (c *Client) AskBattle(ctx context.Context, battleID string, req any) (any, 
 	return c.rt.Ask(ctx, pid, req)
 }
 
-// AskBattleProto 以 proto 信封向战斗 actor 请求并解析 proto 响应。
-// 跨节点响应为序列化字节（集群约定），本地注入实现须同样返回字节。
-func (c *Client) AskBattleProto(ctx context.Context, battleID string, req, out proto.Message) error {
-	reply, err := c.AskBattle(ctx, battleID, req)
-	if err != nil {
-		return err
-	}
-	return decodeReply(reply, out)
+// invoker 适配 Player/Battle 两个目标：把 actorclient 的「按业务 ID 构造 PID +
+// 调用 Runtime」封装为 core.ActorInvoker（protoc-gen-atlas-actor 生成的 client
+// stub 依赖；Ask 的 SendOption 变参在本层无消费方，直接忽略）。
+type invoker struct {
+	newPID func(id string) (types.PID, error)
+	ask    func(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error)
+	tell   func(ctx context.Context, pid types.PID, msg any) error
+}
+
+func (i invoker) Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error) {
+	return i.ask(ctx, pid, req, opts...)
+}
+
+func (i invoker) Tell(ctx context.Context, pid types.PID, msg any) error {
+	return i.tell(ctx, pid, msg)
+}
+
+// PlayerInvoker 返回玩家 actor 的 core.ActorInvoker 适配（生成 client stub 用）。
+func (c *Client) PlayerInvoker() core.ActorInvoker {
+	return invoker{newPID: PlayerPID, ask: c.rt.Ask, tell: c.rt.Tell}
+}
+
+// BattleInvoker 返回战斗 actor 的 core.ActorInvoker 适配（生成 client stub 用）。
+func (c *Client) BattleInvoker() core.ActorInvoker {
+	return invoker{newPID: BattlePID, ask: c.rt.Ask, tell: c.rt.Tell}
 }

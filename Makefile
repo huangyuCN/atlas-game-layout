@@ -87,6 +87,9 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 		--atlas-http_out=. --atlas-http_opt=paths=source_relative \
 		$(API_SERVICE_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
+		--atlas-actor_out=. --atlas-actor_opt=paths=source_relative \
+		api/game/v1/player_actor.proto api/battle/v1/battle_actor.proto
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
 		--atlas-udp_out=. --atlas-udp_opt=paths=source_relative \
 		--atlas-kcp_out=. --atlas-kcp_opt=paths=source_relative \

@@ -98,10 +98,8 @@ func (x *RegisterActorReq) GetGatewayInstance() string {
 
 type RegisterActorReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	ErrorReason   string                 `protobuf:"bytes,2,opt,name=error_reason,json=errorReason,proto3" json:"error_reason,omitempty"`
-	PlayerId      string                 `protobuf:"bytes,3,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
-	Player        *v1.PlayerSummary      `protobuf:"bytes,4,opt,name=player,proto3" json:"player,omitempty"`
+	PlayerId      string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Player        *v1.PlayerSummary      `protobuf:"bytes,2,opt,name=player,proto3" json:"player,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -134,20 +132,6 @@ func (x *RegisterActorReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RegisterActorReply.ProtoReflect.Descriptor instead.
 func (*RegisterActorReply) Descriptor() ([]byte, []int) {
 	return file_api_game_v1_player_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *RegisterActorReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
-func (x *RegisterActorReply) GetErrorReason() string {
-	if x != nil {
-		return x.ErrorReason
-	}
-	return ""
 }
 
 func (x *RegisterActorReply) GetPlayerId() string {
@@ -237,9 +221,7 @@ func (x *LoginActorReq) GetGatewayInstance() string {
 
 type LoginActorReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	ErrorReason   string                 `protobuf:"bytes,2,opt,name=error_reason,json=errorReason,proto3" json:"error_reason,omitempty"`
-	Player        *v1.PlayerSummary      `protobuf:"bytes,3,opt,name=player,proto3" json:"player,omitempty"`
+	Player        *v1.PlayerSummary      `protobuf:"bytes,1,opt,name=player,proto3" json:"player,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -272,20 +254,6 @@ func (x *LoginActorReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use LoginActorReply.ProtoReflect.Descriptor instead.
 func (*LoginActorReply) Descriptor() ([]byte, []int) {
 	return file_api_game_v1_player_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *LoginActorReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
-func (x *LoginActorReply) GetErrorReason() string {
-	if x != nil {
-		return x.ErrorReason
-	}
-	return ""
 }
 
 func (x *LoginActorReply) GetPlayer() *v1.PlayerSummary {
@@ -412,8 +380,6 @@ func (x *GrantItemActorReq) GetReason() string {
 
 type GrantItemActorReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	ErrorReason   string                 `protobuf:"bytes,2,opt,name=error_reason,json=errorReason,proto3" json:"error_reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -446,20 +412,6 @@ func (x *GrantItemActorReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GrantItemActorReply.ProtoReflect.Descriptor instead.
 func (*GrantItemActorReply) Descriptor() ([]byte, []int) {
 	return file_api_game_v1_player_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *GrantItemActorReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
-func (x *GrantItemActorReply) GetErrorReason() string {
-	if x != nil {
-		return x.ErrorReason
-	}
-	return ""
 }
 
 // GetBackpackActorReq/Reply 背包查询（聚合根内存快照，grpc 转发）。
@@ -501,8 +453,7 @@ func (*GetBackpackActorReq) Descriptor() ([]byte, []int) {
 
 type GetBackpackActorReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Items         []*BackpackItem        `protobuf:"bytes,2,rep,name=items,proto3" json:"items,omitempty"`
+	Items         []*BackpackItem        `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -535,13 +486,6 @@ func (x *GetBackpackActorReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetBackpackActorReply.ProtoReflect.Descriptor instead.
 func (*GetBackpackActorReply) Descriptor() ([]byte, []int) {
 	return file_api_game_v1_player_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *GetBackpackActorReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
 }
 
 func (x *GetBackpackActorReply) GetItems() []*BackpackItem {
@@ -590,8 +534,7 @@ func (*GetPlayerActorReq) Descriptor() ([]byte, []int) {
 
 type GetPlayerActorReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Player        *v1.PlayerSummary      `protobuf:"bytes,2,opt,name=player,proto3" json:"player,omitempty"`
+	Player        *v1.PlayerSummary      `protobuf:"bytes,1,opt,name=player,proto3" json:"player,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -626,167 +569,12 @@ func (*GetPlayerActorReply) Descriptor() ([]byte, []int) {
 	return file_api_game_v1_player_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *GetPlayerActorReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
 func (x *GetPlayerActorReply) GetPlayer() *v1.PlayerSummary {
 	if x != nil {
 		return x.Player
 	}
 	return nil
 }
-
-// PlayerActorMsg 是 PlayerActor 的消息信封：跨节点传输的 payload 为
-// 序列化字节（集群约定），oneof 区分具体消息类型。
-type PlayerActorMsg struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Kind:
-	//
-	//	*PlayerActorMsg_Register
-	//	*PlayerActorMsg_Login
-	//	*PlayerActorMsg_Logout
-	//	*PlayerActorMsg_GrantItem
-	//	*PlayerActorMsg_GetBackpack
-	//	*PlayerActorMsg_GetPlayer
-	Kind          isPlayerActorMsg_Kind `protobuf_oneof:"kind"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PlayerActorMsg) Reset() {
-	*x = PlayerActorMsg{}
-	mi := &file_api_game_v1_player_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PlayerActorMsg) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PlayerActorMsg) ProtoMessage() {}
-
-func (x *PlayerActorMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PlayerActorMsg.ProtoReflect.Descriptor instead.
-func (*PlayerActorMsg) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *PlayerActorMsg) GetKind() isPlayerActorMsg_Kind {
-	if x != nil {
-		return x.Kind
-	}
-	return nil
-}
-
-func (x *PlayerActorMsg) GetRegister() *RegisterActorReq {
-	if x != nil {
-		if x, ok := x.Kind.(*PlayerActorMsg_Register); ok {
-			return x.Register
-		}
-	}
-	return nil
-}
-
-func (x *PlayerActorMsg) GetLogin() *LoginActorReq {
-	if x != nil {
-		if x, ok := x.Kind.(*PlayerActorMsg_Login); ok {
-			return x.Login
-		}
-	}
-	return nil
-}
-
-func (x *PlayerActorMsg) GetLogout() *LogoutActorMsg {
-	if x != nil {
-		if x, ok := x.Kind.(*PlayerActorMsg_Logout); ok {
-			return x.Logout
-		}
-	}
-	return nil
-}
-
-func (x *PlayerActorMsg) GetGrantItem() *GrantItemActorReq {
-	if x != nil {
-		if x, ok := x.Kind.(*PlayerActorMsg_GrantItem); ok {
-			return x.GrantItem
-		}
-	}
-	return nil
-}
-
-func (x *PlayerActorMsg) GetGetBackpack() *GetBackpackActorReq {
-	if x != nil {
-		if x, ok := x.Kind.(*PlayerActorMsg_GetBackpack); ok {
-			return x.GetBackpack
-		}
-	}
-	return nil
-}
-
-func (x *PlayerActorMsg) GetGetPlayer() *GetPlayerActorReq {
-	if x != nil {
-		if x, ok := x.Kind.(*PlayerActorMsg_GetPlayer); ok {
-			return x.GetPlayer
-		}
-	}
-	return nil
-}
-
-type isPlayerActorMsg_Kind interface {
-	isPlayerActorMsg_Kind()
-}
-
-type PlayerActorMsg_Register struct {
-	Register *RegisterActorReq `protobuf:"bytes,1,opt,name=register,proto3,oneof"`
-}
-
-type PlayerActorMsg_Login struct {
-	Login *LoginActorReq `protobuf:"bytes,2,opt,name=login,proto3,oneof"`
-}
-
-type PlayerActorMsg_Logout struct {
-	Logout *LogoutActorMsg `protobuf:"bytes,3,opt,name=logout,proto3,oneof"`
-}
-
-type PlayerActorMsg_GrantItem struct {
-	GrantItem *GrantItemActorReq `protobuf:"bytes,4,opt,name=grant_item,json=grantItem,proto3,oneof"`
-}
-
-type PlayerActorMsg_GetBackpack struct {
-	GetBackpack *GetBackpackActorReq `protobuf:"bytes,5,opt,name=get_backpack,json=getBackpack,proto3,oneof"`
-}
-
-type PlayerActorMsg_GetPlayer struct {
-	GetPlayer *GetPlayerActorReq `protobuf:"bytes,6,opt,name=get_player,json=getPlayer,proto3,oneof"`
-}
-
-func (*PlayerActorMsg_Register) isPlayerActorMsg_Kind() {}
-
-func (*PlayerActorMsg_Login) isPlayerActorMsg_Kind() {}
-
-func (*PlayerActorMsg_Logout) isPlayerActorMsg_Kind() {}
-
-func (*PlayerActorMsg_GrantItem) isPlayerActorMsg_Kind() {}
-
-func (*PlayerActorMsg_GetBackpack) isPlayerActorMsg_Kind() {}
-
-func (*PlayerActorMsg_GetPlayer) isPlayerActorMsg_Kind() {}
 
 // GetPlayerRequest/Reply 玩家信息查询。
 type GetPlayerRequest struct {
@@ -798,7 +586,7 @@ type GetPlayerRequest struct {
 
 func (x *GetPlayerRequest) Reset() {
 	*x = GetPlayerRequest{}
-	mi := &file_api_game_v1_player_proto_msgTypes[12]
+	mi := &file_api_game_v1_player_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -810,7 +598,7 @@ func (x *GetPlayerRequest) String() string {
 func (*GetPlayerRequest) ProtoMessage() {}
 
 func (x *GetPlayerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[12]
+	mi := &file_api_game_v1_player_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -823,7 +611,7 @@ func (x *GetPlayerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerRequest.ProtoReflect.Descriptor instead.
 func (*GetPlayerRequest) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{12}
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetPlayerRequest) GetPlayerId() string {
@@ -842,7 +630,7 @@ type GetPlayerReply struct {
 
 func (x *GetPlayerReply) Reset() {
 	*x = GetPlayerReply{}
-	mi := &file_api_game_v1_player_proto_msgTypes[13]
+	mi := &file_api_game_v1_player_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -854,7 +642,7 @@ func (x *GetPlayerReply) String() string {
 func (*GetPlayerReply) ProtoMessage() {}
 
 func (x *GetPlayerReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[13]
+	mi := &file_api_game_v1_player_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -867,7 +655,7 @@ func (x *GetPlayerReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerReply.ProtoReflect.Descriptor instead.
 func (*GetPlayerReply) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{13}
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetPlayerReply) GetPlayer() *v1.PlayerSummary {
@@ -888,7 +676,7 @@ type BackpackItem struct {
 
 func (x *BackpackItem) Reset() {
 	*x = BackpackItem{}
-	mi := &file_api_game_v1_player_proto_msgTypes[14]
+	mi := &file_api_game_v1_player_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -900,7 +688,7 @@ func (x *BackpackItem) String() string {
 func (*BackpackItem) ProtoMessage() {}
 
 func (x *BackpackItem) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[14]
+	mi := &file_api_game_v1_player_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -913,7 +701,7 @@ func (x *BackpackItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackpackItem.ProtoReflect.Descriptor instead.
 func (*BackpackItem) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{14}
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *BackpackItem) GetItemId() uint32 {
@@ -940,7 +728,7 @@ type GetBackpackRequest struct {
 
 func (x *GetBackpackRequest) Reset() {
 	*x = GetBackpackRequest{}
-	mi := &file_api_game_v1_player_proto_msgTypes[15]
+	mi := &file_api_game_v1_player_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -952,7 +740,7 @@ func (x *GetBackpackRequest) String() string {
 func (*GetBackpackRequest) ProtoMessage() {}
 
 func (x *GetBackpackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[15]
+	mi := &file_api_game_v1_player_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -965,7 +753,7 @@ func (x *GetBackpackRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBackpackRequest.ProtoReflect.Descriptor instead.
 func (*GetBackpackRequest) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{15}
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetBackpackRequest) GetPlayerId() string {
@@ -984,7 +772,7 @@ type GetBackpackReply struct {
 
 func (x *GetBackpackReply) Reset() {
 	*x = GetBackpackReply{}
-	mi := &file_api_game_v1_player_proto_msgTypes[16]
+	mi := &file_api_game_v1_player_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -996,7 +784,7 @@ func (x *GetBackpackReply) String() string {
 func (*GetBackpackReply) ProtoMessage() {}
 
 func (x *GetBackpackReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[16]
+	mi := &file_api_game_v1_player_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1009,7 +797,7 @@ func (x *GetBackpackReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBackpackReply.ProtoReflect.Descriptor instead.
 func (*GetBackpackReply) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{16}
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetBackpackReply) GetItems() []*BackpackItem {
@@ -1032,7 +820,7 @@ type GrantItemRequest struct {
 
 func (x *GrantItemRequest) Reset() {
 	*x = GrantItemRequest{}
-	mi := &file_api_game_v1_player_proto_msgTypes[17]
+	mi := &file_api_game_v1_player_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1044,7 +832,7 @@ func (x *GrantItemRequest) String() string {
 func (*GrantItemRequest) ProtoMessage() {}
 
 func (x *GrantItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[17]
+	mi := &file_api_game_v1_player_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1057,7 +845,7 @@ func (x *GrantItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrantItemRequest.ProtoReflect.Descriptor instead.
 func (*GrantItemRequest) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{17}
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GrantItemRequest) GetPlayerId() string {
@@ -1096,7 +884,7 @@ type GrantItemReply struct {
 
 func (x *GrantItemReply) Reset() {
 	*x = GrantItemReply{}
-	mi := &file_api_game_v1_player_proto_msgTypes[18]
+	mi := &file_api_game_v1_player_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1108,7 +896,7 @@ func (x *GrantItemReply) String() string {
 func (*GrantItemReply) ProtoMessage() {}
 
 func (x *GrantItemReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_game_v1_player_proto_msgTypes[18]
+	mi := &file_api_game_v1_player_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1121,7 +909,7 @@ func (x *GrantItemReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrantItemReply.ProtoReflect.Descriptor instead.
 func (*GrantItemReply) Descriptor() ([]byte, []int) {
-	return file_api_game_v1_player_proto_rawDescGZIP(), []int{18}
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{17}
 }
 
 var File_api_game_v1_player_proto protoreflect.FileDescriptor
@@ -1133,49 +921,31 @@ const file_api_game_v1_player_proto_rawDesc = "" +
 	"\aaccount\x18\x01 \x01(\tR\aaccount\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1a\n" +
 	"\bnickname\x18\x03 \x01(\tR\bnickname\x12)\n" +
-	"\x10gateway_instance\x18\x04 \x01(\tR\x0fgatewayInstance\"\x96\x01\n" +
-	"\x12RegisterActorReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12!\n" +
-	"\ferror_reason\x18\x02 \x01(\tR\verrorReason\x12\x1b\n" +
-	"\tplayer_id\x18\x03 \x01(\tR\bplayerId\x120\n" +
-	"\x06player\x18\x04 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"\x89\x01\n" +
+	"\x10gateway_instance\x18\x04 \x01(\tR\x0fgatewayInstance\"c\n" +
+	"\x12RegisterActorReply\x12\x1b\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x120\n" +
+	"\x06player\x18\x02 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"\x89\x01\n" +
 	"\rLoginActorReq\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12)\n" +
-	"\x10gateway_instance\x18\x04 \x01(\tR\x0fgatewayInstance\"v\n" +
-	"\x0fLoginActorReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12!\n" +
-	"\ferror_reason\x18\x02 \x01(\tR\verrorReason\x120\n" +
-	"\x06player\x18\x03 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\">\n" +
+	"\x10gateway_instance\x18\x04 \x01(\tR\x0fgatewayInstance\"C\n" +
+	"\x0fLoginActorReply\x120\n" +
+	"\x06player\x18\x01 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\">\n" +
 	"\x0eLogoutActorMsg\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"Z\n" +
 	"\x11GrantItemActorReq\x12\x17\n" +
 	"\aitem_id\x18\x01 \x01(\rR\x06itemId\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\rR\x05count\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"H\n" +
-	"\x13GrantItemActorReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12!\n" +
-	"\ferror_reason\x18\x02 \x01(\tR\verrorReason\"\x15\n" +
-	"\x13GetBackpackActorReq\"T\n" +
-	"\x15GetBackpackActorReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12+\n" +
-	"\x05items\x18\x02 \x03(\v2\x15.game.v1.BackpackItemR\x05items\"\x13\n" +
-	"\x11GetPlayerActorReq\"W\n" +
-	"\x13GetPlayerActorReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x120\n" +
-	"\x06player\x18\x02 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"\xf1\x02\n" +
-	"\x0ePlayerActorMsg\x127\n" +
-	"\bregister\x18\x01 \x01(\v2\x19.game.v1.RegisterActorReqH\x00R\bregister\x12.\n" +
-	"\x05login\x18\x02 \x01(\v2\x16.game.v1.LoginActorReqH\x00R\x05login\x121\n" +
-	"\x06logout\x18\x03 \x01(\v2\x17.game.v1.LogoutActorMsgH\x00R\x06logout\x12;\n" +
-	"\n" +
-	"grant_item\x18\x04 \x01(\v2\x1a.game.v1.GrantItemActorReqH\x00R\tgrantItem\x12A\n" +
-	"\fget_backpack\x18\x05 \x01(\v2\x1c.game.v1.GetBackpackActorReqH\x00R\vgetBackpack\x12;\n" +
-	"\n" +
-	"get_player\x18\x06 \x01(\v2\x1a.game.v1.GetPlayerActorReqH\x00R\tgetPlayerB\x06\n" +
-	"\x04kind\"/\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"\x15\n" +
+	"\x13GrantItemActorReply\"\x15\n" +
+	"\x13GetBackpackActorReq\"D\n" +
+	"\x15GetBackpackActorReply\x12+\n" +
+	"\x05items\x18\x01 \x03(\v2\x15.game.v1.BackpackItemR\x05items\"\x13\n" +
+	"\x11GetPlayerActorReq\"G\n" +
+	"\x13GetPlayerActorReply\x120\n" +
+	"\x06player\x18\x01 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"/\n" +
 	"\x10GetPlayerRequest\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"B\n" +
 	"\x0eGetPlayerReply\x120\n" +
@@ -1210,7 +980,7 @@ func file_api_game_v1_player_proto_rawDescGZIP() []byte {
 	return file_api_game_v1_player_proto_rawDescData
 }
 
-var file_api_game_v1_player_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_api_game_v1_player_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_api_game_v1_player_proto_goTypes = []any{
 	(*RegisterActorReq)(nil),      // 0: game.v1.RegisterActorReq
 	(*RegisterActorReply)(nil),    // 1: game.v1.RegisterActorReply
@@ -1223,40 +993,33 @@ var file_api_game_v1_player_proto_goTypes = []any{
 	(*GetBackpackActorReply)(nil), // 8: game.v1.GetBackpackActorReply
 	(*GetPlayerActorReq)(nil),     // 9: game.v1.GetPlayerActorReq
 	(*GetPlayerActorReply)(nil),   // 10: game.v1.GetPlayerActorReply
-	(*PlayerActorMsg)(nil),        // 11: game.v1.PlayerActorMsg
-	(*GetPlayerRequest)(nil),      // 12: game.v1.GetPlayerRequest
-	(*GetPlayerReply)(nil),        // 13: game.v1.GetPlayerReply
-	(*BackpackItem)(nil),          // 14: game.v1.BackpackItem
-	(*GetBackpackRequest)(nil),    // 15: game.v1.GetBackpackRequest
-	(*GetBackpackReply)(nil),      // 16: game.v1.GetBackpackReply
-	(*GrantItemRequest)(nil),      // 17: game.v1.GrantItemRequest
-	(*GrantItemReply)(nil),        // 18: game.v1.GrantItemReply
-	(*v1.PlayerSummary)(nil),      // 19: common.v1.PlayerSummary
+	(*GetPlayerRequest)(nil),      // 11: game.v1.GetPlayerRequest
+	(*GetPlayerReply)(nil),        // 12: game.v1.GetPlayerReply
+	(*BackpackItem)(nil),          // 13: game.v1.BackpackItem
+	(*GetBackpackRequest)(nil),    // 14: game.v1.GetBackpackRequest
+	(*GetBackpackReply)(nil),      // 15: game.v1.GetBackpackReply
+	(*GrantItemRequest)(nil),      // 16: game.v1.GrantItemRequest
+	(*GrantItemReply)(nil),        // 17: game.v1.GrantItemReply
+	(*v1.PlayerSummary)(nil),      // 18: common.v1.PlayerSummary
 }
 var file_api_game_v1_player_proto_depIdxs = []int32{
-	19, // 0: game.v1.RegisterActorReply.player:type_name -> common.v1.PlayerSummary
-	19, // 1: game.v1.LoginActorReply.player:type_name -> common.v1.PlayerSummary
-	14, // 2: game.v1.GetBackpackActorReply.items:type_name -> game.v1.BackpackItem
-	19, // 3: game.v1.GetPlayerActorReply.player:type_name -> common.v1.PlayerSummary
-	0,  // 4: game.v1.PlayerActorMsg.register:type_name -> game.v1.RegisterActorReq
-	2,  // 5: game.v1.PlayerActorMsg.login:type_name -> game.v1.LoginActorReq
-	4,  // 6: game.v1.PlayerActorMsg.logout:type_name -> game.v1.LogoutActorMsg
-	5,  // 7: game.v1.PlayerActorMsg.grant_item:type_name -> game.v1.GrantItemActorReq
-	7,  // 8: game.v1.PlayerActorMsg.get_backpack:type_name -> game.v1.GetBackpackActorReq
-	9,  // 9: game.v1.PlayerActorMsg.get_player:type_name -> game.v1.GetPlayerActorReq
-	19, // 10: game.v1.GetPlayerReply.player:type_name -> common.v1.PlayerSummary
-	14, // 11: game.v1.GetBackpackReply.items:type_name -> game.v1.BackpackItem
-	12, // 12: game.v1.Player.GetPlayer:input_type -> game.v1.GetPlayerRequest
-	15, // 13: game.v1.Player.GetBackpack:input_type -> game.v1.GetBackpackRequest
-	17, // 14: game.v1.Player.GrantItem:input_type -> game.v1.GrantItemRequest
-	13, // 15: game.v1.Player.GetPlayer:output_type -> game.v1.GetPlayerReply
-	16, // 16: game.v1.Player.GetBackpack:output_type -> game.v1.GetBackpackReply
-	18, // 17: game.v1.Player.GrantItem:output_type -> game.v1.GrantItemReply
-	15, // [15:18] is the sub-list for method output_type
-	12, // [12:15] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	18, // 0: game.v1.RegisterActorReply.player:type_name -> common.v1.PlayerSummary
+	18, // 1: game.v1.LoginActorReply.player:type_name -> common.v1.PlayerSummary
+	13, // 2: game.v1.GetBackpackActorReply.items:type_name -> game.v1.BackpackItem
+	18, // 3: game.v1.GetPlayerActorReply.player:type_name -> common.v1.PlayerSummary
+	18, // 4: game.v1.GetPlayerReply.player:type_name -> common.v1.PlayerSummary
+	13, // 5: game.v1.GetBackpackReply.items:type_name -> game.v1.BackpackItem
+	11, // 6: game.v1.Player.GetPlayer:input_type -> game.v1.GetPlayerRequest
+	14, // 7: game.v1.Player.GetBackpack:input_type -> game.v1.GetBackpackRequest
+	16, // 8: game.v1.Player.GrantItem:input_type -> game.v1.GrantItemRequest
+	12, // 9: game.v1.Player.GetPlayer:output_type -> game.v1.GetPlayerReply
+	15, // 10: game.v1.Player.GetBackpack:output_type -> game.v1.GetBackpackReply
+	17, // 11: game.v1.Player.GrantItem:output_type -> game.v1.GrantItemReply
+	9,  // [9:12] is the sub-list for method output_type
+	6,  // [6:9] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_api_game_v1_player_proto_init() }
@@ -1264,21 +1027,13 @@ func file_api_game_v1_player_proto_init() {
 	if File_api_game_v1_player_proto != nil {
 		return
 	}
-	file_api_game_v1_player_proto_msgTypes[11].OneofWrappers = []any{
-		(*PlayerActorMsg_Register)(nil),
-		(*PlayerActorMsg_Login)(nil),
-		(*PlayerActorMsg_Logout)(nil),
-		(*PlayerActorMsg_GrantItem)(nil),
-		(*PlayerActorMsg_GetBackpack)(nil),
-		(*PlayerActorMsg_GetPlayer)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_game_v1_player_proto_rawDesc), len(file_api_game_v1_player_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -7,13 +7,13 @@ import (
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	lockstepimpl "github.com/huangyuCN/atlas/contrib/lockstep"
-	"google.golang.org/protobuf/proto"
 )
 
 // memNotifier 是下行通知的内存实现（帧/结束通知记录）。
@@ -96,7 +96,7 @@ func (l localRT) Stop(ctx context.Context, pid types.PID) error {
 }
 
 // Ask 适配 Runtime.Ask（剥离 SendOption）。
-func (l localRT) Ask(ctx context.Context, pid types.PID, req any) (any, error) {
+func (l localRT) Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error) {
 	return l.LocalRuntime.Ask(ctx, pid, req)
 }
 
@@ -155,9 +155,9 @@ func newBattleEnv(t *testing.T) *battleEnv {
 	return &battleEnv{rt: rt, pid: pid, notifier: notifier, result: result, publisher: publisher, reg: reg}
 }
 
-// ask 以对象信封向战斗 actor 请求（同节点直传形态）。
-func (e *battleEnv) ask(ctx context.Context, env *battlev1.BattleActorMsg) (any, error) {
-	return e.rt.Ask(ctx, e.pid, env)
+// ask 以具体消息对象向战斗 actor 请求（同节点直传形态，生成的桩 switch 直接命中）。
+func (e *battleEnv) ask(ctx context.Context, req any) (any, error) {
+	return e.rt.Ask(ctx, e.pid, req)
 }
 
 // TestBattleActorFullLoop 验证战斗闭环：开局 → 双人加入 → 帧输入 → 胜负结算
@@ -179,9 +179,7 @@ func TestBattleActorFullLoop(t *testing.T) {
 // seedAndJoin 开局并让双玩家加入（含非参战玩家被拒断言）。
 func seedAndJoin(t *testing.T, env *battleEnv, ctx context.Context) {
 	t.Helper()
-	reply, err := env.ask(ctx, &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_Create{
-		Create: &battlev1.CreateBattleRequest{MatchId: "m-1", PlayerIds: []string{"p-a", "p-b"}},
-	}})
+	reply, err := env.ask(ctx, &battlev1.CreateBattleRequest{MatchId: "m-1", PlayerIds: []string{"p-a", "p-b"}})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -189,26 +187,19 @@ func seedAndJoin(t *testing.T, env *battleEnv, ctx context.Context) {
 		t.Fatalf("开局回执不符: %T %+v", reply, reply)
 	}
 	for _, p := range []string{"p-a", "p-b"} {
-		reply, err := env.ask(ctx, &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_Join{
-			Join: &battlev1.JoinBattleReq{PlayerId: p},
-		}})
+		reply, err := env.ask(ctx, &battlev1.JoinBattleReq{PlayerId: p})
 		if err != nil {
 			t.Fatalf("join %s: %v", p, err)
 		}
 		join, ok := reply.(*battlev1.JoinBattleReply)
-		if !ok || !join.GetOk() || join.GetMeta().GetSessionId() != "b-test01" || join.GetSnapshot() == nil {
+		if !ok || join.GetMeta().GetSessionId() != "b-test01" || join.GetSnapshot() == nil {
 			t.Fatalf("%s 加入回执不符: %T %+v", p, reply, reply)
 		}
 	}
-	// 非参战玩家被拒。
-	reply, err = env.ask(ctx, &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_Join{
-		Join: &battlev1.JoinBattleReq{PlayerId: "p-x"},
-	}})
-	if err != nil {
-		t.Fatalf("join outsider: %v", err)
-	}
-	if join := reply.(*battlev1.JoinBattleReply); join.GetOk() || join.GetErrorReason() != "PLAYER_NOT_IN_BATTLE" {
-		t.Fatalf("非参战玩家应被拒: %+v", join)
+	// 非参战玩家被拒（错误语义上移到产生点：BATTLE_NOT_FOUND）。
+	_, err = env.ask(ctx, &battlev1.JoinBattleReq{PlayerId: "p-x"})
+	if atlaserrors.Reason(err) != "BATTLE_NOT_FOUND" {
+		t.Fatalf("非参战玩家应被拒 BATTLE_NOT_FOUND, got %v", err)
 	}
 }
 
@@ -217,12 +208,10 @@ func sendFrameInputs(t *testing.T, env *battleEnv, ctx context.Context) {
 	t.Helper()
 	for i := uint64(1); i <= 12; i++ {
 		send := func(p string, step byte) {
-			_, err := env.ask(ctx, &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_FrameInput{
-				FrameInput: &battlev1.FrameInputReq{
-					PlayerId: p,
-					Input:    &locksteppb.LockstepInput{FrameId: i, PlayerId: p, Payload: []byte{step}},
-				},
-			}})
+			_, err := env.ask(ctx, &battlev1.FrameInputReq{
+				PlayerId: p,
+				Input:    &locksteppb.LockstepInput{FrameId: i, PlayerId: p, Payload: []byte{step}},
+			})
 			if err != nil {
 				t.Fatalf("帧输入 %s@%d: %v", p, i, err)
 			}
@@ -333,31 +322,18 @@ func waitSettled(t *testing.T, env *battleEnv) {
 func TestBattleActorReconnectRejectsOutsider(t *testing.T) {
 	env := newBattleEnv(t)
 	ctx := context.Background()
-	_, err := env.ask(ctx, &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_Create{
-		Create: &battlev1.CreateBattleRequest{MatchId: "m-1", PlayerIds: []string{"p-a"}},
-	}})
+	_, err := env.ask(ctx, &battlev1.CreateBattleRequest{MatchId: "m-1", PlayerIds: []string{"p-a"}})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// 局外人补帧被拒。
-	reply, err := env.ask(ctx, &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_Reconnect{
-		Reconnect: &battlev1.ReconnectReq{PlayerId: "p-x", LastSeenFrame: 0},
-	}})
-	if err != nil {
-		t.Fatalf("reconnect outsider: %v", err)
-	}
-	if r := reply.(*battlev1.ReconnectReply); r.GetOk() {
-		t.Fatalf("局外人补帧应被拒: %+v", r)
+	// 局外人补帧被拒（INVALID_TOKEN，语义与 gateway 现状对外一致）。
+	_, err = env.ask(ctx, &battlev1.ReconnectReq{PlayerId: "p-x", LastSeenFrame: 0})
+	if atlaserrors.Reason(err) != "INVALID_TOKEN" {
+		t.Fatalf("局外人补帧应被拒 INVALID_TOKEN, got %v", err)
 	}
 	// 参战玩家补帧放行。
-	reply, err = env.ask(ctx, &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_Reconnect{
-		Reconnect: &battlev1.ReconnectReq{PlayerId: "p-a", LastSeenFrame: 0},
-	}})
-	if err != nil {
+	if _, err = env.ask(ctx, &battlev1.ReconnectReq{PlayerId: "p-a", LastSeenFrame: 0}); err != nil {
 		t.Fatalf("reconnect member: %v", err)
-	}
-	if r := reply.(*battlev1.ReconnectReply); !r.GetOk() {
-		t.Fatalf("参战玩家补帧应放行: %+v", r)
 	}
 }
 
@@ -378,31 +354,6 @@ func TestLockstepType(t *testing.T) {
 	}
 }
 
-// TestDecodeEnvelope 验证信封还原（对象直传/跨节点字节/非法输入）。
-func TestDecodeEnvelope(t *testing.T) {
-	in := &battlev1.BattleActorMsg{Kind: &battlev1.BattleActorMsg_Create{
-		Create: &battlev1.CreateBattleRequest{MatchId: "m-1"},
-	}}
-	// 对象直传。
-	if got, err := decodeEnvelope(in); err != nil || got.GetCreate().GetMatchId() != "m-1" {
-		t.Fatalf("对象信封: %+v, %v", got, err)
-	}
-	// 字节形态（跨节点）。
-	b, err := proto.Marshal(in)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if got, err := decodeEnvelope(b); err != nil || got.GetCreate().GetMatchId() != "m-1" {
-		t.Fatalf("字节信封: %+v, %v", got, err)
-	}
-	// 非法输入。
-	if _, err := decodeEnvelope("oops"); err == nil {
-		t.Fatal("非法类型应报错")
-	}
-	if _, err := decodeEnvelope([]byte("bad")); err == nil {
-		t.Fatal("非法字节应报错")
-	}
-}
 
 // TestHashBytes 验证状态哈希编码往返。
 func TestHashBytes(t *testing.T) {

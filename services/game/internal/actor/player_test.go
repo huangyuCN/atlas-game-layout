@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
-	"google.golang.org/protobuf/proto"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 )
 
 // memRepo 是玩家仓储的内存实现（快照 + 持久化两级，记录落库次数）。
@@ -134,37 +135,8 @@ func newActorEnv(t *testing.T, snapTTL, snapTick time.Duration) (*core.LocalRunt
 	return rt, regPID, loginPID, store
 }
 
-// askBytes 以字节信封向 actor 发起请求（模拟跨节点传输形态）。
-func askBytes(ctx context.Context, rt *core.LocalRuntime, pid types.PID, env *gamev1.PlayerActorMsg) (any, error) {
-	b, err := proto.Marshal(env)
-	if err != nil {
-		return nil, err
-	}
-	return rt.Ask(ctx, pid, b)
-}
-
-// registerEnvelope 组注册信封。
-func registerEnvelope(account, password string) *gamev1.PlayerActorMsg {
-	return &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_Register{Register: &gamev1.RegisterActorReq{Account: account, Password: password, Nickname: "爱丽丝"}},
-	}
-}
-
-// loginEnvelope 组登录信封。
-func loginEnvelope(playerID, password, token string) *gamev1.PlayerActorMsg {
-	return &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_Login{Login: &gamev1.LoginActorReq{PlayerId: playerID, Password: password, Token: token}},
-	}
-}
-
-// grantEnvelope 组发放道具信封。
-func grantEnvelope(itemID, count uint32) *gamev1.PlayerActorMsg {
-	return &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_GrantItem{GrantItem: &gamev1.GrantItemActorReq{ItemId: itemID, Count: count}},
-	}
-}
-
-// TestPlayerActorRegisterLogin 验证注册（自停）/登录（聚合根加载）/口令错误。
+// TestPlayerActorRegisterLogin 验证注册（自停）/登录（聚合根加载）/口令错误
+// （同节点对象直传形态：生成的桩 switch 直接命中具体消息）。
 func TestPlayerActorRegisterLogin(t *testing.T) {
 	ctx := context.Background()
 	rt, regPID, loginPID, _ := newActorEnv(t, 0, 0)
@@ -172,12 +144,12 @@ func TestPlayerActorRegisterLogin(t *testing.T) {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	regReply, err := askBytes(ctx, rt, regPID, registerEnvelope("alice", "pw"))
+	regReply, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw", Nickname: "爱丽丝"})
 	if err != nil {
 		t.Fatalf("Ask register: %v", err)
 	}
 	reg := regReply.(*gamev1.RegisterActorReply)
-	if !reg.GetOk() || reg.GetPlayerId() != "p-test" {
+	if reg.GetPlayerId() != "p-test" {
 		t.Fatalf("注册回执不符: %+v", reg)
 	}
 	// 注册两段式：临时实例自停。
@@ -193,23 +165,18 @@ func TestPlayerActorRegisterLogin(t *testing.T) {
 	}
 
 	// 登录（懒激活 + 聚合根加载）。
-	loginReply, err := askBytes(ctx, rt, loginPID, loginEnvelope("p-test", "pw", "t1"))
+	loginReply, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"})
 	if err != nil {
 		t.Fatalf("Ask login: %v", err)
 	}
 	login := loginReply.(*gamev1.LoginActorReply)
-	if !login.GetOk() || login.GetPlayer().GetNickname() != "爱丽丝" {
+	if login.GetPlayer().GetNickname() != "爱丽丝" {
 		t.Fatalf("登录回执不符: %+v", login)
 	}
 
-	// 口令错误。
-	loginReply, err = askBytes(ctx, rt, loginPID, loginEnvelope("p-test", "bad", "t2"))
-	if err != nil {
-		t.Fatalf("Ask login2: %v", err)
-	}
-	login2 := loginReply.(*gamev1.LoginActorReply)
-	if login2.GetOk() || login2.GetErrorReason() != "PASSWORD_WRONG" {
-		t.Fatalf("口令错误回执不符: %+v", login2)
+	// 口令错误：业务错误以 error 返回（reason 经集群 error 通道往返保留）。
+	if _, err = rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "bad", Token: "t2"}); atlaserrors.Reason(err) != "PASSWORD_WRONG" {
+		t.Fatalf("口令错误应返回 PASSWORD_WRONG, got %v", err)
 	}
 }
 
@@ -220,42 +187,34 @@ func TestPlayerActorGrantAndQuery(t *testing.T) {
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if _, err := askBytes(ctx, rt, regPID, registerEnvelope("alice", "pw")); err != nil {
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, err := askBytes(ctx, rt, loginPID, loginEnvelope("p-test", "pw", "t1")); err != nil {
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
 		t.Fatalf("login: %v", err)
 	}
 
 	// 发放道具两次（累加语义）。
 	for i := 0; i < 2; i++ {
-		reply, err := askBytes(ctx, rt, loginPID, grantEnvelope(1001, 3))
-		if err != nil {
+		if _, err := rt.Ask(ctx, loginPID, &gamev1.GrantItemActorReq{ItemId: 1001, Count: 3}); err != nil {
 			t.Fatalf("grant#%d: %v", i, err)
-		}
-		if !reply.(*gamev1.GrantItemActorReply).GetOk() {
-			t.Fatalf("grant#%d 回执失败: %+v", i, reply)
 		}
 	}
 	// 背包查询（内存快照）。
-	bpReply, err := askBytes(ctx, rt, loginPID, &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_GetBackpack{GetBackpack: &gamev1.GetBackpackActorReq{}},
-	})
+	bpReply, err := rt.Ask(ctx, loginPID, &gamev1.GetBackpackActorReq{})
 	if err != nil {
 		t.Fatalf("get backpack: %v", err)
 	}
 	bp := bpReply.(*gamev1.GetBackpackActorReply)
-	if !bp.GetOk() || len(bp.GetItems()) != 1 || bp.GetItems()[0].GetCount() != 6 {
+	if len(bp.GetItems()) != 1 || bp.GetItems()[0].GetCount() != 6 {
 		t.Fatalf("背包不符: %+v", bp.GetItems())
 	}
 	// 玩家摘要查询。
-	pReply, err := askBytes(ctx, rt, loginPID, &gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_GetPlayer{GetPlayer: &gamev1.GetPlayerActorReq{}},
-	})
+	pReply, err := rt.Ask(ctx, loginPID, &gamev1.GetPlayerActorReq{})
 	if err != nil {
 		t.Fatalf("get player: %v", err)
 	}
-	if got := pReply.(*gamev1.GetPlayerActorReply); !got.GetOk() || got.GetPlayer().GetPlayerId() != "p-test" {
+	if got := pReply.(*gamev1.GetPlayerActorReply); got.GetPlayer().GetPlayerId() != "p-test" {
 		t.Fatalf("玩家摘要不符: %+v", got)
 	}
 }
@@ -267,13 +226,13 @@ func TestPlayerActorSnapshotAndPersist(t *testing.T) {
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if _, err := askBytes(ctx, rt, regPID, registerEnvelope("alice", "pw")); err != nil {
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, err := askBytes(ctx, rt, loginPID, loginEnvelope("p-test", "pw", "t1")); err != nil {
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if _, err := askBytes(ctx, rt, loginPID, grantEnvelope(1001, 5)); err != nil {
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.GrantItemActorReq{ItemId: 1001, Count: 5}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	// 等待定时快照。
@@ -287,14 +246,8 @@ func TestPlayerActorSnapshotAndPersist(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	// 登出自停 → OnStop 落库。
-	out, err := proto.Marshal(&gamev1.PlayerActorMsg{
-		Kind: &gamev1.PlayerActorMsg_Logout{Logout: &gamev1.LogoutActorMsg{Token: "t1", Reason: "logout"}},
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := rt.Tell(ctx, loginPID, out); err != nil {
+	// 登出（Tell 对象直传，本地路由之外的桩 switch 命中）→ 自停 → OnStop 落库。
+	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutActorMsg{Token: "t1", Reason: "logout"}); err != nil {
 		t.Fatalf("Tell logout: %v", err)
 	}
 	deadline = time.Now().Add(2 * time.Second)
@@ -312,32 +265,31 @@ func TestPlayerActorSnapshotAndPersist(t *testing.T) {
 	}
 }
 
-// TestPlayerActorGrantBeforeLogin 验证未登录发放道具被拒。
+// TestPlayerActorGrantBeforeLogin 验证未登录发放道具被拒（PLAYER_NOT_ONLINE）。
 func TestPlayerActorGrantBeforeLogin(t *testing.T) {
 	ctx := context.Background()
 	rt, regPID, loginPID, _ := newActorEnv(t, 0, 0)
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if _, err := askBytes(ctx, rt, regPID, registerEnvelope("alice", "pw")); err != nil {
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	reply, err := askBytes(ctx, rt, loginPID, grantEnvelope(1001, 1))
-	if err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	g := reply.(*gamev1.GrantItemActorReply)
-	if g.GetOk() || g.GetErrorReason() != "PLAYER_NOT_ONLINE" {
-		t.Fatalf("未登录发放回执不符: %+v", g)
+	_, err := rt.Ask(ctx, loginPID, &gamev1.GrantItemActorReq{ItemId: 1001, Count: 1})
+	if atlaserrors.Reason(err) != "PLAYER_NOT_ONLINE" {
+		t.Fatalf("未登录发放应返回 PLAYER_NOT_ONLINE, got %v", err)
 	}
 }
 
-// TestDecodeEnvelopeRejectsUnknown 验证未知消息类型与坏字节被拒绝。
-func TestDecodeEnvelopeRejectsUnknown(t *testing.T) {
-	if _, err := decodeEnvelope(42); err == nil {
-		t.Fatal("未知消息类型应报错")
+// TestDispatchRejectsUnknownMessage 验证生成的桩对未知 Ask 消息（本地路由未命中）
+// 返回 ErrUnknownMessage 哨兵。Tell 的 handler 错误不回传调用方（异步投递，现状语义）。
+func TestDispatchRejectsUnknownMessage(t *testing.T) {
+	ctx := context.Background()
+	rt, regPID, _, _ := newActorEnv(t, 0, 0)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
 	}
-	if _, err := decodeEnvelope([]byte("garbage")); err == nil {
-		t.Fatal("坏字节应报错")
+	if _, err := rt.Ask(ctx, regPID, "unknown-message"); !errors.Is(err, core.ErrUnknownMessage) {
+		t.Fatalf("未知消息应返回 ErrUnknownMessage, got %v", err)
 	}
 }

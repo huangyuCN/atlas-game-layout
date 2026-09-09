@@ -382,11 +382,9 @@ func (x *JoinBattleReq) GetPlayerId() string {
 // JoinBattleReply 加入回执：会话元信息、当前帧与快照（断线重连恢复）。
 type JoinBattleReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	ErrorReason   string                 `protobuf:"bytes,2,opt,name=error_reason,json=errorReason,proto3" json:"error_reason,omitempty"`
-	Meta          *lockstep.SessionMeta  `protobuf:"bytes,3,opt,name=meta,proto3" json:"meta,omitempty"`
-	CurrentFrame  uint64                 `protobuf:"varint,4,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
-	Snapshot      *lockstep.SnapshotMeta `protobuf:"bytes,5,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Meta          *lockstep.SessionMeta  `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+	CurrentFrame  uint64                 `protobuf:"varint,2,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
+	Snapshot      *lockstep.SnapshotMeta `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -419,20 +417,6 @@ func (x *JoinBattleReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use JoinBattleReply.ProtoReflect.Descriptor instead.
 func (*JoinBattleReply) Descriptor() ([]byte, []int) {
 	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *JoinBattleReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
-func (x *JoinBattleReply) GetErrorReason() string {
-	if x != nil {
-		return x.ErrorReason
-	}
-	return ""
 }
 
 func (x *JoinBattleReply) GetMeta() *lockstep.SessionMeta {
@@ -601,10 +585,9 @@ func (x *ReconnectReq) GetLastSeenFrame() uint64 {
 // ReconnectReply 补帧回执：当前帧、快照与缺失帧输入。
 type ReconnectReply struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
-	Ok            bool                    `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	CurrentFrame  uint64                  `protobuf:"varint,2,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
-	Snapshot      *lockstep.SnapshotMeta  `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	Missed        []*lockstep.FrameInputs `protobuf:"bytes,4,rep,name=missed,proto3" json:"missed,omitempty"`
+	CurrentFrame  uint64                  `protobuf:"varint,1,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
+	Snapshot      *lockstep.SnapshotMeta  `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Missed        []*lockstep.FrameInputs `protobuf:"bytes,3,rep,name=missed,proto3" json:"missed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -637,13 +620,6 @@ func (x *ReconnectReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ReconnectReply.ProtoReflect.Descriptor instead.
 func (*ReconnectReply) Descriptor() ([]byte, []int) {
 	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *ReconnectReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
 }
 
 func (x *ReconnectReply) GetCurrentFrame() uint64 {
@@ -706,10 +682,9 @@ func (*GetStateReq) Descriptor() ([]byte, []int) {
 
 type GetStateReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	State         string                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
-	CurrentFrame  uint64                 `protobuf:"varint,3,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
-	PlayerCount   uint32                 `protobuf:"varint,4,opt,name=player_count,json=playerCount,proto3" json:"player_count,omitempty"`
+	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
+	CurrentFrame  uint64                 `protobuf:"varint,2,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
+	PlayerCount   uint32                 `protobuf:"varint,3,opt,name=player_count,json=playerCount,proto3" json:"player_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -744,13 +719,6 @@ func (*GetStateReply) Descriptor() ([]byte, []int) {
 	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *GetStateReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
 func (x *GetStateReply) GetState() string {
 	if x != nil {
 		return x.State
@@ -771,138 +739,6 @@ func (x *GetStateReply) GetPlayerCount() uint32 {
 	}
 	return 0
 }
-
-// BattleActorMsg 是战斗 actor 的消息信封：跨节点传输的 payload 为
-// 序列化字节（集群约定），oneof 区分具体消息类型。
-type BattleActorMsg struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Kind:
-	//
-	//	*BattleActorMsg_Create
-	//	*BattleActorMsg_Join
-	//	*BattleActorMsg_FrameInput
-	//	*BattleActorMsg_Reconnect
-	//	*BattleActorMsg_GetState
-	Kind          isBattleActorMsg_Kind `protobuf_oneof:"kind"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *BattleActorMsg) Reset() {
-	*x = BattleActorMsg{}
-	mi := &file_api_battle_v1_battle_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *BattleActorMsg) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*BattleActorMsg) ProtoMessage() {}
-
-func (x *BattleActorMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use BattleActorMsg.ProtoReflect.Descriptor instead.
-func (*BattleActorMsg) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *BattleActorMsg) GetKind() isBattleActorMsg_Kind {
-	if x != nil {
-		return x.Kind
-	}
-	return nil
-}
-
-func (x *BattleActorMsg) GetCreate() *CreateBattleRequest {
-	if x != nil {
-		if x, ok := x.Kind.(*BattleActorMsg_Create); ok {
-			return x.Create
-		}
-	}
-	return nil
-}
-
-func (x *BattleActorMsg) GetJoin() *JoinBattleReq {
-	if x != nil {
-		if x, ok := x.Kind.(*BattleActorMsg_Join); ok {
-			return x.Join
-		}
-	}
-	return nil
-}
-
-func (x *BattleActorMsg) GetFrameInput() *FrameInputReq {
-	if x != nil {
-		if x, ok := x.Kind.(*BattleActorMsg_FrameInput); ok {
-			return x.FrameInput
-		}
-	}
-	return nil
-}
-
-func (x *BattleActorMsg) GetReconnect() *ReconnectReq {
-	if x != nil {
-		if x, ok := x.Kind.(*BattleActorMsg_Reconnect); ok {
-			return x.Reconnect
-		}
-	}
-	return nil
-}
-
-func (x *BattleActorMsg) GetGetState() *GetStateReq {
-	if x != nil {
-		if x, ok := x.Kind.(*BattleActorMsg_GetState); ok {
-			return x.GetState
-		}
-	}
-	return nil
-}
-
-type isBattleActorMsg_Kind interface {
-	isBattleActorMsg_Kind()
-}
-
-type BattleActorMsg_Create struct {
-	Create *CreateBattleRequest `protobuf:"bytes,1,opt,name=create,proto3,oneof"`
-}
-
-type BattleActorMsg_Join struct {
-	Join *JoinBattleReq `protobuf:"bytes,2,opt,name=join,proto3,oneof"`
-}
-
-type BattleActorMsg_FrameInput struct {
-	FrameInput *FrameInputReq `protobuf:"bytes,3,opt,name=frame_input,json=frameInput,proto3,oneof"`
-}
-
-type BattleActorMsg_Reconnect struct {
-	Reconnect *ReconnectReq `protobuf:"bytes,4,opt,name=reconnect,proto3,oneof"`
-}
-
-type BattleActorMsg_GetState struct {
-	GetState *GetStateReq `protobuf:"bytes,5,opt,name=get_state,json=getState,proto3,oneof"`
-}
-
-func (*BattleActorMsg_Create) isBattleActorMsg_Kind() {}
-
-func (*BattleActorMsg_Join) isBattleActorMsg_Kind() {}
-
-func (*BattleActorMsg_FrameInput) isBattleActorMsg_Kind() {}
-
-func (*BattleActorMsg_Reconnect) isBattleActorMsg_Kind() {}
-
-func (*BattleActorMsg_GetState) isBattleActorMsg_Kind() {}
 
 var File_api_battle_v1_battle_proto protoreflect.FileDescriptor
 
@@ -928,39 +764,27 @@ const file_api_battle_v1_battle_proto_rawDesc = "" +
 	"\bmatch_id\x18\x02 \x01(\tR\amatchId\x121\n" +
 	"\aplayers\x18\x03 \x03(\v2\x17.battle.v1.PlayerResultR\aplayers\",\n" +
 	"\rJoinBattleReq\x12\x1b\n" +
-	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"\xde\x01\n" +
-	"\x0fJoinBattleReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12!\n" +
-	"\ferror_reason\x18\x02 \x01(\tR\verrorReason\x124\n" +
-	"\x04meta\x18\x03 \x01(\v2 .atlas.game.lockstep.SessionMetaR\x04meta\x12#\n" +
-	"\rcurrent_frame\x18\x04 \x01(\x04R\fcurrentFrame\x12=\n" +
-	"\bsnapshot\x18\x05 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\"f\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"\xab\x01\n" +
+	"\x0fJoinBattleReply\x124\n" +
+	"\x04meta\x18\x01 \x01(\v2 .atlas.game.lockstep.SessionMetaR\x04meta\x12#\n" +
+	"\rcurrent_frame\x18\x02 \x01(\x04R\fcurrentFrame\x12=\n" +
+	"\bsnapshot\x18\x03 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\"f\n" +
 	"\rFrameInputReq\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x128\n" +
 	"\x05input\x18\x02 \x01(\v2\".atlas.game.lockstep.LockstepInputR\x05input\"\x11\n" +
 	"\x0fFrameInputReply\"S\n" +
 	"\fReconnectReq\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12&\n" +
-	"\x0flast_seen_frame\x18\x02 \x01(\x04R\rlastSeenFrame\"\xbe\x01\n" +
-	"\x0eReconnectReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12#\n" +
-	"\rcurrent_frame\x18\x02 \x01(\x04R\fcurrentFrame\x12=\n" +
-	"\bsnapshot\x18\x03 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\x128\n" +
-	"\x06missed\x18\x04 \x03(\v2 .atlas.game.lockstep.FrameInputsR\x06missed\"\r\n" +
-	"\vGetStateReq\"}\n" +
-	"\rGetStateReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05state\x18\x02 \x01(\tR\x05state\x12#\n" +
-	"\rcurrent_frame\x18\x03 \x01(\x04R\fcurrentFrame\x12!\n" +
-	"\fplayer_count\x18\x04 \x01(\rR\vplayerCount\"\xaf\x02\n" +
-	"\x0eBattleActorMsg\x128\n" +
-	"\x06create\x18\x01 \x01(\v2\x1e.battle.v1.CreateBattleRequestH\x00R\x06create\x12.\n" +
-	"\x04join\x18\x02 \x01(\v2\x18.battle.v1.JoinBattleReqH\x00R\x04join\x12;\n" +
-	"\vframe_input\x18\x03 \x01(\v2\x18.battle.v1.FrameInputReqH\x00R\n" +
-	"frameInput\x127\n" +
-	"\treconnect\x18\x04 \x01(\v2\x17.battle.v1.ReconnectReqH\x00R\treconnect\x125\n" +
-	"\tget_state\x18\x05 \x01(\v2\x16.battle.v1.GetStateReqH\x00R\bgetStateB\x06\n" +
-	"\x04kind2\xd4\x01\n" +
+	"\x0flast_seen_frame\x18\x02 \x01(\x04R\rlastSeenFrame\"\xae\x01\n" +
+	"\x0eReconnectReply\x12#\n" +
+	"\rcurrent_frame\x18\x01 \x01(\x04R\fcurrentFrame\x12=\n" +
+	"\bsnapshot\x18\x02 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\x128\n" +
+	"\x06missed\x18\x03 \x03(\v2 .atlas.game.lockstep.FrameInputsR\x06missed\"\r\n" +
+	"\vGetStateReq\"m\n" +
+	"\rGetStateReply\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12#\n" +
+	"\rcurrent_frame\x18\x02 \x01(\x04R\fcurrentFrame\x12!\n" +
+	"\fplayer_count\x18\x03 \x01(\rR\vplayerCount2\xd4\x01\n" +
 	"\x06Battle\x12d\n" +
 	"\fCreateBattle\x12\x1e.battle.v1.CreateBattleRequest\x1a\x1c.battle.v1.CreateBattleReply\"\x16\x82\xd3\xe4\x93\x02\x10:\x01*\"\v/v1/battles\x12d\n" +
 	"\tGetBattle\x12\x1b.battle.v1.GetBattleRequest\x1a\x19.battle.v1.GetBattleReply\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/battles/{battle_id}B?Z=github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1b\x06proto3"
@@ -977,7 +801,7 @@ func file_api_battle_v1_battle_proto_rawDescGZIP() []byte {
 	return file_api_battle_v1_battle_proto_rawDescData
 }
 
-var file_api_battle_v1_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_api_battle_v1_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_api_battle_v1_battle_proto_goTypes = []any{
 	(*CreateBattleRequest)(nil),    // 0: battle.v1.CreateBattleRequest
 	(*CreateBattleReply)(nil),      // 1: battle.v1.CreateBattleReply
@@ -993,33 +817,27 @@ var file_api_battle_v1_battle_proto_goTypes = []any{
 	(*ReconnectReply)(nil),         // 11: battle.v1.ReconnectReply
 	(*GetStateReq)(nil),            // 12: battle.v1.GetStateReq
 	(*GetStateReply)(nil),          // 13: battle.v1.GetStateReply
-	(*BattleActorMsg)(nil),         // 14: battle.v1.BattleActorMsg
-	(*lockstep.SessionMeta)(nil),   // 15: atlas.game.lockstep.SessionMeta
-	(*lockstep.SnapshotMeta)(nil),  // 16: atlas.game.lockstep.SnapshotMeta
-	(*lockstep.LockstepInput)(nil), // 17: atlas.game.lockstep.LockstepInput
-	(*lockstep.FrameInputs)(nil),   // 18: atlas.game.lockstep.FrameInputs
+	(*lockstep.SessionMeta)(nil),   // 14: atlas.game.lockstep.SessionMeta
+	(*lockstep.SnapshotMeta)(nil),  // 15: atlas.game.lockstep.SnapshotMeta
+	(*lockstep.LockstepInput)(nil), // 16: atlas.game.lockstep.LockstepInput
+	(*lockstep.FrameInputs)(nil),   // 17: atlas.game.lockstep.FrameInputs
 }
 var file_api_battle_v1_battle_proto_depIdxs = []int32{
 	4,  // 0: battle.v1.BattleSettledEvent.players:type_name -> battle.v1.PlayerResult
-	15, // 1: battle.v1.JoinBattleReply.meta:type_name -> atlas.game.lockstep.SessionMeta
-	16, // 2: battle.v1.JoinBattleReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
-	17, // 3: battle.v1.FrameInputReq.input:type_name -> atlas.game.lockstep.LockstepInput
-	16, // 4: battle.v1.ReconnectReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
-	18, // 5: battle.v1.ReconnectReply.missed:type_name -> atlas.game.lockstep.FrameInputs
-	0,  // 6: battle.v1.BattleActorMsg.create:type_name -> battle.v1.CreateBattleRequest
-	6,  // 7: battle.v1.BattleActorMsg.join:type_name -> battle.v1.JoinBattleReq
-	8,  // 8: battle.v1.BattleActorMsg.frame_input:type_name -> battle.v1.FrameInputReq
-	10, // 9: battle.v1.BattleActorMsg.reconnect:type_name -> battle.v1.ReconnectReq
-	12, // 10: battle.v1.BattleActorMsg.get_state:type_name -> battle.v1.GetStateReq
-	0,  // 11: battle.v1.Battle.CreateBattle:input_type -> battle.v1.CreateBattleRequest
-	2,  // 12: battle.v1.Battle.GetBattle:input_type -> battle.v1.GetBattleRequest
-	1,  // 13: battle.v1.Battle.CreateBattle:output_type -> battle.v1.CreateBattleReply
-	3,  // 14: battle.v1.Battle.GetBattle:output_type -> battle.v1.GetBattleReply
-	13, // [13:15] is the sub-list for method output_type
-	11, // [11:13] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	14, // 1: battle.v1.JoinBattleReply.meta:type_name -> atlas.game.lockstep.SessionMeta
+	15, // 2: battle.v1.JoinBattleReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
+	16, // 3: battle.v1.FrameInputReq.input:type_name -> atlas.game.lockstep.LockstepInput
+	15, // 4: battle.v1.ReconnectReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
+	17, // 5: battle.v1.ReconnectReply.missed:type_name -> atlas.game.lockstep.FrameInputs
+	0,  // 6: battle.v1.Battle.CreateBattle:input_type -> battle.v1.CreateBattleRequest
+	2,  // 7: battle.v1.Battle.GetBattle:input_type -> battle.v1.GetBattleRequest
+	1,  // 8: battle.v1.Battle.CreateBattle:output_type -> battle.v1.CreateBattleReply
+	3,  // 9: battle.v1.Battle.GetBattle:output_type -> battle.v1.GetBattleReply
+	8,  // [8:10] is the sub-list for method output_type
+	6,  // [6:8] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_api_battle_v1_battle_proto_init() }
@@ -1027,20 +845,13 @@ func file_api_battle_v1_battle_proto_init() {
 	if File_api_battle_v1_battle_proto != nil {
 		return
 	}
-	file_api_battle_v1_battle_proto_msgTypes[14].OneofWrappers = []any{
-		(*BattleActorMsg_Create)(nil),
-		(*BattleActorMsg_Join)(nil),
-		(*BattleActorMsg_FrameInput)(nil),
-		(*BattleActorMsg_Reconnect)(nil),
-		(*BattleActorMsg_GetState)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_battle_v1_battle_proto_rawDesc), len(file_api_battle_v1_battle_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

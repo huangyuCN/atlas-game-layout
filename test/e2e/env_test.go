@@ -133,14 +133,11 @@ func seedBattle(t *testing.T, ctx context.Context, b *battleassemble.Battle, bat
 	if err != nil {
 		t.Fatalf("seedBattle PID: %v", err)
 	}
-	reply := new(battlev1.CreateBattleReply)
-	err = b.Runtime.AskProto(ctx, pid, &battlev1.BattleActorMsg{
-		Kind: &battlev1.BattleActorMsg_Create{Create: &battlev1.CreateBattleRequest{
-			MatchId:   "m-seed-" + battleID,
-			PlayerIds: playerIDs,
-		}},
-	}, reply)
-	if err != nil {
+	cli := battlev1.NewBattleActorClient(b.Runtime)
+	if _, err := cli.Create(ctx, pid, &battlev1.CreateBattleRequest{
+		MatchId:   "m-seed-" + battleID,
+		PlayerIds: playerIDs,
+	}); err != nil {
 		t.Fatalf("seedBattle 开局: %v", err)
 	}
 }
