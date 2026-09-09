@@ -34,7 +34,7 @@ type Gateway struct {
 	instanceID string
 	sess       *session.Manager
 	actors     *actorclient.Client
-	players    *gamev1.PlayerActorClient  // 生成的玩家 actor client stub
+	players    *gamev1.PlayerActorClient   // 生成的玩家 actor client stub
 	battles    *battlev1.BattleActorClient // 生成的战斗 actor client stub
 	nc         *nats.Conn
 	pushers    map[transport.Kind]pushServer

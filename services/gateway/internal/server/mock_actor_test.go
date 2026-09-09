@@ -17,7 +17,7 @@ import (
 // 消息为具体对象直传（生成的桩 switch 直接命中），回执直接返回对象（同节点形态）；
 // 注册/登录恒成功（player_id 取 PID uid）；加入战斗按 joinOK 裁决；帧输入/补帧记录投递。
 type mockActorRuntime struct {
-	logoutMsgs  []*gamev1.LogoutActorMsg            // 登出投递记录
+	logoutMsgs  []*gamev1.LogoutActorMsg             // 登出投递记录
 	joinOK      bool                                 // 加入战斗裁决（默认放行）
 	frameInputs map[string][]*battlev1.FrameInputReq // battleID → 帧输入序列
 	reconnects  map[string][]*battlev1.ReconnectReq  // battleID → 补帧请求序列
