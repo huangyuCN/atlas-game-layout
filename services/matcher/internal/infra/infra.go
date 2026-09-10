@@ -198,12 +198,17 @@ func NewSink(nc *natsgo.Conn, rt *pkgactor.Runtime) *Sink {
 	}
 }
 
+// PublishStarted 实现 biz.MatchEventSink：转发成局事件到内部发布器。
 func (s *Sink) PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string) error {
 	return s.publisher.PublishStarted(ctx, battleID, matchID, playerIDs)
 }
+
+// PublishFailed 实现 biz.MatchEventSink：转发失败事件到内部发布器。
 func (s *Sink) PublishFailed(ctx context.Context, matchID string, playerIDs []string, reason string) error {
 	return s.publisher.PublishFailed(ctx, matchID, playerIDs, reason)
 }
+
+// Start 实现 biz.BattleStarter：转发开局调用到内部 starter。
 func (s *Sink) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
 	return s.starter.Start(ctx, battleID, matchID, playerIDs)
 }

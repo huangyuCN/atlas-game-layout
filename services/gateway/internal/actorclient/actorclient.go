@@ -112,10 +112,12 @@ type invoker struct {
 	tell   func(ctx context.Context, pid types.PID, msg any) error
 }
 
+// Ask 实现 core.ActorInvoker：转发到构造时注入的运行时 Ask（SendOption 变参原样透传）。
 func (i invoker) Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error) {
 	return i.ask(ctx, pid, req, opts...)
 }
 
+// Tell 实现 core.ActorInvoker：转发到构造时注入的运行时 Tell。
 func (i invoker) Tell(ctx context.Context, pid types.PID, msg any) error {
 	return i.tell(ctx, pid, msg)
 }

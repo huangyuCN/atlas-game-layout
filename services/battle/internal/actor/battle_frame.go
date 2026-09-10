@@ -1,5 +1,6 @@
 // 帧同步/结算域：FrameInput（输入转发）+ onFrameResult/checkSettle（帧广播处理与
 // 结算）+ 帧协议辅助（主题/键/元信息编码）。实现 BattleActorServer 接口的帧部分。
+
 package actor
 
 import (

@@ -3,9 +3,10 @@
 // 本文件只含字段声明与序列化标签，保持模型干净（写代理方法全部在生成物中）。
 package models
 
-// +cow:undoproxy-gen=true
 // Player 是玩家聚合根：内存写模型（cow undo 回滚）与持久化视图共用同一结构。
 // PlayerActor 单协程串行写满足 cow 前提；BSON 用于 mongo、JSON 用于 redis 快照。
+//
+// +cow:undoproxy-gen=true
 type Player struct {
 	PlayerID  string  `bson:"_id" json:"player_id"`
 	Account   string  `bson:"account" json:"account"`

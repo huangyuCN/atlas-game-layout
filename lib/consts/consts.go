@@ -41,17 +41,17 @@ const (
 	PushOpBattleEnd      = "gateway.v1.BattleEndNotify"
 )
 
-// 成局事件主题：atlas.event.match.started。
+// MatchStartedTopic 返回成局事件主题：atlas.event.match.started。
 func MatchStartedTopic() string { return TopicEvent + "match.started" }
 
-// 失败事件主题：atlas.event.match.failed。
+// MatchFailedTopic 返回失败事件主题：atlas.event.match.failed。
 func MatchFailedTopic() string { return TopicEvent + "match.failed" }
 
-// 玩家推送主题拼接：atlas.push.<playerID>。
+// PushTopic 拼接玩家推送主题：atlas.push.<playerID>。
 func PushTopic(playerID string) string { return TopicPush + playerID }
 
-// 业务事件主题拼接：atlas.event.<kind>。
+// EventTopic 拼接业务事件主题：atlas.event.<kind>。
 func EventTopic(kind string) string { return TopicEvent + kind }
 
-// Gateway 控制主题拼接：atlas.gw.<instanceID>。
+// GatewayTopic 拼接 Gateway 控制主题：atlas.gw.<instanceID>。
 func GatewayTopic(instanceID string) string { return TopicGatewayControl + instanceID }

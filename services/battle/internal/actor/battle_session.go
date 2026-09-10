@@ -1,5 +1,6 @@
 // 会话域业务方法：Create/Join/Reconnect/GetState（实现 BattleActorServer 接口的
 // 会话部分）。管理一局战斗的玩家进出、状态查询与补帧；帧输入/结算见 battle_frame.go。
+
 package actor
 
 import (
