@@ -58,6 +58,14 @@ Atlas 类型仅在 `pkg/` 装配层使用。`go.mod` 以本地 `replace` 指向 
   - **公共抽象**：多处重复或可被清晰命名的逻辑，**必须**提取为包内/跨包的**公共函数**（或小型类型与方法），避免复制粘贴；提取时保持命名与现有代码风格一致。
   - **命名不得以包名开头**：包内导出的函数名、类型名、变量名杜绝以包名作为前缀。调用侧在使用时本身带有包名限定（如 `session.NewManager`），若函数名再以包名开头将形成冗余（`session.SessionNewManager`），且会触发 IDE 警告 "Name starts with the package name"。正确做法：`session.NewManager`（而非 `session.SessionNewManager`）。提交前可用 `make lint`（scripts/check-pkgname）自动检查全部导出标识符（函数/类型/变量/方法）是否以包名开头。
 - **代码注释语言**：所有手写代码注释必须使用中文，包括 Go doc 注释、行内注释、复杂逻辑说明和测试意图说明。允许保留英文的情况仅限专有协议字段、外部标准名、错误码、指标名、trace attribute 名、第三方 API 原文，以及 protobuf/OpenAPI/工具生成文件中的生成注释。
+- **Go 注释格式（IDEA 无波浪线）**：doc 注释首句**必须以被声明的东西的名字开头**（官方 go.dev/doc/comment 规范），否则 GoLand 的 `GoCommentStart`（Comment of exported element starts with the incorrect name）与 `GoExportedElementShouldHaveComment`（Missing comment）会产生下波浪线警告。规则速查（详细规范与正反示例见 `docs/go-comments.md`）：
+  1. **包注释**：必须以 `Package <包名>` 开头（`// Package ledger 实现 …`）。
+  2. **顶层类型/函数/单条常量/变量注释**：首词必须是**类型名/函数名/标识符名**（`// Store Mongo 客户端…`、`// New 连接…`、`// DBName 平台数据库名…`）。
+  3. **方法注释**：首词必须是**方法名**，**不带接收者类型前缀**（写 `// Coll 返回集合…`，不要写 `// Store.Coll …`）。
+  4. **结构体/接口导出字段注释**：**不要求**以字段名开头（官方明确建议字段注释简短说明、不必完整句）。
+  5. **注释与声明之间不能有空行**（否则不算 doc 注释，触发 Missing comment）；首句以句号结尾。
+  6. 行内注释、`//go:` 指令注释不受「首词」限制；非导出声明不强制 doc 注释。
+  7. 新增/修改代码时必须自查，code review 必查项：注释首词是否等于声明名。
 
 ---
 
