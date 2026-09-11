@@ -7,6 +7,7 @@ package game.v1;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
 
+import "api/common/v1/common.proto";
 import "api/game/v1/player.proto";
 import "api/matcher/v1/matcher.proto";
 import "google/protobuf/empty.proto";
@@ -28,6 +29,17 @@ service PlayerActor {
   rpc CancelMatch (CancelMatchActorReq) returns (CancelMatchActorReply);
   // GetMatchStatus 查询匹配状态（Ask）：轮询兜底用（成局/失败另有主动推送）。
   rpc GetMatchStatus (GetMatchStatusActorReq) returns (MatchStatusActorReply);
+  // ---- 组队域（灵活 1..N 人；名册权威在撮合域，PlayerActor 持引用与在线态）----
+  // CreateParty 建队（Ask）：本玩家为队长，回执名册快照。
+  rpc CreateParty (CreatePartyActorReq) returns (PartyActorReply);
+  // JoinParty 按 party_id 加入（Ask）：容量原子校验，回执名册快照。
+  rpc JoinParty (JoinPartyActorReq) returns (PartyActorReply);
+  // LeaveParty 离开（Ask）：幂等（不在队回执空快照）；队长离开顺延；空队解散。
+  rpc LeaveParty (LeavePartyActorReq) returns (PartyActorReply);
+  // GetParty 名册快照（Ask）：轮询兜底用（成员变更另有主动推送）。
+  rpc GetParty (GetPartyActorReq) returns (PartyActorReply);
+  // QueueParty 队长发整队入队（Ask）：1..N 人都可入队，等对面凑齐等量人数。
+  rpc QueueParty (QueuePartyActorReq) returns (QueuePartyActorReply);
 }
 
 // EnterMatchQueueActorReq 入队：仅规则集名（空串取服务端默认）。
@@ -47,8 +59,38 @@ message CancelMatchActorReply {
 message GetMatchStatusActorReq {}
 
 // MatchStatusActorReply 匹配状态（枚举语义见 matcher.v1.MatchState）。
+// battle_id 供「成局推送丢失后重登恢复」：matched 态据此恢复加入对局。
 message MatchStatusActorReply {
   matcher.v1.MatchState state = 1;
   string ticket_id = 2;
   string match_id = 3;
+  string battle_id = 4;
+}
+
+// ---- 组队域消息 ----
+
+message CreatePartyActorReq {}
+
+message JoinPartyActorReq {
+  string party_id = 1;
+}
+
+message LeavePartyActorReq {}
+
+message GetPartyActorReq {}
+
+message QueuePartyActorReq {
+  string ruleset = 1;
+}
+
+// PartyActorReply 队伍名册快照（离开/未组队回执空快照）。
+message PartyActorReply {
+  string party_id = 1;
+  string leader_id = 2;
+  repeated common.v1.PlayerSummary members = 3;
+}
+
+// QueuePartyActorReply 整队入队回执：ticket_id 关联失败/成局事件。
+message QueuePartyActorReply {
+  string ticket_id = 1;
 }

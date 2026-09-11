@@ -13,6 +13,8 @@ package gateway.v1;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1";
 
+import "api/common/v1/common.proto";
+import "api/matcher/v1/match_events.proto";
 import "api/matcher/v1/matcher.proto";
 
 // MatchQueueRequest 入队匹配。
@@ -40,21 +42,76 @@ message MatchStatusRequest {
 }
 
 // MatchStatusReply 匹配状态（轮询兜底；成局/失败另有主动推送）。
+// battle_id 在 matched 态回执，供开局推送丢失后重登恢复加入对局。
 message MatchStatusReply {
   matcher.v1.MatchState state = 1;
   string ticket_id = 2;
   string match_id = 3;
+  string battle_id = 4;
+}
+
+// ---- 灵活组队（1..N 人；客户端只传队伍标识/规则集，属性由服务端权威填充）----
+
+message PartyCreateRequest {
+  string token = 1;
+  string player_id = 2;
+}
+
+message PartyJoinRequest {
+  string token = 1;
+  string player_id = 2;
+  string party_id = 3;   // 队伍标识（队长分享）
+}
+
+message PartyLeaveRequest {
+  string token = 1;
+  string player_id = 2;
+}
+
+message PartyStatusRequest {
+  string token = 1;
+  string player_id = 2;
+}
+
+message PartyQueueRequest {
+  string token = 1;
+  string player_id = 2;
+  string ruleset = 3;
+}
+
+// PartyInfoReply 队伍名册快照（离开/未组队回执空快照）。
+message PartyInfoReply {
+  string party_id = 1;
+  string leader_id = 2;
+  repeated common.v1.PlayerSummary members = 3;
+}
+
+message PartyQueueReply {
+  string ticket_id = 1;
 }
 
 // MatchFailedNotify 服务端推送：匹配失败/超时/取消通知。
 message MatchFailedNotify {
   string ticket_id = 1;
-  string reason = 2;
+  matcher.v1.MatchFailReason reason = 2;
 }
 
-// GatewayMatch 是网关匹配服务（业务通道协议）。
+// PartyRosterNotify 服务端推送：队伍名册变更（建队/加入/离开/解散，全队下发）。
+message PartyRosterNotify {
+  string party_id = 1;
+  string leader_id = 2;
+  repeated string player_ids = 3;
+  matcher.v1.PartyRosterReason reason = 4;
+}
+
+// GatewayMatch 是网关匹配服务（业务通道协议）：单人匹配 + 灵活组队。
 service GatewayMatch {
   rpc QueueMatch (MatchQueueRequest) returns (MatchQueueReply);
   rpc CancelMatch (MatchCancelRequest) returns (MatchCancelReply);
   rpc MatchStatus (MatchStatusRequest) returns (MatchStatusReply);
+  rpc PartyCreate (PartyCreateRequest) returns (PartyInfoReply);
+  rpc PartyJoin (PartyJoinRequest) returns (PartyInfoReply);
+  rpc PartyLeave (PartyLeaveRequest) returns (PartyInfoReply);
+  rpc PartyStatus (PartyStatusRequest) returns (PartyInfoReply);
+  rpc PartyQueue (PartyQueueRequest) returns (PartyQueueReply);
 }

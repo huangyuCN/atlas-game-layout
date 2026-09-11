@@ -26,6 +26,11 @@ enum ErrorReason {
   // 匹配
   AlreadyInMatch = 2001 [(atlas.errors.code) = 409]; // 已在匹配中
   MatchNotFound = 2002 [(atlas.errors.code) = 404];  // 匹配不存在
+  PartyNotFound = 2003 [(atlas.errors.code) = 404];  // 队伍不存在或已解散
+  PartyFull = 2004 [(atlas.errors.code) = 409];      // 队伍已满
+  AlreadyInParty = 2005 [(atlas.errors.code) = 409]; // 已在队伍中
+  NotPartyLeader = 2006 [(atlas.errors.code) = 403]; // 仅队长可执行该操作
+  NotInParty = 2007 [(atlas.errors.code) = 404];     // 不在队伍中
 
   // 战斗
   BattleNotFound = 3001 [(atlas.errors.code) = 404]; // 战斗不存在

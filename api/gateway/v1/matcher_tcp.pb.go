@@ -21,12 +21,22 @@ const _ = tcpt.SupportPackageIsVersion1
 // Operation 常量定义 TCP 调用使用的完整方法名。
 const OperationGatewayMatchCancelMatchTCP = "/gateway.v1.GatewayMatch/CancelMatch"
 const OperationGatewayMatchMatchStatusTCP = "/gateway.v1.GatewayMatch/MatchStatus"
+const OperationGatewayMatchPartyCreateTCP = "/gateway.v1.GatewayMatch/PartyCreate"
+const OperationGatewayMatchPartyJoinTCP = "/gateway.v1.GatewayMatch/PartyJoin"
+const OperationGatewayMatchPartyLeaveTCP = "/gateway.v1.GatewayMatch/PartyLeave"
+const OperationGatewayMatchPartyQueueTCP = "/gateway.v1.GatewayMatch/PartyQueue"
+const OperationGatewayMatchPartyStatusTCP = "/gateway.v1.GatewayMatch/PartyStatus"
 const OperationGatewayMatchQueueMatchTCP = "/gateway.v1.GatewayMatch/QueueMatch"
 
 // GatewayMatchTCPClient 定义通过 TCP 调用服务的方法集合。
 type GatewayMatchTCPClient interface {
 	CancelMatch(ctx context.Context, req *MatchCancelRequest) (*MatchCancelReply, error)
 	MatchStatus(ctx context.Context, req *MatchStatusRequest) (*MatchStatusReply, error)
+	PartyCreate(ctx context.Context, req *PartyCreateRequest) (*PartyInfoReply, error)
+	PartyJoin(ctx context.Context, req *PartyJoinRequest) (*PartyInfoReply, error)
+	PartyLeave(ctx context.Context, req *PartyLeaveRequest) (*PartyInfoReply, error)
+	PartyQueue(ctx context.Context, req *PartyQueueRequest) (*PartyQueueReply, error)
+	PartyStatus(ctx context.Context, req *PartyStatusRequest) (*PartyInfoReply, error)
 	QueueMatch(ctx context.Context, req *MatchQueueRequest) (*MatchQueueReply, error)
 }
 
@@ -55,6 +65,46 @@ func (c *gatewayMatchTCPClient) MatchStatus(ctx context.Context, in *MatchStatus
 	return &out, nil
 }
 
+func (c *gatewayMatchTCPClient) PartyCreate(ctx context.Context, in *PartyCreateRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyCreateTCP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchTCPClient) PartyJoin(ctx context.Context, in *PartyJoinRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyJoinTCP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchTCPClient) PartyLeave(ctx context.Context, in *PartyLeaveRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyLeaveTCP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchTCPClient) PartyQueue(ctx context.Context, in *PartyQueueRequest) (*PartyQueueReply, error) {
+	var out PartyQueueReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyQueueTCP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchTCPClient) PartyStatus(ctx context.Context, in *PartyStatusRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyStatusTCP, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *gatewayMatchTCPClient) QueueMatch(ctx context.Context, in *MatchQueueRequest) (*MatchQueueReply, error) {
 	var out MatchQueueReply
 	if err := c.cc.Invoke(ctx, OperationGatewayMatchQueueMatchTCP, in, &out); err != nil {
@@ -67,6 +117,11 @@ func (c *gatewayMatchTCPClient) QueueMatch(ctx context.Context, in *MatchQueueRe
 type GatewayMatchTCPServer interface {
 	CancelMatch(context.Context, *MatchCancelRequest) (*MatchCancelReply, error)
 	MatchStatus(context.Context, *MatchStatusRequest) (*MatchStatusReply, error)
+	PartyCreate(context.Context, *PartyCreateRequest) (*PartyInfoReply, error)
+	PartyJoin(context.Context, *PartyJoinRequest) (*PartyInfoReply, error)
+	PartyLeave(context.Context, *PartyLeaveRequest) (*PartyInfoReply, error)
+	PartyQueue(context.Context, *PartyQueueRequest) (*PartyQueueReply, error)
+	PartyStatus(context.Context, *PartyStatusRequest) (*PartyInfoReply, error)
 	QueueMatch(context.Context, *MatchQueueRequest) (*MatchQueueReply, error)
 }
 
@@ -79,6 +134,21 @@ func RegisterGatewayMatchTCPServer(s *tcpt.Server, srv GatewayMatchTCPServer) er
 		return err
 	}
 	if err := s.Subscribe(OperationGatewayMatchMatchStatusTCP, _GatewayMatch_MatchStatus0_TCP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyCreateTCP, _GatewayMatch_PartyCreate0_TCP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyJoinTCP, _GatewayMatch_PartyJoin0_TCP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyLeaveTCP, _GatewayMatch_PartyLeave0_TCP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyStatusTCP, _GatewayMatch_PartyStatus0_TCP_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyQueueTCP, _GatewayMatch_PartyQueue0_TCP_Handler(srv)); err != nil {
 		return err
 	}
 	return nil
@@ -125,6 +195,91 @@ func _GatewayMatch_MatchStatus0_TCP_Handler(srv GatewayMatchTCPServer) tcpt.MsgH
 			return nil, err
 		}
 		out, err := srv.MatchStatus(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyCreate0_TCP_Handler(srv GatewayMatchTCPServer) tcpt.MsgHandler {
+	return func(ctx context.Context, dec tcpt.Decoder, enc tcpt.Encoder) ([]byte, error) {
+		in := new(PartyCreateRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyCreate(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyJoin0_TCP_Handler(srv GatewayMatchTCPServer) tcpt.MsgHandler {
+	return func(ctx context.Context, dec tcpt.Decoder, enc tcpt.Encoder) ([]byte, error) {
+		in := new(PartyJoinRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyJoin(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyLeave0_TCP_Handler(srv GatewayMatchTCPServer) tcpt.MsgHandler {
+	return func(ctx context.Context, dec tcpt.Decoder, enc tcpt.Encoder) ([]byte, error) {
+		in := new(PartyLeaveRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyLeave(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyStatus0_TCP_Handler(srv GatewayMatchTCPServer) tcpt.MsgHandler {
+	return func(ctx context.Context, dec tcpt.Decoder, enc tcpt.Encoder) ([]byte, error) {
+		in := new(PartyStatusRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyStatus(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyQueue0_TCP_Handler(srv GatewayMatchTCPServer) tcpt.MsgHandler {
+	return func(ctx context.Context, dec tcpt.Decoder, enc tcpt.Encoder) ([]byte, error) {
+		in := new(PartyQueueRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyQueue(ctx, in)
 		if err != nil {
 			return nil, err
 		}

@@ -52,9 +52,16 @@ message LogoutRequest {
 
 message LogoutReply {}
 
+// KickedReason 是被挤下线的原因。
+enum KickedReason {
+  KICKED_REASON_UNSPECIFIED = 0;
+  KICKED_REASON_LOGGED_IN_ELSEWHERE = 1; // 被新登录挤下线
+  KICKED_REASON_SESSION_EXPIRED = 2;     // 会话过期（预留）
+}
+
 // KickedNotify 服务端推送：被挤下线（旧连接断开前收到）。
 message KickedNotify {
-  string reason = 1;
+  KickedReason reason = 1;
 }
 
 // GatewayAuth 是网关认证服务（业务通道协议）。

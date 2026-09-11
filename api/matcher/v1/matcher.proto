@@ -47,10 +47,65 @@ message QueryMatchRequest {
 }
 
 // QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
+// battle_id 在 matched 态回执，供「开局推送丢失后重登恢复加入对局」。
 message QueryMatchReply {
   MatchState state = 1;
   string ticket_id = 2;
   string match_id = 3;
+  string battle_id = 4;
+}
+
+// ---- 灵活组队（1..N 人，整队票；属性均为服务端权威，调用方为各成员自己的 PlayerActor）----
+
+// PartyInfo 队伍名册快照（队长 + 全部成员）。
+message PartyInfo {
+  string party_id = 1;
+  string leader_id = 2;
+  repeated PartyMember members = 3;
+}
+
+message PartyMember {
+  string player_id = 1;
+  int32 level = 2;
+}
+
+message CreatePartyRequest {
+  string player_id = 1;
+  common.v1.PlayerSummary player = 2;
+}
+
+// CreatePartyReply 建队回执：party_id 即队伍标识（分享给成员加入）。
+message CreatePartyReply {
+  string party_id = 1;
+}
+
+message JoinPartyRequest {
+  string party_id = 1;
+  string player_id = 2;
+  common.v1.PlayerSummary player = 3;
+}
+
+message JoinPartyReply {}
+
+message LeavePartyRequest {
+  string party_id = 1;
+  string player_id = 2;
+}
+
+message LeavePartyReply {}
+
+message DescribePartyRequest {
+  string party_id = 1;
+}
+
+message QueuePartyRequest {
+  string party_id = 1;
+  string ruleset = 2;
+}
+
+// QueuePartyReply 整队入队回执：ticket_id 关联失败/成局事件。
+message QueuePartyReply {
+  string ticket_id = 1;
 }
 
 // Matcher 是撮合服务。
@@ -70,6 +125,40 @@ service Matcher {
   rpc QueryMatch (QueryMatchRequest) returns (QueryMatchReply) {
     option (google.api.http) = {
       get: "/v1/matcher/query/{player_id}"
+    };
+  }
+  // CreateParty 队长建队（名册权威在撮合域 redis，带 TTL）。
+  rpc CreateParty (CreatePartyRequest) returns (CreatePartyReply) {
+    option (google.api.http) = {
+      post: "/v1/matcher/party/create"
+      body: "*"
+    };
+  }
+  // JoinParty 按 party_id 加入队伍（容量原子校验，满员拒绝）。
+  rpc JoinParty (JoinPartyRequest) returns (JoinPartyReply) {
+    option (google.api.http) = {
+      post: "/v1/matcher/party/join"
+      body: "*"
+    };
+  }
+  // LeaveParty 离开队伍（队长顺延；空队解散）。
+  rpc LeaveParty (LeavePartyRequest) returns (LeavePartyReply) {
+    option (google.api.http) = {
+      post: "/v1/matcher/party/leave"
+      body: "*"
+    };
+  }
+  // DescribeParty 名册快照（轮询兜底用）。
+  rpc DescribeParty (DescribePartyRequest) returns (PartyInfo) {
+    option (google.api.http) = {
+      get: "/v1/matcher/party/{party_id}"
+    };
+  }
+  // QueueParty 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+  rpc QueueParty (QueuePartyRequest) returns (QueuePartyReply) {
+    option (google.api.http) = {
+      post: "/v1/matcher/party/queue"
+      body: "*"
     };
   }
 }

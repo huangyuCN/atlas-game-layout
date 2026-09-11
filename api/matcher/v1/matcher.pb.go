@@ -325,11 +325,13 @@ func (x *QueryMatchRequest) GetPlayerId() string {
 }
 
 // QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
+// battle_id 在 matched 态回执，供「开局推送丢失后重登恢复加入对局」。
 type QueryMatchReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	State         MatchState             `protobuf:"varint,1,opt,name=state,proto3,enum=matcher.v1.MatchState" json:"state,omitempty"`
 	TicketId      string                 `protobuf:"bytes,2,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
 	MatchId       string                 `protobuf:"bytes,3,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	BattleId      string                 `protobuf:"bytes,4,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -385,6 +387,548 @@ func (x *QueryMatchReply) GetMatchId() string {
 	return ""
 }
 
+func (x *QueryMatchReply) GetBattleId() string {
+	if x != nil {
+		return x.BattleId
+	}
+	return ""
+}
+
+// PartyInfo 队伍名册快照（队长 + 全部成员）。
+type PartyInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	LeaderId      string                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	Members       []*PartyMember         `protobuf:"bytes,3,rep,name=members,proto3" json:"members,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PartyInfo) Reset() {
+	*x = PartyInfo{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PartyInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PartyInfo) ProtoMessage() {}
+
+func (x *PartyInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PartyInfo.ProtoReflect.Descriptor instead.
+func (*PartyInfo) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PartyInfo) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+func (x *PartyInfo) GetLeaderId() string {
+	if x != nil {
+		return x.LeaderId
+	}
+	return ""
+}
+
+func (x *PartyInfo) GetMembers() []*PartyMember {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
+type PartyMember struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlayerId      string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Level         int32                  `protobuf:"varint,2,opt,name=level,proto3" json:"level,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PartyMember) Reset() {
+	*x = PartyMember{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PartyMember) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PartyMember) ProtoMessage() {}
+
+func (x *PartyMember) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PartyMember.ProtoReflect.Descriptor instead.
+func (*PartyMember) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PartyMember) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
+}
+
+func (x *PartyMember) GetLevel() int32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+type CreatePartyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlayerId      string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Player        *v1.PlayerSummary      `protobuf:"bytes,2,opt,name=player,proto3" json:"player,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreatePartyRequest) Reset() {
+	*x = CreatePartyRequest{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreatePartyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreatePartyRequest) ProtoMessage() {}
+
+func (x *CreatePartyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreatePartyRequest.ProtoReflect.Descriptor instead.
+func (*CreatePartyRequest) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CreatePartyRequest) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
+}
+
+func (x *CreatePartyRequest) GetPlayer() *v1.PlayerSummary {
+	if x != nil {
+		return x.Player
+	}
+	return nil
+}
+
+// CreatePartyReply 建队回执：party_id 即队伍标识（分享给成员加入）。
+type CreatePartyReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreatePartyReply) Reset() {
+	*x = CreatePartyReply{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreatePartyReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreatePartyReply) ProtoMessage() {}
+
+func (x *CreatePartyReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreatePartyReply.ProtoReflect.Descriptor instead.
+func (*CreatePartyReply) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreatePartyReply) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+type JoinPartyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	PlayerId      string                 `protobuf:"bytes,2,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Player        *v1.PlayerSummary      `protobuf:"bytes,3,opt,name=player,proto3" json:"player,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinPartyRequest) Reset() {
+	*x = JoinPartyRequest{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinPartyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinPartyRequest) ProtoMessage() {}
+
+func (x *JoinPartyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinPartyRequest.ProtoReflect.Descriptor instead.
+func (*JoinPartyRequest) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *JoinPartyRequest) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+func (x *JoinPartyRequest) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
+}
+
+func (x *JoinPartyRequest) GetPlayer() *v1.PlayerSummary {
+	if x != nil {
+		return x.Player
+	}
+	return nil
+}
+
+type JoinPartyReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinPartyReply) Reset() {
+	*x = JoinPartyReply{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinPartyReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinPartyReply) ProtoMessage() {}
+
+func (x *JoinPartyReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinPartyReply.ProtoReflect.Descriptor instead.
+func (*JoinPartyReply) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{11}
+}
+
+type LeavePartyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	PlayerId      string                 `protobuf:"bytes,2,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeavePartyRequest) Reset() {
+	*x = LeavePartyRequest{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeavePartyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeavePartyRequest) ProtoMessage() {}
+
+func (x *LeavePartyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeavePartyRequest.ProtoReflect.Descriptor instead.
+func (*LeavePartyRequest) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *LeavePartyRequest) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+func (x *LeavePartyRequest) GetPlayerId() string {
+	if x != nil {
+		return x.PlayerId
+	}
+	return ""
+}
+
+type LeavePartyReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeavePartyReply) Reset() {
+	*x = LeavePartyReply{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeavePartyReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeavePartyReply) ProtoMessage() {}
+
+func (x *LeavePartyReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeavePartyReply.ProtoReflect.Descriptor instead.
+func (*LeavePartyReply) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{13}
+}
+
+type DescribePartyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DescribePartyRequest) Reset() {
+	*x = DescribePartyRequest{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DescribePartyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DescribePartyRequest) ProtoMessage() {}
+
+func (x *DescribePartyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DescribePartyRequest.ProtoReflect.Descriptor instead.
+func (*DescribePartyRequest) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *DescribePartyRequest) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+type QueuePartyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	Ruleset       string                 `protobuf:"bytes,2,opt,name=ruleset,proto3" json:"ruleset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueuePartyRequest) Reset() {
+	*x = QueuePartyRequest{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueuePartyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueuePartyRequest) ProtoMessage() {}
+
+func (x *QueuePartyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueuePartyRequest.ProtoReflect.Descriptor instead.
+func (*QueuePartyRequest) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *QueuePartyRequest) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+func (x *QueuePartyRequest) GetRuleset() string {
+	if x != nil {
+		return x.Ruleset
+	}
+	return ""
+}
+
+// QueuePartyReply 整队入队回执：ticket_id 关联失败/成局事件。
+type QueuePartyReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TicketId      string                 `protobuf:"bytes,1,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueuePartyReply) Reset() {
+	*x = QueuePartyReply{}
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueuePartyReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueuePartyReply) ProtoMessage() {}
+
+func (x *QueuePartyReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_matcher_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueuePartyReply.ProtoReflect.Descriptor instead.
+func (*QueuePartyReply) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_matcher_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *QueuePartyReply) GetTicketId() string {
+	if x != nil {
+		return x.TicketId
+	}
+	return ""
+}
+
 var File_api_matcher_v1_matcher_proto protoreflect.FileDescriptor
 
 const file_api_matcher_v1_matcher_proto_rawDesc = "" +
@@ -402,24 +946,60 @@ const file_api_matcher_v1_matcher_proto_rawDesc = "" +
 	"\x10CancelMatchReply\x12\x1a\n" +
 	"\bcanceled\x18\x01 \x01(\bR\bcanceled\"0\n" +
 	"\x11QueryMatchRequest\x12\x1b\n" +
-	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"w\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"\x94\x01\n" +
 	"\x0fQueryMatchReply\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.matcher.v1.MatchStateR\x05state\x12\x1b\n" +
 	"\tticket_id\x18\x02 \x01(\tR\bticketId\x12\x19\n" +
-	"\bmatch_id\x18\x03 \x01(\tR\amatchId*\x89\x01\n" +
+	"\bmatch_id\x18\x03 \x01(\tR\amatchId\x12\x1b\n" +
+	"\tbattle_id\x18\x04 \x01(\tR\bbattleId\"v\n" +
+	"\tPartyInfo\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\x12\x1b\n" +
+	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x121\n" +
+	"\amembers\x18\x03 \x03(\v2\x17.matcher.v1.PartyMemberR\amembers\"@\n" +
+	"\vPartyMember\x12\x1b\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x14\n" +
+	"\x05level\x18\x02 \x01(\x05R\x05level\"c\n" +
+	"\x12CreatePartyRequest\x12\x1b\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x120\n" +
+	"\x06player\x18\x02 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"-\n" +
+	"\x10CreatePartyReply\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\"|\n" +
+	"\x10JoinPartyRequest\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\x12\x1b\n" +
+	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\x120\n" +
+	"\x06player\x18\x03 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"\x10\n" +
+	"\x0eJoinPartyReply\"K\n" +
+	"\x11LeavePartyRequest\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\x12\x1b\n" +
+	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\"\x11\n" +
+	"\x0fLeavePartyReply\"1\n" +
+	"\x14DescribePartyRequest\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\"H\n" +
+	"\x11QueuePartyRequest\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\x12\x18\n" +
+	"\aruleset\x18\x02 \x01(\tR\aruleset\".\n" +
+	"\x0fQueuePartyReply\x12\x1b\n" +
+	"\tticket_id\x18\x01 \x01(\tR\bticketId*\x89\x01\n" +
 	"\n" +
 	"MatchState\x12\x1b\n" +
 	"\x17MATCH_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13MATCH_STATE_WAITING\x10\x01\x12\x17\n" +
 	"\x13MATCH_STATE_MATCHED\x10\x02\x12\x16\n" +
 	"\x12MATCH_STATE_FAILED\x10\x03\x12\x14\n" +
-	"\x10MATCH_STATE_NONE\x10\x042\xce\x02\n" +
+	"\x10MATCH_STATE_NONE\x10\x042\xf6\x06\n" +
 	"\aMatcher\x12f\n" +
 	"\n" +
 	"QueueMatch\x12\x1d.matcher.v1.QueueMatchRequest\x1a\x1b.matcher.v1.QueueMatchReply\"\x1c\x82\xd3\xe4\x93\x02\x16:\x01*\"\x11/v1/matcher/queue\x12j\n" +
 	"\vCancelMatch\x12\x1e.matcher.v1.CancelMatchRequest\x1a\x1c.matcher.v1.CancelMatchReply\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/v1/matcher/cancel\x12o\n" +
 	"\n" +
-	"QueryMatch\x12\x1d.matcher.v1.QueryMatchRequest\x1a\x1b.matcher.v1.QueryMatchReply\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/matcher/query/{player_id}BAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
+	"QueryMatch\x12\x1d.matcher.v1.QueryMatchRequest\x1a\x1b.matcher.v1.QueryMatchReply\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/matcher/query/{player_id}\x12p\n" +
+	"\vCreateParty\x12\x1e.matcher.v1.CreatePartyRequest\x1a\x1c.matcher.v1.CreatePartyReply\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/matcher/party/create\x12h\n" +
+	"\tJoinParty\x12\x1c.matcher.v1.JoinPartyRequest\x1a\x1a.matcher.v1.JoinPartyReply\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/matcher/party/join\x12l\n" +
+	"\n" +
+	"LeaveParty\x12\x1d.matcher.v1.LeavePartyRequest\x1a\x1b.matcher.v1.LeavePartyReply\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/matcher/party/leave\x12n\n" +
+	"\rDescribeParty\x12 .matcher.v1.DescribePartyRequest\x1a\x15.matcher.v1.PartyInfo\"$\x82\xd3\xe4\x93\x02\x1e\x12\x1c/v1/matcher/party/{party_id}\x12l\n" +
+	"\n" +
+	"QueueParty\x12\x1d.matcher.v1.QueuePartyRequest\x1a\x1b.matcher.v1.QueuePartyReply\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/matcher/party/queueBAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
 
 var (
 	file_api_matcher_v1_matcher_proto_rawDescOnce sync.Once
@@ -434,31 +1014,55 @@ func file_api_matcher_v1_matcher_proto_rawDescGZIP() []byte {
 }
 
 var file_api_matcher_v1_matcher_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_matcher_v1_matcher_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_api_matcher_v1_matcher_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_api_matcher_v1_matcher_proto_goTypes = []any{
-	(MatchState)(0),            // 0: matcher.v1.MatchState
-	(*QueueMatchRequest)(nil),  // 1: matcher.v1.QueueMatchRequest
-	(*QueueMatchReply)(nil),    // 2: matcher.v1.QueueMatchReply
-	(*CancelMatchRequest)(nil), // 3: matcher.v1.CancelMatchRequest
-	(*CancelMatchReply)(nil),   // 4: matcher.v1.CancelMatchReply
-	(*QueryMatchRequest)(nil),  // 5: matcher.v1.QueryMatchRequest
-	(*QueryMatchReply)(nil),    // 6: matcher.v1.QueryMatchReply
-	(*v1.PlayerSummary)(nil),   // 7: common.v1.PlayerSummary
+	(MatchState)(0),              // 0: matcher.v1.MatchState
+	(*QueueMatchRequest)(nil),    // 1: matcher.v1.QueueMatchRequest
+	(*QueueMatchReply)(nil),      // 2: matcher.v1.QueueMatchReply
+	(*CancelMatchRequest)(nil),   // 3: matcher.v1.CancelMatchRequest
+	(*CancelMatchReply)(nil),     // 4: matcher.v1.CancelMatchReply
+	(*QueryMatchRequest)(nil),    // 5: matcher.v1.QueryMatchRequest
+	(*QueryMatchReply)(nil),      // 6: matcher.v1.QueryMatchReply
+	(*PartyInfo)(nil),            // 7: matcher.v1.PartyInfo
+	(*PartyMember)(nil),          // 8: matcher.v1.PartyMember
+	(*CreatePartyRequest)(nil),   // 9: matcher.v1.CreatePartyRequest
+	(*CreatePartyReply)(nil),     // 10: matcher.v1.CreatePartyReply
+	(*JoinPartyRequest)(nil),     // 11: matcher.v1.JoinPartyRequest
+	(*JoinPartyReply)(nil),       // 12: matcher.v1.JoinPartyReply
+	(*LeavePartyRequest)(nil),    // 13: matcher.v1.LeavePartyRequest
+	(*LeavePartyReply)(nil),      // 14: matcher.v1.LeavePartyReply
+	(*DescribePartyRequest)(nil), // 15: matcher.v1.DescribePartyRequest
+	(*QueuePartyRequest)(nil),    // 16: matcher.v1.QueuePartyRequest
+	(*QueuePartyReply)(nil),      // 17: matcher.v1.QueuePartyReply
+	(*v1.PlayerSummary)(nil),     // 18: common.v1.PlayerSummary
 }
 var file_api_matcher_v1_matcher_proto_depIdxs = []int32{
-	7, // 0: matcher.v1.QueueMatchRequest.player:type_name -> common.v1.PlayerSummary
-	0, // 1: matcher.v1.QueryMatchReply.state:type_name -> matcher.v1.MatchState
-	1, // 2: matcher.v1.Matcher.QueueMatch:input_type -> matcher.v1.QueueMatchRequest
-	3, // 3: matcher.v1.Matcher.CancelMatch:input_type -> matcher.v1.CancelMatchRequest
-	5, // 4: matcher.v1.Matcher.QueryMatch:input_type -> matcher.v1.QueryMatchRequest
-	2, // 5: matcher.v1.Matcher.QueueMatch:output_type -> matcher.v1.QueueMatchReply
-	4, // 6: matcher.v1.Matcher.CancelMatch:output_type -> matcher.v1.CancelMatchReply
-	6, // 7: matcher.v1.Matcher.QueryMatch:output_type -> matcher.v1.QueryMatchReply
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	18, // 0: matcher.v1.QueueMatchRequest.player:type_name -> common.v1.PlayerSummary
+	0,  // 1: matcher.v1.QueryMatchReply.state:type_name -> matcher.v1.MatchState
+	8,  // 2: matcher.v1.PartyInfo.members:type_name -> matcher.v1.PartyMember
+	18, // 3: matcher.v1.CreatePartyRequest.player:type_name -> common.v1.PlayerSummary
+	18, // 4: matcher.v1.JoinPartyRequest.player:type_name -> common.v1.PlayerSummary
+	1,  // 5: matcher.v1.Matcher.QueueMatch:input_type -> matcher.v1.QueueMatchRequest
+	3,  // 6: matcher.v1.Matcher.CancelMatch:input_type -> matcher.v1.CancelMatchRequest
+	5,  // 7: matcher.v1.Matcher.QueryMatch:input_type -> matcher.v1.QueryMatchRequest
+	9,  // 8: matcher.v1.Matcher.CreateParty:input_type -> matcher.v1.CreatePartyRequest
+	11, // 9: matcher.v1.Matcher.JoinParty:input_type -> matcher.v1.JoinPartyRequest
+	13, // 10: matcher.v1.Matcher.LeaveParty:input_type -> matcher.v1.LeavePartyRequest
+	15, // 11: matcher.v1.Matcher.DescribeParty:input_type -> matcher.v1.DescribePartyRequest
+	16, // 12: matcher.v1.Matcher.QueueParty:input_type -> matcher.v1.QueuePartyRequest
+	2,  // 13: matcher.v1.Matcher.QueueMatch:output_type -> matcher.v1.QueueMatchReply
+	4,  // 14: matcher.v1.Matcher.CancelMatch:output_type -> matcher.v1.CancelMatchReply
+	6,  // 15: matcher.v1.Matcher.QueryMatch:output_type -> matcher.v1.QueryMatchReply
+	10, // 16: matcher.v1.Matcher.CreateParty:output_type -> matcher.v1.CreatePartyReply
+	12, // 17: matcher.v1.Matcher.JoinParty:output_type -> matcher.v1.JoinPartyReply
+	14, // 18: matcher.v1.Matcher.LeaveParty:output_type -> matcher.v1.LeavePartyReply
+	7,  // 19: matcher.v1.Matcher.DescribeParty:output_type -> matcher.v1.PartyInfo
+	17, // 20: matcher.v1.Matcher.QueueParty:output_type -> matcher.v1.QueuePartyReply
+	13, // [13:21] is the sub-list for method output_type
+	5,  // [5:13] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_api_matcher_v1_matcher_proto_init() }
@@ -472,7 +1076,7 @@ func file_api_matcher_v1_matcher_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_matcher_v1_matcher_proto_rawDesc), len(file_api_matcher_v1_matcher_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

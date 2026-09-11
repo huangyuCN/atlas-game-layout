@@ -24,13 +24,28 @@ var _ = http.Operation
 var _ = http.PathTemplate
 
 const OperationMatcherCancelMatch = "/matcher.v1.Matcher/CancelMatch"
+const OperationMatcherCreateParty = "/matcher.v1.Matcher/CreateParty"
+const OperationMatcherDescribeParty = "/matcher.v1.Matcher/DescribeParty"
+const OperationMatcherJoinParty = "/matcher.v1.Matcher/JoinParty"
+const OperationMatcherLeaveParty = "/matcher.v1.Matcher/LeaveParty"
 const OperationMatcherQueryMatch = "/matcher.v1.Matcher/QueryMatch"
 const OperationMatcherQueueMatch = "/matcher.v1.Matcher/QueueMatch"
+const OperationMatcherQueueParty = "/matcher.v1.Matcher/QueueParty"
 
 type MatcherHTTPServer interface {
 	CancelMatch(context.Context, *CancelMatchRequest) (*CancelMatchReply, error)
+	// CreateParty CreateParty 队长建队（名册权威在撮合域 redis，带 TTL）。
+	CreateParty(context.Context, *CreatePartyRequest) (*CreatePartyReply, error)
+	// DescribeParty DescribeParty 名册快照（轮询兜底用）。
+	DescribeParty(context.Context, *DescribePartyRequest) (*PartyInfo, error)
+	// JoinParty JoinParty 按 party_id 加入队伍（容量原子校验，满员拒绝）。
+	JoinParty(context.Context, *JoinPartyRequest) (*JoinPartyReply, error)
+	// LeaveParty LeaveParty 离开队伍（队长顺延；空队解散）。
+	LeaveParty(context.Context, *LeavePartyRequest) (*LeavePartyReply, error)
 	QueryMatch(context.Context, *QueryMatchRequest) (*QueryMatchReply, error)
 	QueueMatch(context.Context, *QueueMatchRequest) (*QueueMatchReply, error)
+	// QueueParty QueueParty 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+	QueueParty(context.Context, *QueuePartyRequest) (*QueuePartyReply, error)
 }
 
 func RegisterMatcherHTTPServer(s *http.Server, srv MatcherHTTPServer) {
@@ -38,6 +53,11 @@ func RegisterMatcherHTTPServer(s *http.Server, srv MatcherHTTPServer) {
 	r.POST("/v1/matcher/queue", _Matcher_QueueMatch0_HTTP_Handler(srv))
 	r.POST("/v1/matcher/cancel", _Matcher_CancelMatch0_HTTP_Handler(srv))
 	r.GET("/v1/matcher/query/{player_id}", _Matcher_QueryMatch0_HTTP_Handler(srv))
+	r.POST("/v1/matcher/party/create", _Matcher_CreateParty0_HTTP_Handler(srv))
+	r.POST("/v1/matcher/party/join", _Matcher_JoinParty0_HTTP_Handler(srv))
+	r.POST("/v1/matcher/party/leave", _Matcher_LeaveParty0_HTTP_Handler(srv))
+	r.GET("/v1/matcher/party/{party_id}", _Matcher_DescribeParty0_HTTP_Handler(srv))
+	r.POST("/v1/matcher/party/queue", _Matcher_QueueParty0_HTTP_Handler(srv))
 }
 
 func _Matcher_QueueMatch0_HTTP_Handler(srv MatcherHTTPServer) func(ctx http.Context) error {
@@ -106,10 +126,130 @@ func _Matcher_QueryMatch0_HTTP_Handler(srv MatcherHTTPServer) func(ctx http.Cont
 	}
 }
 
+func _Matcher_CreateParty0_HTTP_Handler(srv MatcherHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in CreatePartyRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationMatcherCreateParty)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.CreateParty(ctx, req.(*CreatePartyRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*CreatePartyReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Matcher_JoinParty0_HTTP_Handler(srv MatcherHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in JoinPartyRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationMatcherJoinParty)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.JoinParty(ctx, req.(*JoinPartyRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*JoinPartyReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Matcher_LeaveParty0_HTTP_Handler(srv MatcherHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in LeavePartyRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationMatcherLeaveParty)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.LeaveParty(ctx, req.(*LeavePartyRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*LeavePartyReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Matcher_DescribeParty0_HTTP_Handler(srv MatcherHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in DescribePartyRequest
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindVars(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationMatcherDescribeParty)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.DescribeParty(ctx, req.(*DescribePartyRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*PartyInfo)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Matcher_QueueParty0_HTTP_Handler(srv MatcherHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in QueuePartyRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationMatcherQueueParty)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.QueueParty(ctx, req.(*QueuePartyRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*QueuePartyReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 type MatcherHTTPClient interface {
 	CancelMatch(ctx context.Context, req *CancelMatchRequest, opts ...http.CallOption) (rsp *CancelMatchReply, err error)
+	// CreateParty CreateParty 队长建队（名册权威在撮合域 redis，带 TTL）。
+	CreateParty(ctx context.Context, req *CreatePartyRequest, opts ...http.CallOption) (rsp *CreatePartyReply, err error)
+	// DescribeParty DescribeParty 名册快照（轮询兜底用）。
+	DescribeParty(ctx context.Context, req *DescribePartyRequest, opts ...http.CallOption) (rsp *PartyInfo, err error)
+	// JoinParty JoinParty 按 party_id 加入队伍（容量原子校验，满员拒绝）。
+	JoinParty(ctx context.Context, req *JoinPartyRequest, opts ...http.CallOption) (rsp *JoinPartyReply, err error)
+	// LeaveParty LeaveParty 离开队伍（队长顺延；空队解散）。
+	LeaveParty(ctx context.Context, req *LeavePartyRequest, opts ...http.CallOption) (rsp *LeavePartyReply, err error)
 	QueryMatch(ctx context.Context, req *QueryMatchRequest, opts ...http.CallOption) (rsp *QueryMatchReply, err error)
 	QueueMatch(ctx context.Context, req *QueueMatchRequest, opts ...http.CallOption) (rsp *QueueMatchReply, err error)
+	// QueueParty QueueParty 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+	QueueParty(ctx context.Context, req *QueuePartyRequest, opts ...http.CallOption) (rsp *QueuePartyReply, err error)
 }
 
 type MatcherHTTPClientImpl struct {
@@ -125,6 +265,62 @@ func (c *MatcherHTTPClientImpl) CancelMatch(ctx context.Context, in *CancelMatch
 	pattern := "/v1/matcher/cancel"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationMatcherCancelMatch))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateParty CreateParty 队长建队（名册权威在撮合域 redis，带 TTL）。
+func (c *MatcherHTTPClientImpl) CreateParty(ctx context.Context, in *CreatePartyRequest, opts ...http.CallOption) (*CreatePartyReply, error) {
+	var out CreatePartyReply
+	pattern := "/v1/matcher/party/create"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationMatcherCreateParty))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DescribeParty DescribeParty 名册快照（轮询兜底用）。
+func (c *MatcherHTTPClientImpl) DescribeParty(ctx context.Context, in *DescribePartyRequest, opts ...http.CallOption) (*PartyInfo, error) {
+	var out PartyInfo
+	pattern := "/v1/matcher/party/{party_id}"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationMatcherDescribeParty))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// JoinParty JoinParty 按 party_id 加入队伍（容量原子校验，满员拒绝）。
+func (c *MatcherHTTPClientImpl) JoinParty(ctx context.Context, in *JoinPartyRequest, opts ...http.CallOption) (*JoinPartyReply, error) {
+	var out JoinPartyReply
+	pattern := "/v1/matcher/party/join"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationMatcherJoinParty))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// LeaveParty LeaveParty 离开队伍（队长顺延；空队解散）。
+func (c *MatcherHTTPClientImpl) LeaveParty(ctx context.Context, in *LeavePartyRequest, opts ...http.CallOption) (*LeavePartyReply, error) {
+	var out LeavePartyReply
+	pattern := "/v1/matcher/party/leave"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationMatcherLeaveParty))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
@@ -151,6 +347,20 @@ func (c *MatcherHTTPClientImpl) QueueMatch(ctx context.Context, in *QueueMatchRe
 	pattern := "/v1/matcher/queue"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationMatcherQueueMatch))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// QueueParty QueueParty 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+func (c *MatcherHTTPClientImpl) QueueParty(ctx context.Context, in *QueuePartyRequest, opts ...http.CallOption) (*QueuePartyReply, error) {
+	var out QueuePartyReply
+	pattern := "/v1/matcher/party/queue"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationMatcherQueueParty))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

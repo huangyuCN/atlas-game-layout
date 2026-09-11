@@ -21,12 +21,22 @@ const _ = wst.SupportPackageIsVersion1
 // Operation 常量定义 WebSocket 调用使用的完整方法名。
 const OperationGatewayMatchCancelMatchWS = "/gateway.v1.GatewayMatch/CancelMatch"
 const OperationGatewayMatchMatchStatusWS = "/gateway.v1.GatewayMatch/MatchStatus"
+const OperationGatewayMatchPartyCreateWS = "/gateway.v1.GatewayMatch/PartyCreate"
+const OperationGatewayMatchPartyJoinWS = "/gateway.v1.GatewayMatch/PartyJoin"
+const OperationGatewayMatchPartyLeaveWS = "/gateway.v1.GatewayMatch/PartyLeave"
+const OperationGatewayMatchPartyQueueWS = "/gateway.v1.GatewayMatch/PartyQueue"
+const OperationGatewayMatchPartyStatusWS = "/gateway.v1.GatewayMatch/PartyStatus"
 const OperationGatewayMatchQueueMatchWS = "/gateway.v1.GatewayMatch/QueueMatch"
 
 // GatewayMatchWSClient 定义通过 WebSocket 调用服务的方法集合。
 type GatewayMatchWSClient interface {
 	CancelMatch(ctx context.Context, req *MatchCancelRequest) (*MatchCancelReply, error)
 	MatchStatus(ctx context.Context, req *MatchStatusRequest) (*MatchStatusReply, error)
+	PartyCreate(ctx context.Context, req *PartyCreateRequest) (*PartyInfoReply, error)
+	PartyJoin(ctx context.Context, req *PartyJoinRequest) (*PartyInfoReply, error)
+	PartyLeave(ctx context.Context, req *PartyLeaveRequest) (*PartyInfoReply, error)
+	PartyQueue(ctx context.Context, req *PartyQueueRequest) (*PartyQueueReply, error)
+	PartyStatus(ctx context.Context, req *PartyStatusRequest) (*PartyInfoReply, error)
 	QueueMatch(ctx context.Context, req *MatchQueueRequest) (*MatchQueueReply, error)
 }
 
@@ -55,6 +65,46 @@ func (c *gatewayMatchWSClient) MatchStatus(ctx context.Context, in *MatchStatusR
 	return &out, nil
 }
 
+func (c *gatewayMatchWSClient) PartyCreate(ctx context.Context, in *PartyCreateRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyCreateWS, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchWSClient) PartyJoin(ctx context.Context, in *PartyJoinRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyJoinWS, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchWSClient) PartyLeave(ctx context.Context, in *PartyLeaveRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyLeaveWS, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchWSClient) PartyQueue(ctx context.Context, in *PartyQueueRequest) (*PartyQueueReply, error) {
+	var out PartyQueueReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyQueueWS, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *gatewayMatchWSClient) PartyStatus(ctx context.Context, in *PartyStatusRequest) (*PartyInfoReply, error) {
+	var out PartyInfoReply
+	if err := c.cc.Invoke(ctx, OperationGatewayMatchPartyStatusWS, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *gatewayMatchWSClient) QueueMatch(ctx context.Context, in *MatchQueueRequest) (*MatchQueueReply, error) {
 	var out MatchQueueReply
 	if err := c.cc.Invoke(ctx, OperationGatewayMatchQueueMatchWS, in, &out); err != nil {
@@ -67,6 +117,11 @@ func (c *gatewayMatchWSClient) QueueMatch(ctx context.Context, in *MatchQueueReq
 type GatewayMatchWSServer interface {
 	CancelMatch(context.Context, *MatchCancelRequest) (*MatchCancelReply, error)
 	MatchStatus(context.Context, *MatchStatusRequest) (*MatchStatusReply, error)
+	PartyCreate(context.Context, *PartyCreateRequest) (*PartyInfoReply, error)
+	PartyJoin(context.Context, *PartyJoinRequest) (*PartyInfoReply, error)
+	PartyLeave(context.Context, *PartyLeaveRequest) (*PartyInfoReply, error)
+	PartyQueue(context.Context, *PartyQueueRequest) (*PartyQueueReply, error)
+	PartyStatus(context.Context, *PartyStatusRequest) (*PartyInfoReply, error)
 	QueueMatch(context.Context, *MatchQueueRequest) (*MatchQueueReply, error)
 }
 
@@ -79,6 +134,21 @@ func RegisterGatewayMatchWSServer(s *wst.Server, srv GatewayMatchWSServer) error
 		return err
 	}
 	if err := s.Subscribe(OperationGatewayMatchMatchStatusWS, _GatewayMatch_MatchStatus0_WS_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyCreateWS, _GatewayMatch_PartyCreate0_WS_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyJoinWS, _GatewayMatch_PartyJoin0_WS_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyLeaveWS, _GatewayMatch_PartyLeave0_WS_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyStatusWS, _GatewayMatch_PartyStatus0_WS_Handler(srv)); err != nil {
+		return err
+	}
+	if err := s.Subscribe(OperationGatewayMatchPartyQueueWS, _GatewayMatch_PartyQueue0_WS_Handler(srv)); err != nil {
 		return err
 	}
 	return nil
@@ -125,6 +195,91 @@ func _GatewayMatch_MatchStatus0_WS_Handler(srv GatewayMatchWSServer) wst.MsgHand
 			return nil, err
 		}
 		out, err := srv.MatchStatus(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyCreate0_WS_Handler(srv GatewayMatchWSServer) wst.MsgHandler {
+	return func(ctx context.Context, dec wst.Decoder, enc wst.Encoder) ([]byte, error) {
+		in := new(PartyCreateRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyCreate(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyJoin0_WS_Handler(srv GatewayMatchWSServer) wst.MsgHandler {
+	return func(ctx context.Context, dec wst.Decoder, enc wst.Encoder) ([]byte, error) {
+		in := new(PartyJoinRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyJoin(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyLeave0_WS_Handler(srv GatewayMatchWSServer) wst.MsgHandler {
+	return func(ctx context.Context, dec wst.Decoder, enc wst.Encoder) ([]byte, error) {
+		in := new(PartyLeaveRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyLeave(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyStatus0_WS_Handler(srv GatewayMatchWSServer) wst.MsgHandler {
+	return func(ctx context.Context, dec wst.Decoder, enc wst.Encoder) ([]byte, error) {
+		in := new(PartyStatusRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyStatus(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, nil
+		}
+		return enc(out)
+	}
+}
+
+func _GatewayMatch_PartyQueue0_WS_Handler(srv GatewayMatchWSServer) wst.MsgHandler {
+	return func(ctx context.Context, dec wst.Decoder, enc wst.Encoder) ([]byte, error) {
+		in := new(PartyQueueRequest)
+		if err := dec(in); err != nil {
+			return nil, err
+		}
+		out, err := srv.PartyQueue(ctx, in)
 		if err != nil {
 			return nil, err
 		}

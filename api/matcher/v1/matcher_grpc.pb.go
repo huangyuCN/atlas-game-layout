@@ -24,9 +24,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Matcher_QueueMatch_FullMethodName  = "/matcher.v1.Matcher/QueueMatch"
-	Matcher_CancelMatch_FullMethodName = "/matcher.v1.Matcher/CancelMatch"
-	Matcher_QueryMatch_FullMethodName  = "/matcher.v1.Matcher/QueryMatch"
+	Matcher_QueueMatch_FullMethodName    = "/matcher.v1.Matcher/QueueMatch"
+	Matcher_CancelMatch_FullMethodName   = "/matcher.v1.Matcher/CancelMatch"
+	Matcher_QueryMatch_FullMethodName    = "/matcher.v1.Matcher/QueryMatch"
+	Matcher_CreateParty_FullMethodName   = "/matcher.v1.Matcher/CreateParty"
+	Matcher_JoinParty_FullMethodName     = "/matcher.v1.Matcher/JoinParty"
+	Matcher_LeaveParty_FullMethodName    = "/matcher.v1.Matcher/LeaveParty"
+	Matcher_DescribeParty_FullMethodName = "/matcher.v1.Matcher/DescribeParty"
+	Matcher_QueueParty_FullMethodName    = "/matcher.v1.Matcher/QueueParty"
 )
 
 // MatcherClient is the client API for Matcher service.
@@ -38,6 +43,16 @@ type MatcherClient interface {
 	QueueMatch(ctx context.Context, in *QueueMatchRequest, opts ...grpc.CallOption) (*QueueMatchReply, error)
 	CancelMatch(ctx context.Context, in *CancelMatchRequest, opts ...grpc.CallOption) (*CancelMatchReply, error)
 	QueryMatch(ctx context.Context, in *QueryMatchRequest, opts ...grpc.CallOption) (*QueryMatchReply, error)
+	// CreateParty 队长建队（名册权威在撮合域 redis，带 TTL）。
+	CreateParty(ctx context.Context, in *CreatePartyRequest, opts ...grpc.CallOption) (*CreatePartyReply, error)
+	// JoinParty 按 party_id 加入队伍（容量原子校验，满员拒绝）。
+	JoinParty(ctx context.Context, in *JoinPartyRequest, opts ...grpc.CallOption) (*JoinPartyReply, error)
+	// LeaveParty 离开队伍（队长顺延；空队解散）。
+	LeaveParty(ctx context.Context, in *LeavePartyRequest, opts ...grpc.CallOption) (*LeavePartyReply, error)
+	// DescribeParty 名册快照（轮询兜底用）。
+	DescribeParty(ctx context.Context, in *DescribePartyRequest, opts ...grpc.CallOption) (*PartyInfo, error)
+	// QueueParty 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+	QueueParty(ctx context.Context, in *QueuePartyRequest, opts ...grpc.CallOption) (*QueuePartyReply, error)
 }
 
 type matcherClient struct {
@@ -78,6 +93,56 @@ func (c *matcherClient) QueryMatch(ctx context.Context, in *QueryMatchRequest, o
 	return out, nil
 }
 
+func (c *matcherClient) CreateParty(ctx context.Context, in *CreatePartyRequest, opts ...grpc.CallOption) (*CreatePartyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreatePartyReply)
+	err := c.cc.Invoke(ctx, Matcher_CreateParty_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *matcherClient) JoinParty(ctx context.Context, in *JoinPartyRequest, opts ...grpc.CallOption) (*JoinPartyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JoinPartyReply)
+	err := c.cc.Invoke(ctx, Matcher_JoinParty_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *matcherClient) LeaveParty(ctx context.Context, in *LeavePartyRequest, opts ...grpc.CallOption) (*LeavePartyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LeavePartyReply)
+	err := c.cc.Invoke(ctx, Matcher_LeaveParty_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *matcherClient) DescribeParty(ctx context.Context, in *DescribePartyRequest, opts ...grpc.CallOption) (*PartyInfo, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PartyInfo)
+	err := c.cc.Invoke(ctx, Matcher_DescribeParty_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *matcherClient) QueueParty(ctx context.Context, in *QueuePartyRequest, opts ...grpc.CallOption) (*QueuePartyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueuePartyReply)
+	err := c.cc.Invoke(ctx, Matcher_QueueParty_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MatcherServer is the server API for Matcher service.
 // All implementations must embed UnimplementedMatcherServer
 // for forward compatibility.
@@ -87,6 +152,16 @@ type MatcherServer interface {
 	QueueMatch(context.Context, *QueueMatchRequest) (*QueueMatchReply, error)
 	CancelMatch(context.Context, *CancelMatchRequest) (*CancelMatchReply, error)
 	QueryMatch(context.Context, *QueryMatchRequest) (*QueryMatchReply, error)
+	// CreateParty 队长建队（名册权威在撮合域 redis，带 TTL）。
+	CreateParty(context.Context, *CreatePartyRequest) (*CreatePartyReply, error)
+	// JoinParty 按 party_id 加入队伍（容量原子校验，满员拒绝）。
+	JoinParty(context.Context, *JoinPartyRequest) (*JoinPartyReply, error)
+	// LeaveParty 离开队伍（队长顺延；空队解散）。
+	LeaveParty(context.Context, *LeavePartyRequest) (*LeavePartyReply, error)
+	// DescribeParty 名册快照（轮询兜底用）。
+	DescribeParty(context.Context, *DescribePartyRequest) (*PartyInfo, error)
+	// QueueParty 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+	QueueParty(context.Context, *QueuePartyRequest) (*QueuePartyReply, error)
 	mustEmbedUnimplementedMatcherServer()
 }
 
@@ -105,6 +180,21 @@ func (UnimplementedMatcherServer) CancelMatch(context.Context, *CancelMatchReque
 }
 func (UnimplementedMatcherServer) QueryMatch(context.Context, *QueryMatchRequest) (*QueryMatchReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method QueryMatch not implemented")
+}
+func (UnimplementedMatcherServer) CreateParty(context.Context, *CreatePartyRequest) (*CreatePartyReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateParty not implemented")
+}
+func (UnimplementedMatcherServer) JoinParty(context.Context, *JoinPartyRequest) (*JoinPartyReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method JoinParty not implemented")
+}
+func (UnimplementedMatcherServer) LeaveParty(context.Context, *LeavePartyRequest) (*LeavePartyReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method LeaveParty not implemented")
+}
+func (UnimplementedMatcherServer) DescribeParty(context.Context, *DescribePartyRequest) (*PartyInfo, error) {
+	return nil, status.Error(codes.Unimplemented, "method DescribeParty not implemented")
+}
+func (UnimplementedMatcherServer) QueueParty(context.Context, *QueuePartyRequest) (*QueuePartyReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method QueueParty not implemented")
 }
 func (UnimplementedMatcherServer) mustEmbedUnimplementedMatcherServer() {}
 func (UnimplementedMatcherServer) testEmbeddedByValue()                 {}
@@ -181,6 +271,96 @@ func _Matcher_QueryMatch_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Matcher_CreateParty_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreatePartyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MatcherServer).CreateParty(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Matcher_CreateParty_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MatcherServer).CreateParty(ctx, req.(*CreatePartyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Matcher_JoinParty_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinPartyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MatcherServer).JoinParty(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Matcher_JoinParty_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MatcherServer).JoinParty(ctx, req.(*JoinPartyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Matcher_LeaveParty_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LeavePartyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MatcherServer).LeaveParty(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Matcher_LeaveParty_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MatcherServer).LeaveParty(ctx, req.(*LeavePartyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Matcher_DescribeParty_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribePartyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MatcherServer).DescribeParty(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Matcher_DescribeParty_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MatcherServer).DescribeParty(ctx, req.(*DescribePartyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Matcher_QueueParty_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueuePartyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MatcherServer).QueueParty(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Matcher_QueueParty_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MatcherServer).QueueParty(ctx, req.(*QueuePartyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Matcher_ServiceDesc is the grpc.ServiceDesc for Matcher service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -199,6 +379,26 @@ var Matcher_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "QueryMatch",
 			Handler:    _Matcher_QueryMatch_Handler,
+		},
+		{
+			MethodName: "CreateParty",
+			Handler:    _Matcher_CreateParty_Handler,
+		},
+		{
+			MethodName: "JoinParty",
+			Handler:    _Matcher_JoinParty_Handler,
+		},
+		{
+			MethodName: "LeaveParty",
+			Handler:    _Matcher_LeaveParty_Handler,
+		},
+		{
+			MethodName: "DescribeParty",
+			Handler:    _Matcher_DescribeParty_Handler,
+		},
+		{
+			MethodName: "QueueParty",
+			Handler:    _Matcher_QueueParty_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

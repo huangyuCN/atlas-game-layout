@@ -11,6 +11,7 @@
 package gamev1
 
 import (
+	v11 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	v1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -226,11 +227,13 @@ func (*GetMatchStatusActorReq) Descriptor() ([]byte, []int) {
 }
 
 // MatchStatusActorReply 匹配状态（枚举语义见 matcher.v1.MatchState）。
+// battle_id 供「成局推送丢失后重登恢复」：matched 态据此恢复加入对局。
 type MatchStatusActorReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	State         v1.MatchState          `protobuf:"varint,1,opt,name=state,proto3,enum=matcher.v1.MatchState" json:"state,omitempty"`
 	TicketId      string                 `protobuf:"bytes,2,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
 	MatchId       string                 `protobuf:"bytes,3,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	BattleId      string                 `protobuf:"bytes,4,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -286,22 +289,345 @@ func (x *MatchStatusActorReply) GetMatchId() string {
 	return ""
 }
 
+func (x *MatchStatusActorReply) GetBattleId() string {
+	if x != nil {
+		return x.BattleId
+	}
+	return ""
+}
+
+type CreatePartyActorReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreatePartyActorReq) Reset() {
+	*x = CreatePartyActorReq{}
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreatePartyActorReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreatePartyActorReq) ProtoMessage() {}
+
+func (x *CreatePartyActorReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreatePartyActorReq.ProtoReflect.Descriptor instead.
+func (*CreatePartyActorReq) Descriptor() ([]byte, []int) {
+	return file_api_game_v1_player_actor_proto_rawDescGZIP(), []int{6}
+}
+
+type JoinPartyActorReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinPartyActorReq) Reset() {
+	*x = JoinPartyActorReq{}
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinPartyActorReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinPartyActorReq) ProtoMessage() {}
+
+func (x *JoinPartyActorReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinPartyActorReq.ProtoReflect.Descriptor instead.
+func (*JoinPartyActorReq) Descriptor() ([]byte, []int) {
+	return file_api_game_v1_player_actor_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *JoinPartyActorReq) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+type LeavePartyActorReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeavePartyActorReq) Reset() {
+	*x = LeavePartyActorReq{}
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeavePartyActorReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeavePartyActorReq) ProtoMessage() {}
+
+func (x *LeavePartyActorReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeavePartyActorReq.ProtoReflect.Descriptor instead.
+func (*LeavePartyActorReq) Descriptor() ([]byte, []int) {
+	return file_api_game_v1_player_actor_proto_rawDescGZIP(), []int{8}
+}
+
+type GetPartyActorReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPartyActorReq) Reset() {
+	*x = GetPartyActorReq{}
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPartyActorReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPartyActorReq) ProtoMessage() {}
+
+func (x *GetPartyActorReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPartyActorReq.ProtoReflect.Descriptor instead.
+func (*GetPartyActorReq) Descriptor() ([]byte, []int) {
+	return file_api_game_v1_player_actor_proto_rawDescGZIP(), []int{9}
+}
+
+type QueuePartyActorReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ruleset       string                 `protobuf:"bytes,1,opt,name=ruleset,proto3" json:"ruleset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueuePartyActorReq) Reset() {
+	*x = QueuePartyActorReq{}
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueuePartyActorReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueuePartyActorReq) ProtoMessage() {}
+
+func (x *QueuePartyActorReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueuePartyActorReq.ProtoReflect.Descriptor instead.
+func (*QueuePartyActorReq) Descriptor() ([]byte, []int) {
+	return file_api_game_v1_player_actor_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *QueuePartyActorReq) GetRuleset() string {
+	if x != nil {
+		return x.Ruleset
+	}
+	return ""
+}
+
+// PartyActorReply 队伍名册快照（离开/未组队回执空快照）。
+type PartyActorReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	LeaderId      string                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	Members       []*v11.PlayerSummary   `protobuf:"bytes,3,rep,name=members,proto3" json:"members,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PartyActorReply) Reset() {
+	*x = PartyActorReply{}
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PartyActorReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PartyActorReply) ProtoMessage() {}
+
+func (x *PartyActorReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PartyActorReply.ProtoReflect.Descriptor instead.
+func (*PartyActorReply) Descriptor() ([]byte, []int) {
+	return file_api_game_v1_player_actor_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *PartyActorReply) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+func (x *PartyActorReply) GetLeaderId() string {
+	if x != nil {
+		return x.LeaderId
+	}
+	return ""
+}
+
+func (x *PartyActorReply) GetMembers() []*v11.PlayerSummary {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
+// QueuePartyActorReply 整队入队回执：ticket_id 关联失败/成局事件。
+type QueuePartyActorReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TicketId      string                 `protobuf:"bytes,1,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueuePartyActorReply) Reset() {
+	*x = QueuePartyActorReply{}
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueuePartyActorReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueuePartyActorReply) ProtoMessage() {}
+
+func (x *QueuePartyActorReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_game_v1_player_actor_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueuePartyActorReply.ProtoReflect.Descriptor instead.
+func (*QueuePartyActorReply) Descriptor() ([]byte, []int) {
+	return file_api_game_v1_player_actor_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *QueuePartyActorReply) GetTicketId() string {
+	if x != nil {
+		return x.TicketId
+	}
+	return ""
+}
+
 var File_api_game_v1_player_actor_proto protoreflect.FileDescriptor
 
 const file_api_game_v1_player_actor_proto_rawDesc = "" +
 	"\n" +
-	"\x1eapi/game/v1/player_actor.proto\x12\agame.v1\x1a\x18api/game/v1/player.proto\x1a\x1capi/matcher/v1/matcher.proto\x1a\x1bgoogle/protobuf/empty.proto\"3\n" +
+	"\x1eapi/game/v1/player_actor.proto\x12\agame.v1\x1a\x1aapi/common/v1/common.proto\x1a\x18api/game/v1/player.proto\x1a\x1capi/matcher/v1/matcher.proto\x1a\x1bgoogle/protobuf/empty.proto\"3\n" +
 	"\x17EnterMatchQueueActorReq\x12\x18\n" +
 	"\aruleset\x18\x01 \x01(\tR\aruleset\"\x1b\n" +
 	"\x19EnterMatchQueueActorReply\"\x15\n" +
 	"\x13CancelMatchActorReq\"3\n" +
 	"\x15CancelMatchActorReply\x12\x1a\n" +
 	"\bcanceled\x18\x01 \x01(\bR\bcanceled\"\x18\n" +
-	"\x16GetMatchStatusActorReq\"}\n" +
+	"\x16GetMatchStatusActorReq\"\x9a\x01\n" +
 	"\x15MatchStatusActorReply\x12,\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x16.matcher.v1.MatchStateR\x05state\x12\x1b\n" +
 	"\tticket_id\x18\x02 \x01(\tR\bticketId\x12\x19\n" +
-	"\bmatch_id\x18\x03 \x01(\tR\amatchId2\x9b\x05\n" +
+	"\bmatch_id\x18\x03 \x01(\tR\amatchId\x12\x1b\n" +
+	"\tbattle_id\x18\x04 \x01(\tR\bbattleId\"\x15\n" +
+	"\x13CreatePartyActorReq\".\n" +
+	"\x11JoinPartyActorReq\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\"\x14\n" +
+	"\x12LeavePartyActorReq\"\x12\n" +
+	"\x10GetPartyActorReq\".\n" +
+	"\x12QueuePartyActorReq\x12\x18\n" +
+	"\aruleset\x18\x01 \x01(\tR\aruleset\"}\n" +
+	"\x0fPartyActorReply\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\x12\x1b\n" +
+	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x122\n" +
+	"\amembers\x18\x03 \x03(\v2\x18.common.v1.PlayerSummaryR\amembers\"3\n" +
+	"\x14QueuePartyActorReply\x12\x1b\n" +
+	"\tticket_id\x18\x01 \x01(\tR\bticketId2\xf5\a\n" +
 	"\vPlayerActor\x12B\n" +
 	"\bRegister\x12\x19.game.v1.RegisterActorReq\x1a\x1b.game.v1.RegisterActorReply\x129\n" +
 	"\x05Login\x12\x16.game.v1.LoginActorReq\x1a\x18.game.v1.LoginActorReply\x129\n" +
@@ -311,7 +637,14 @@ const file_api_game_v1_player_actor_proto_rawDesc = "" +
 	"\tGetPlayer\x12\x1a.game.v1.GetPlayerActorReq\x1a\x1c.game.v1.GetPlayerActorReply\x12W\n" +
 	"\x0fEnterMatchQueue\x12 .game.v1.EnterMatchQueueActorReq\x1a\".game.v1.EnterMatchQueueActorReply\x12K\n" +
 	"\vCancelMatch\x12\x1c.game.v1.CancelMatchActorReq\x1a\x1e.game.v1.CancelMatchActorReply\x12Q\n" +
-	"\x0eGetMatchStatus\x12\x1f.game.v1.GetMatchStatusActorReq\x1a\x1e.game.v1.MatchStatusActorReplyB;Z9github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1b\x06proto3"
+	"\x0eGetMatchStatus\x12\x1f.game.v1.GetMatchStatusActorReq\x1a\x1e.game.v1.MatchStatusActorReply\x12E\n" +
+	"\vCreateParty\x12\x1c.game.v1.CreatePartyActorReq\x1a\x18.game.v1.PartyActorReply\x12A\n" +
+	"\tJoinParty\x12\x1a.game.v1.JoinPartyActorReq\x1a\x18.game.v1.PartyActorReply\x12C\n" +
+	"\n" +
+	"LeaveParty\x12\x1b.game.v1.LeavePartyActorReq\x1a\x18.game.v1.PartyActorReply\x12?\n" +
+	"\bGetParty\x12\x19.game.v1.GetPartyActorReq\x1a\x18.game.v1.PartyActorReply\x12H\n" +
+	"\n" +
+	"QueueParty\x12\x1b.game.v1.QueuePartyActorReq\x1a\x1d.game.v1.QueuePartyActorReplyB;Z9github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1b\x06proto3"
 
 var (
 	file_api_game_v1_player_actor_proto_rawDescOnce sync.Once
@@ -325,7 +658,7 @@ func file_api_game_v1_player_actor_proto_rawDescGZIP() []byte {
 	return file_api_game_v1_player_actor_proto_rawDescData
 }
 
-var file_api_game_v1_player_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_api_game_v1_player_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_api_game_v1_player_actor_proto_goTypes = []any{
 	(*EnterMatchQueueActorReq)(nil),   // 0: game.v1.EnterMatchQueueActorReq
 	(*EnterMatchQueueActorReply)(nil), // 1: game.v1.EnterMatchQueueActorReply
@@ -333,45 +666,64 @@ var file_api_game_v1_player_actor_proto_goTypes = []any{
 	(*CancelMatchActorReply)(nil),     // 3: game.v1.CancelMatchActorReply
 	(*GetMatchStatusActorReq)(nil),    // 4: game.v1.GetMatchStatusActorReq
 	(*MatchStatusActorReply)(nil),     // 5: game.v1.MatchStatusActorReply
-	(v1.MatchState)(0),                // 6: matcher.v1.MatchState
-	(*RegisterActorReq)(nil),          // 7: game.v1.RegisterActorReq
-	(*LoginActorReq)(nil),             // 8: game.v1.LoginActorReq
-	(*LogoutActorMsg)(nil),            // 9: game.v1.LogoutActorMsg
-	(*GrantItemActorReq)(nil),         // 10: game.v1.GrantItemActorReq
-	(*GetBackpackActorReq)(nil),       // 11: game.v1.GetBackpackActorReq
-	(*GetPlayerActorReq)(nil),         // 12: game.v1.GetPlayerActorReq
-	(*RegisterActorReply)(nil),        // 13: game.v1.RegisterActorReply
-	(*LoginActorReply)(nil),           // 14: game.v1.LoginActorReply
-	(*emptypb.Empty)(nil),             // 15: google.protobuf.Empty
-	(*GrantItemActorReply)(nil),       // 16: game.v1.GrantItemActorReply
-	(*GetBackpackActorReply)(nil),     // 17: game.v1.GetBackpackActorReply
-	(*GetPlayerActorReply)(nil),       // 18: game.v1.GetPlayerActorReply
+	(*CreatePartyActorReq)(nil),       // 6: game.v1.CreatePartyActorReq
+	(*JoinPartyActorReq)(nil),         // 7: game.v1.JoinPartyActorReq
+	(*LeavePartyActorReq)(nil),        // 8: game.v1.LeavePartyActorReq
+	(*GetPartyActorReq)(nil),          // 9: game.v1.GetPartyActorReq
+	(*QueuePartyActorReq)(nil),        // 10: game.v1.QueuePartyActorReq
+	(*PartyActorReply)(nil),           // 11: game.v1.PartyActorReply
+	(*QueuePartyActorReply)(nil),      // 12: game.v1.QueuePartyActorReply
+	(v1.MatchState)(0),                // 13: matcher.v1.MatchState
+	(*v11.PlayerSummary)(nil),         // 14: common.v1.PlayerSummary
+	(*RegisterActorReq)(nil),          // 15: game.v1.RegisterActorReq
+	(*LoginActorReq)(nil),             // 16: game.v1.LoginActorReq
+	(*LogoutActorMsg)(nil),            // 17: game.v1.LogoutActorMsg
+	(*GrantItemActorReq)(nil),         // 18: game.v1.GrantItemActorReq
+	(*GetBackpackActorReq)(nil),       // 19: game.v1.GetBackpackActorReq
+	(*GetPlayerActorReq)(nil),         // 20: game.v1.GetPlayerActorReq
+	(*RegisterActorReply)(nil),        // 21: game.v1.RegisterActorReply
+	(*LoginActorReply)(nil),           // 22: game.v1.LoginActorReply
+	(*emptypb.Empty)(nil),             // 23: google.protobuf.Empty
+	(*GrantItemActorReply)(nil),       // 24: game.v1.GrantItemActorReply
+	(*GetBackpackActorReply)(nil),     // 25: game.v1.GetBackpackActorReply
+	(*GetPlayerActorReply)(nil),       // 26: game.v1.GetPlayerActorReply
 }
 var file_api_game_v1_player_actor_proto_depIdxs = []int32{
-	6,  // 0: game.v1.MatchStatusActorReply.state:type_name -> matcher.v1.MatchState
-	7,  // 1: game.v1.PlayerActor.Register:input_type -> game.v1.RegisterActorReq
-	8,  // 2: game.v1.PlayerActor.Login:input_type -> game.v1.LoginActorReq
-	9,  // 3: game.v1.PlayerActor.Logout:input_type -> game.v1.LogoutActorMsg
-	10, // 4: game.v1.PlayerActor.GrantItem:input_type -> game.v1.GrantItemActorReq
-	11, // 5: game.v1.PlayerActor.GetBackpack:input_type -> game.v1.GetBackpackActorReq
-	12, // 6: game.v1.PlayerActor.GetPlayer:input_type -> game.v1.GetPlayerActorReq
-	0,  // 7: game.v1.PlayerActor.EnterMatchQueue:input_type -> game.v1.EnterMatchQueueActorReq
-	2,  // 8: game.v1.PlayerActor.CancelMatch:input_type -> game.v1.CancelMatchActorReq
-	4,  // 9: game.v1.PlayerActor.GetMatchStatus:input_type -> game.v1.GetMatchStatusActorReq
-	13, // 10: game.v1.PlayerActor.Register:output_type -> game.v1.RegisterActorReply
-	14, // 11: game.v1.PlayerActor.Login:output_type -> game.v1.LoginActorReply
-	15, // 12: game.v1.PlayerActor.Logout:output_type -> google.protobuf.Empty
-	16, // 13: game.v1.PlayerActor.GrantItem:output_type -> game.v1.GrantItemActorReply
-	17, // 14: game.v1.PlayerActor.GetBackpack:output_type -> game.v1.GetBackpackActorReply
-	18, // 15: game.v1.PlayerActor.GetPlayer:output_type -> game.v1.GetPlayerActorReply
-	1,  // 16: game.v1.PlayerActor.EnterMatchQueue:output_type -> game.v1.EnterMatchQueueActorReply
-	3,  // 17: game.v1.PlayerActor.CancelMatch:output_type -> game.v1.CancelMatchActorReply
-	5,  // 18: game.v1.PlayerActor.GetMatchStatus:output_type -> game.v1.MatchStatusActorReply
-	10, // [10:19] is the sub-list for method output_type
-	1,  // [1:10] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	13, // 0: game.v1.MatchStatusActorReply.state:type_name -> matcher.v1.MatchState
+	14, // 1: game.v1.PartyActorReply.members:type_name -> common.v1.PlayerSummary
+	15, // 2: game.v1.PlayerActor.Register:input_type -> game.v1.RegisterActorReq
+	16, // 3: game.v1.PlayerActor.Login:input_type -> game.v1.LoginActorReq
+	17, // 4: game.v1.PlayerActor.Logout:input_type -> game.v1.LogoutActorMsg
+	18, // 5: game.v1.PlayerActor.GrantItem:input_type -> game.v1.GrantItemActorReq
+	19, // 6: game.v1.PlayerActor.GetBackpack:input_type -> game.v1.GetBackpackActorReq
+	20, // 7: game.v1.PlayerActor.GetPlayer:input_type -> game.v1.GetPlayerActorReq
+	0,  // 8: game.v1.PlayerActor.EnterMatchQueue:input_type -> game.v1.EnterMatchQueueActorReq
+	2,  // 9: game.v1.PlayerActor.CancelMatch:input_type -> game.v1.CancelMatchActorReq
+	4,  // 10: game.v1.PlayerActor.GetMatchStatus:input_type -> game.v1.GetMatchStatusActorReq
+	6,  // 11: game.v1.PlayerActor.CreateParty:input_type -> game.v1.CreatePartyActorReq
+	7,  // 12: game.v1.PlayerActor.JoinParty:input_type -> game.v1.JoinPartyActorReq
+	8,  // 13: game.v1.PlayerActor.LeaveParty:input_type -> game.v1.LeavePartyActorReq
+	9,  // 14: game.v1.PlayerActor.GetParty:input_type -> game.v1.GetPartyActorReq
+	10, // 15: game.v1.PlayerActor.QueueParty:input_type -> game.v1.QueuePartyActorReq
+	21, // 16: game.v1.PlayerActor.Register:output_type -> game.v1.RegisterActorReply
+	22, // 17: game.v1.PlayerActor.Login:output_type -> game.v1.LoginActorReply
+	23, // 18: game.v1.PlayerActor.Logout:output_type -> google.protobuf.Empty
+	24, // 19: game.v1.PlayerActor.GrantItem:output_type -> game.v1.GrantItemActorReply
+	25, // 20: game.v1.PlayerActor.GetBackpack:output_type -> game.v1.GetBackpackActorReply
+	26, // 21: game.v1.PlayerActor.GetPlayer:output_type -> game.v1.GetPlayerActorReply
+	1,  // 22: game.v1.PlayerActor.EnterMatchQueue:output_type -> game.v1.EnterMatchQueueActorReply
+	3,  // 23: game.v1.PlayerActor.CancelMatch:output_type -> game.v1.CancelMatchActorReply
+	5,  // 24: game.v1.PlayerActor.GetMatchStatus:output_type -> game.v1.MatchStatusActorReply
+	11, // 25: game.v1.PlayerActor.CreateParty:output_type -> game.v1.PartyActorReply
+	11, // 26: game.v1.PlayerActor.JoinParty:output_type -> game.v1.PartyActorReply
+	11, // 27: game.v1.PlayerActor.LeaveParty:output_type -> game.v1.PartyActorReply
+	11, // 28: game.v1.PlayerActor.GetParty:output_type -> game.v1.PartyActorReply
+	12, // 29: game.v1.PlayerActor.QueueParty:output_type -> game.v1.QueuePartyActorReply
+	16, // [16:30] is the sub-list for method output_type
+	2,  // [2:16] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_api_game_v1_player_actor_proto_init() }
@@ -386,7 +738,7 @@ func file_api_game_v1_player_actor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_game_v1_player_actor_proto_rawDesc), len(file_api_game_v1_player_actor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -38,12 +38,16 @@ const (
 	PushOpKickedOffline  = "gateway.v1.KickedNotify"
 	PushOpMatchStarted   = "gateway.v1.MatchStartedNotify"
 	PushOpMatchFailed    = "gateway.v1.MatchFailedNotify"
+	PushOpPartyRoster    = "gateway.v1.PartyRosterNotify"
 	PushOpFrameBroadcast = "gateway.v1.FrameBroadcast"
 	PushOpBattleEnd      = "gateway.v1.BattleEndNotify"
 )
 
 // MatchStartedTopic 返回成局事件主题：atlas.event.match.started。
 func MatchStartedTopic() string { return TopicEvent + "match.started" }
+
+// PartyRosterTopic 返回队伍名册变更事件主题：atlas.event.party.roster。
+func PartyRosterTopic() string { return TopicEvent + "party.roster" }
 
 // MatchFailedTopic 返回失败事件主题：atlas.event.match.failed。
 func MatchFailedTopic() string { return TopicEvent + "match.failed" }

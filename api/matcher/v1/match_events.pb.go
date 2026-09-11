@@ -24,6 +24,121 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// MatchFailReason 是匹配失败原因（客户端可读枚举，对齐状态机终态与处置来源）。
+type MatchFailReason int32
+
+const (
+	MatchFailReason_MATCH_FAIL_REASON_UNSPECIFIED       MatchFailReason = 0
+	MatchFailReason_MATCH_FAIL_REASON_TIMEOUT           MatchFailReason = 1 // 玩家请求/接受超时（匹配未成立）
+	MatchFailReason_MATCH_FAIL_REASON_CANCELLED         MatchFailReason = 2 // 玩家主动取消
+	MatchFailReason_MATCH_FAIL_REASON_ACCEPTANCE_FAILED MatchFailReason = 3 // 接受阶段失败
+	MatchFailReason_MATCH_FAIL_REASON_PLACEMENT_FAILED  MatchFailReason = 4 // 对局实例分配失败
+	MatchFailReason_MATCH_FAIL_REASON_FAILED            MatchFailReason = 5 // 其他失败
+)
+
+// Enum value maps for MatchFailReason.
+var (
+	MatchFailReason_name = map[int32]string{
+		0: "MATCH_FAIL_REASON_UNSPECIFIED",
+		1: "MATCH_FAIL_REASON_TIMEOUT",
+		2: "MATCH_FAIL_REASON_CANCELLED",
+		3: "MATCH_FAIL_REASON_ACCEPTANCE_FAILED",
+		4: "MATCH_FAIL_REASON_PLACEMENT_FAILED",
+		5: "MATCH_FAIL_REASON_FAILED",
+	}
+	MatchFailReason_value = map[string]int32{
+		"MATCH_FAIL_REASON_UNSPECIFIED":       0,
+		"MATCH_FAIL_REASON_TIMEOUT":           1,
+		"MATCH_FAIL_REASON_CANCELLED":         2,
+		"MATCH_FAIL_REASON_ACCEPTANCE_FAILED": 3,
+		"MATCH_FAIL_REASON_PLACEMENT_FAILED":  4,
+		"MATCH_FAIL_REASON_FAILED":            5,
+	}
+)
+
+func (x MatchFailReason) Enum() *MatchFailReason {
+	p := new(MatchFailReason)
+	*p = x
+	return p
+}
+
+func (x MatchFailReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MatchFailReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_matcher_v1_match_events_proto_enumTypes[0].Descriptor()
+}
+
+func (MatchFailReason) Type() protoreflect.EnumType {
+	return &file_api_matcher_v1_match_events_proto_enumTypes[0]
+}
+
+func (x MatchFailReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MatchFailReason.Descriptor instead.
+func (MatchFailReason) EnumDescriptor() ([]byte, []int) {
+	return file_api_matcher_v1_match_events_proto_rawDescGZIP(), []int{0}
+}
+
+// PartyRosterReason 是队伍名册变更原因。
+type PartyRosterReason int32
+
+const (
+	PartyRosterReason_PARTY_ROSTER_REASON_UNSPECIFIED PartyRosterReason = 0
+	PartyRosterReason_PARTY_ROSTER_REASON_CREATED     PartyRosterReason = 1 // 建队
+	PartyRosterReason_PARTY_ROSTER_REASON_JOIN        PartyRosterReason = 2 // 成员加入
+	PartyRosterReason_PARTY_ROSTER_REASON_LEAVE       PartyRosterReason = 3 // 成员离开
+	PartyRosterReason_PARTY_ROSTER_REASON_DISSOLVE    PartyRosterReason = 4 // 队伍解散（名册清空）
+)
+
+// Enum value maps for PartyRosterReason.
+var (
+	PartyRosterReason_name = map[int32]string{
+		0: "PARTY_ROSTER_REASON_UNSPECIFIED",
+		1: "PARTY_ROSTER_REASON_CREATED",
+		2: "PARTY_ROSTER_REASON_JOIN",
+		3: "PARTY_ROSTER_REASON_LEAVE",
+		4: "PARTY_ROSTER_REASON_DISSOLVE",
+	}
+	PartyRosterReason_value = map[string]int32{
+		"PARTY_ROSTER_REASON_UNSPECIFIED": 0,
+		"PARTY_ROSTER_REASON_CREATED":     1,
+		"PARTY_ROSTER_REASON_JOIN":        2,
+		"PARTY_ROSTER_REASON_LEAVE":       3,
+		"PARTY_ROSTER_REASON_DISSOLVE":    4,
+	}
+)
+
+func (x PartyRosterReason) Enum() *PartyRosterReason {
+	p := new(PartyRosterReason)
+	*p = x
+	return p
+}
+
+func (x PartyRosterReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PartyRosterReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_matcher_v1_match_events_proto_enumTypes[1].Descriptor()
+}
+
+func (PartyRosterReason) Type() protoreflect.EnumType {
+	return &file_api_matcher_v1_match_events_proto_enumTypes[1]
+}
+
+func (x PartyRosterReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PartyRosterReason.Descriptor instead.
+func (PartyRosterReason) EnumDescriptor() ([]byte, []int) {
+	return file_api_matcher_v1_match_events_proto_rawDescGZIP(), []int{1}
+}
+
 // MatchStartedEvent 匹配成功（battle 已创建）。
 type MatchStartedEvent struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -99,7 +214,7 @@ type MatchFailedEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MatchId       string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"` // 已成局的对局 ID（成局前失败为空）
 	PlayerIds     []string               `protobuf:"bytes,2,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
-	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason        MatchFailReason        `protobuf:"varint,3,opt,name=reason,proto3,enum=matcher.v1.MatchFailReason" json:"reason,omitempty"`
 	TicketId      string                 `protobuf:"bytes,4,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"` // 失败的票据 ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -149,11 +264,11 @@ func (x *MatchFailedEvent) GetPlayerIds() []string {
 	return nil
 }
 
-func (x *MatchFailedEvent) GetReason() string {
+func (x *MatchFailedEvent) GetReason() MatchFailReason {
 	if x != nil {
 		return x.Reason
 	}
-	return ""
+	return MatchFailReason_MATCH_FAIL_REASON_UNSPECIFIED
 }
 
 func (x *MatchFailedEvent) GetTicketId() string {
@@ -161,6 +276,76 @@ func (x *MatchFailedEvent) GetTicketId() string {
 		return x.TicketId
 	}
 	return ""
+}
+
+// PartyRosterEvent 队伍名册变更（建队/加入/离开/解散）：
+// matcher 发布，gateway 向全队推送名册快照（PartyRosterNotify）。
+type PartyRosterEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PartyId       string                 `protobuf:"bytes,1,opt,name=party_id,json=partyId,proto3" json:"party_id,omitempty"`
+	LeaderId      string                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	PlayerIds     []string               `protobuf:"bytes,3,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
+	Reason        PartyRosterReason      `protobuf:"varint,4,opt,name=reason,proto3,enum=matcher.v1.PartyRosterReason" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PartyRosterEvent) Reset() {
+	*x = PartyRosterEvent{}
+	mi := &file_api_matcher_v1_match_events_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PartyRosterEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PartyRosterEvent) ProtoMessage() {}
+
+func (x *PartyRosterEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_api_matcher_v1_match_events_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PartyRosterEvent.ProtoReflect.Descriptor instead.
+func (*PartyRosterEvent) Descriptor() ([]byte, []int) {
+	return file_api_matcher_v1_match_events_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PartyRosterEvent) GetPartyId() string {
+	if x != nil {
+		return x.PartyId
+	}
+	return ""
+}
+
+func (x *PartyRosterEvent) GetLeaderId() string {
+	if x != nil {
+		return x.LeaderId
+	}
+	return ""
+}
+
+func (x *PartyRosterEvent) GetPlayerIds() []string {
+	if x != nil {
+		return x.PlayerIds
+	}
+	return nil
+}
+
+func (x *PartyRosterEvent) GetReason() PartyRosterReason {
+	if x != nil {
+		return x.Reason
+	}
+	return PartyRosterReason_PARTY_ROSTER_REASON_UNSPECIFIED
 }
 
 var File_api_matcher_v1_match_events_proto protoreflect.FileDescriptor
@@ -174,13 +359,32 @@ const file_api_matcher_v1_match_events_proto_rawDesc = "" +
 	"\tbattle_id\x18\x02 \x01(\tR\bbattleId\x12\x1d\n" +
 	"\n" +
 	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12'\n" +
-	"\x0fbattle_endpoint\x18\x04 \x01(\tR\x0ebattleEndpoint\"\x81\x01\n" +
+	"\x0fbattle_endpoint\x18\x04 \x01(\tR\x0ebattleEndpoint\"\x9e\x01\n" +
 	"\x10MatchFailedEvent\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1d\n" +
 	"\n" +
-	"player_ids\x18\x02 \x03(\tR\tplayerIds\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x1b\n" +
-	"\tticket_id\x18\x04 \x01(\tR\bticketIdBAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
+	"player_ids\x18\x02 \x03(\tR\tplayerIds\x123\n" +
+	"\x06reason\x18\x03 \x01(\x0e2\x1b.matcher.v1.MatchFailReasonR\x06reason\x12\x1b\n" +
+	"\tticket_id\x18\x04 \x01(\tR\bticketId\"\xa0\x01\n" +
+	"\x10PartyRosterEvent\x12\x19\n" +
+	"\bparty_id\x18\x01 \x01(\tR\apartyId\x12\x1b\n" +
+	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12\x1d\n" +
+	"\n" +
+	"player_ids\x18\x03 \x03(\tR\tplayerIds\x125\n" +
+	"\x06reason\x18\x04 \x01(\x0e2\x1d.matcher.v1.PartyRosterReasonR\x06reason*\xe3\x01\n" +
+	"\x0fMatchFailReason\x12!\n" +
+	"\x1dMATCH_FAIL_REASON_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19MATCH_FAIL_REASON_TIMEOUT\x10\x01\x12\x1f\n" +
+	"\x1bMATCH_FAIL_REASON_CANCELLED\x10\x02\x12'\n" +
+	"#MATCH_FAIL_REASON_ACCEPTANCE_FAILED\x10\x03\x12&\n" +
+	"\"MATCH_FAIL_REASON_PLACEMENT_FAILED\x10\x04\x12\x1c\n" +
+	"\x18MATCH_FAIL_REASON_FAILED\x10\x05*\xb8\x01\n" +
+	"\x11PartyRosterReason\x12#\n" +
+	"\x1fPARTY_ROSTER_REASON_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bPARTY_ROSTER_REASON_CREATED\x10\x01\x12\x1c\n" +
+	"\x18PARTY_ROSTER_REASON_JOIN\x10\x02\x12\x1d\n" +
+	"\x19PARTY_ROSTER_REASON_LEAVE\x10\x03\x12 \n" +
+	"\x1cPARTY_ROSTER_REASON_DISSOLVE\x10\x04BAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
 
 var (
 	file_api_matcher_v1_match_events_proto_rawDescOnce sync.Once
@@ -194,17 +398,23 @@ func file_api_matcher_v1_match_events_proto_rawDescGZIP() []byte {
 	return file_api_matcher_v1_match_events_proto_rawDescData
 }
 
-var file_api_matcher_v1_match_events_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_api_matcher_v1_match_events_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_api_matcher_v1_match_events_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_api_matcher_v1_match_events_proto_goTypes = []any{
-	(*MatchStartedEvent)(nil), // 0: matcher.v1.MatchStartedEvent
-	(*MatchFailedEvent)(nil),  // 1: matcher.v1.MatchFailedEvent
+	(MatchFailReason)(0),      // 0: matcher.v1.MatchFailReason
+	(PartyRosterReason)(0),    // 1: matcher.v1.PartyRosterReason
+	(*MatchStartedEvent)(nil), // 2: matcher.v1.MatchStartedEvent
+	(*MatchFailedEvent)(nil),  // 3: matcher.v1.MatchFailedEvent
+	(*PartyRosterEvent)(nil),  // 4: matcher.v1.PartyRosterEvent
 }
 var file_api_matcher_v1_match_events_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0, // 0: matcher.v1.MatchFailedEvent.reason:type_name -> matcher.v1.MatchFailReason
+	1, // 1: matcher.v1.PartyRosterEvent.reason:type_name -> matcher.v1.PartyRosterReason
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_api_matcher_v1_match_events_proto_init() }
@@ -217,13 +427,14 @@ func file_api_matcher_v1_match_events_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_matcher_v1_match_events_proto_rawDesc), len(file_api_matcher_v1_match_events_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_api_matcher_v1_match_events_proto_goTypes,
 		DependencyIndexes: file_api_matcher_v1_match_events_proto_depIdxs,
+		EnumInfos:         file_api_matcher_v1_match_events_proto_enumTypes,
 		MessageInfos:      file_api_matcher_v1_match_events_proto_msgTypes,
 	}.Build()
 	File_api_matcher_v1_match_events_proto = out.File

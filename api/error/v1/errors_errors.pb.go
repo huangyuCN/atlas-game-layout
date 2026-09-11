@@ -539,6 +539,246 @@ func WrapMatchNotFound(cause error, format string, args ...interface{}) *errors.
 	return ErrMatchNotFound(format, args...).WithCause(cause)
 }
 
+// 队伍不存在或已解散
+func IsPartyNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "PARTY_NOT_FOUND" || e.Code != 404 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "2003"
+}
+
+// 队伍不存在或已解散
+func ErrPartyNotFound(format string, args ...interface{}) *errors.Error {
+	return errors.New(404, "PARTY_NOT_FOUND", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "2003",
+		"biz_reason": "PartyNotFound",
+	})
+}
+
+// ReasonPartyNotFound 返回当前错误的 reason 常量值。
+func ReasonPartyNotFound() string {
+	return "PARTY_NOT_FOUND"
+}
+
+// CodePartyNotFound 返回当前错误对应的 HTTP 状态码。
+func CodePartyNotFound() int {
+	return 404
+}
+
+// BizCodePartyNotFound 返回当前错误对应的业务错误码（枚举值）。
+func BizCodePartyNotFound() int32 {
+	return 2003
+}
+
+// NewPartyNotFound 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewPartyNotFound(message string) *errors.Error {
+	return errors.New(404, "PARTY_NOT_FOUND", message).WithMetadata(map[string]string{
+		"biz_code":   "2003",
+		"biz_reason": "PartyNotFound",
+	})
+}
+
+// WrapPartyNotFound 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapPartyNotFound(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrPartyNotFound(format, args...).WithCause(cause)
+}
+
+// 队伍已满
+func IsPartyFull(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "PARTY_FULL" || e.Code != 409 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "2004"
+}
+
+// 队伍已满
+func ErrPartyFull(format string, args ...interface{}) *errors.Error {
+	return errors.New(409, "PARTY_FULL", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "2004",
+		"biz_reason": "PartyFull",
+	})
+}
+
+// ReasonPartyFull 返回当前错误的 reason 常量值。
+func ReasonPartyFull() string {
+	return "PARTY_FULL"
+}
+
+// CodePartyFull 返回当前错误对应的 HTTP 状态码。
+func CodePartyFull() int {
+	return 409
+}
+
+// BizCodePartyFull 返回当前错误对应的业务错误码（枚举值）。
+func BizCodePartyFull() int32 {
+	return 2004
+}
+
+// NewPartyFull 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewPartyFull(message string) *errors.Error {
+	return errors.New(409, "PARTY_FULL", message).WithMetadata(map[string]string{
+		"biz_code":   "2004",
+		"biz_reason": "PartyFull",
+	})
+}
+
+// WrapPartyFull 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapPartyFull(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrPartyFull(format, args...).WithCause(cause)
+}
+
+// 已在队伍中
+func IsAlreadyInParty(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "ALREADY_IN_PARTY" || e.Code != 409 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "2005"
+}
+
+// 已在队伍中
+func ErrAlreadyInParty(format string, args ...interface{}) *errors.Error {
+	return errors.New(409, "ALREADY_IN_PARTY", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "2005",
+		"biz_reason": "AlreadyInParty",
+	})
+}
+
+// ReasonAlreadyInParty 返回当前错误的 reason 常量值。
+func ReasonAlreadyInParty() string {
+	return "ALREADY_IN_PARTY"
+}
+
+// CodeAlreadyInParty 返回当前错误对应的 HTTP 状态码。
+func CodeAlreadyInParty() int {
+	return 409
+}
+
+// BizCodeAlreadyInParty 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeAlreadyInParty() int32 {
+	return 2005
+}
+
+// NewAlreadyInParty 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewAlreadyInParty(message string) *errors.Error {
+	return errors.New(409, "ALREADY_IN_PARTY", message).WithMetadata(map[string]string{
+		"biz_code":   "2005",
+		"biz_reason": "AlreadyInParty",
+	})
+}
+
+// WrapAlreadyInParty 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapAlreadyInParty(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrAlreadyInParty(format, args...).WithCause(cause)
+}
+
+// 仅队长可执行该操作
+func IsNotPartyLeader(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "NOT_PARTY_LEADER" || e.Code != 403 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "2006"
+}
+
+// 仅队长可执行该操作
+func ErrNotPartyLeader(format string, args ...interface{}) *errors.Error {
+	return errors.New(403, "NOT_PARTY_LEADER", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "2006",
+		"biz_reason": "NotPartyLeader",
+	})
+}
+
+// ReasonNotPartyLeader 返回当前错误的 reason 常量值。
+func ReasonNotPartyLeader() string {
+	return "NOT_PARTY_LEADER"
+}
+
+// CodeNotPartyLeader 返回当前错误对应的 HTTP 状态码。
+func CodeNotPartyLeader() int {
+	return 403
+}
+
+// BizCodeNotPartyLeader 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeNotPartyLeader() int32 {
+	return 2006
+}
+
+// NewNotPartyLeader 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewNotPartyLeader(message string) *errors.Error {
+	return errors.New(403, "NOT_PARTY_LEADER", message).WithMetadata(map[string]string{
+		"biz_code":   "2006",
+		"biz_reason": "NotPartyLeader",
+	})
+}
+
+// WrapNotPartyLeader 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapNotPartyLeader(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrNotPartyLeader(format, args...).WithCause(cause)
+}
+
+// 不在队伍中
+func IsNotInParty(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "NOT_IN_PARTY" || e.Code != 404 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "2007"
+}
+
+// 不在队伍中
+func ErrNotInParty(format string, args ...interface{}) *errors.Error {
+	return errors.New(404, "NOT_IN_PARTY", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "2007",
+		"biz_reason": "NotInParty",
+	})
+}
+
+// ReasonNotInParty 返回当前错误的 reason 常量值。
+func ReasonNotInParty() string {
+	return "NOT_IN_PARTY"
+}
+
+// CodeNotInParty 返回当前错误对应的 HTTP 状态码。
+func CodeNotInParty() int {
+	return 404
+}
+
+// BizCodeNotInParty 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeNotInParty() int32 {
+	return 2007
+}
+
+// NewNotInParty 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewNotInParty(message string) *errors.Error {
+	return errors.New(404, "NOT_IN_PARTY", message).WithMetadata(map[string]string{
+		"biz_code":   "2007",
+		"biz_reason": "NotInParty",
+	})
+}
+
+// WrapNotInParty 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapNotInParty(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrNotInParty(format, args...).WithCause(cause)
+}
+
 // 战斗
 func IsBattleNotFound(err error) bool {
 	if err == nil {
@@ -793,6 +1033,21 @@ func matchKnown(e *errors.Error) (*errors.Error, bool) {
 		return e, true
 	}
 	if IsMatchNotFound(e) {
+		return e, true
+	}
+	if IsPartyNotFound(e) {
+		return e, true
+	}
+	if IsPartyFull(e) {
+		return e, true
+	}
+	if IsAlreadyInParty(e) {
+		return e, true
+	}
+	if IsNotPartyLeader(e) {
+		return e, true
+	}
+	if IsNotInParty(e) {
 		return e, true
 	}
 	if IsBattleNotFound(e) {

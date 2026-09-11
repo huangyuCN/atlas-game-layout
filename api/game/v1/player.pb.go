@@ -26,6 +26,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// LogoutReason 是登出/退出原因（PlayActor 自停的语义来源）。
+type LogoutReason int32
+
+const (
+	LogoutReason_LOGOUT_REASON_UNSPECIFIED         LogoutReason = 0
+	LogoutReason_LOGOUT_REASON_LOGOUT              LogoutReason = 1 // 玩家主动登出
+	LogoutReason_LOGOUT_REASON_LOGGED_IN_ELSEWHERE LogoutReason = 2 // 被新登录挤下线
+	LogoutReason_LOGOUT_REASON_SESSION_EXPIRED     LogoutReason = 3 // 会话过期（心跳超时清理联动，异常下线兜底）
+)
+
+// Enum value maps for LogoutReason.
+var (
+	LogoutReason_name = map[int32]string{
+		0: "LOGOUT_REASON_UNSPECIFIED",
+		1: "LOGOUT_REASON_LOGOUT",
+		2: "LOGOUT_REASON_LOGGED_IN_ELSEWHERE",
+		3: "LOGOUT_REASON_SESSION_EXPIRED",
+	}
+	LogoutReason_value = map[string]int32{
+		"LOGOUT_REASON_UNSPECIFIED":         0,
+		"LOGOUT_REASON_LOGOUT":              1,
+		"LOGOUT_REASON_LOGGED_IN_ELSEWHERE": 2,
+		"LOGOUT_REASON_SESSION_EXPIRED":     3,
+	}
+)
+
+func (x LogoutReason) Enum() *LogoutReason {
+	p := new(LogoutReason)
+	*p = x
+	return p
+}
+
+func (x LogoutReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LogoutReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_game_v1_player_proto_enumTypes[0].Descriptor()
+}
+
+func (LogoutReason) Type() protoreflect.EnumType {
+	return &file_api_game_v1_player_proto_enumTypes[0]
+}
+
+func (x LogoutReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LogoutReason.Descriptor instead.
+func (LogoutReason) EnumDescriptor() ([]byte, []int) {
+	return file_api_game_v1_player_proto_rawDescGZIP(), []int{0}
+}
+
 // RegisterActorReq 是 PlayerActor 的注册消息（注册与登录两段式，D8/D9）：
 // 玩家数据不存在则创建并回执，客户端仍需 Login 建立会话。
 type RegisterActorReq struct {
@@ -268,7 +321,7 @@ func (x *LoginActorReply) GetPlayer() *v1.PlayerSummary {
 type LogoutActorMsg struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
-	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason        LogoutReason           `protobuf:"varint,2,opt,name=reason,proto3,enum=game.v1.LogoutReason" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -310,11 +363,11 @@ func (x *LogoutActorMsg) GetToken() string {
 	return ""
 }
 
-func (x *LogoutActorMsg) GetReason() string {
+func (x *LogoutActorMsg) GetReason() LogoutReason {
 	if x != nil {
 		return x.Reason
 	}
-	return ""
+	return LogoutReason_LOGOUT_REASON_UNSPECIFIED
 }
 
 // GrantItemActorReq 背包发放（经 PlayerActor 聚合根 undo 写，grpc 转发）。
@@ -931,10 +984,10 @@ const file_api_game_v1_player_proto_rawDesc = "" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12)\n" +
 	"\x10gateway_instance\x18\x04 \x01(\tR\x0fgatewayInstance\"C\n" +
 	"\x0fLoginActorReply\x120\n" +
-	"\x06player\x18\x01 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\">\n" +
+	"\x06player\x18\x01 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"U\n" +
 	"\x0eLogoutActorMsg\x12\x14\n" +
-	"\x05token\x18\x01 \x01(\tR\x05token\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"Z\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12-\n" +
+	"\x06reason\x18\x02 \x01(\x0e2\x15.game.v1.LogoutReasonR\x06reason\"Z\n" +
 	"\x11GrantItemActorReq\x12\x17\n" +
 	"\aitem_id\x18\x01 \x01(\rR\x06itemId\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\rR\x05count\x12\x16\n" +
@@ -962,7 +1015,12 @@ const file_api_game_v1_player_proto_rawDesc = "" +
 	"\aitem_id\x18\x02 \x01(\rR\x06itemId\x12\x14\n" +
 	"\x05count\x18\x03 \x01(\rR\x05count\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x10\n" +
-	"\x0eGrantItemReply2\xc6\x02\n" +
+	"\x0eGrantItemReply*\x91\x01\n" +
+	"\fLogoutReason\x12\x1d\n" +
+	"\x19LOGOUT_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14LOGOUT_REASON_LOGOUT\x10\x01\x12%\n" +
+	"!LOGOUT_REASON_LOGGED_IN_ELSEWHERE\x10\x02\x12!\n" +
+	"\x1dLOGOUT_REASON_SESSION_EXPIRED\x10\x032\xc6\x02\n" +
 	"\x06Player\x12`\n" +
 	"\tGetPlayer\x12\x19.game.v1.GetPlayerRequest\x1a\x17.game.v1.GetPlayerReply\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/players/{player_id}\x12o\n" +
 	"\vGetBackpack\x12\x1b.game.v1.GetBackpackRequest\x1a\x19.game.v1.GetBackpackReply\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/players/{player_id}/backpack\x12i\n" +
@@ -980,46 +1038,49 @@ func file_api_game_v1_player_proto_rawDescGZIP() []byte {
 	return file_api_game_v1_player_proto_rawDescData
 }
 
+var file_api_game_v1_player_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_api_game_v1_player_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_api_game_v1_player_proto_goTypes = []any{
-	(*RegisterActorReq)(nil),      // 0: game.v1.RegisterActorReq
-	(*RegisterActorReply)(nil),    // 1: game.v1.RegisterActorReply
-	(*LoginActorReq)(nil),         // 2: game.v1.LoginActorReq
-	(*LoginActorReply)(nil),       // 3: game.v1.LoginActorReply
-	(*LogoutActorMsg)(nil),        // 4: game.v1.LogoutActorMsg
-	(*GrantItemActorReq)(nil),     // 5: game.v1.GrantItemActorReq
-	(*GrantItemActorReply)(nil),   // 6: game.v1.GrantItemActorReply
-	(*GetBackpackActorReq)(nil),   // 7: game.v1.GetBackpackActorReq
-	(*GetBackpackActorReply)(nil), // 8: game.v1.GetBackpackActorReply
-	(*GetPlayerActorReq)(nil),     // 9: game.v1.GetPlayerActorReq
-	(*GetPlayerActorReply)(nil),   // 10: game.v1.GetPlayerActorReply
-	(*GetPlayerRequest)(nil),      // 11: game.v1.GetPlayerRequest
-	(*GetPlayerReply)(nil),        // 12: game.v1.GetPlayerReply
-	(*BackpackItem)(nil),          // 13: game.v1.BackpackItem
-	(*GetBackpackRequest)(nil),    // 14: game.v1.GetBackpackRequest
-	(*GetBackpackReply)(nil),      // 15: game.v1.GetBackpackReply
-	(*GrantItemRequest)(nil),      // 16: game.v1.GrantItemRequest
-	(*GrantItemReply)(nil),        // 17: game.v1.GrantItemReply
-	(*v1.PlayerSummary)(nil),      // 18: common.v1.PlayerSummary
+	(LogoutReason)(0),             // 0: game.v1.LogoutReason
+	(*RegisterActorReq)(nil),      // 1: game.v1.RegisterActorReq
+	(*RegisterActorReply)(nil),    // 2: game.v1.RegisterActorReply
+	(*LoginActorReq)(nil),         // 3: game.v1.LoginActorReq
+	(*LoginActorReply)(nil),       // 4: game.v1.LoginActorReply
+	(*LogoutActorMsg)(nil),        // 5: game.v1.LogoutActorMsg
+	(*GrantItemActorReq)(nil),     // 6: game.v1.GrantItemActorReq
+	(*GrantItemActorReply)(nil),   // 7: game.v1.GrantItemActorReply
+	(*GetBackpackActorReq)(nil),   // 8: game.v1.GetBackpackActorReq
+	(*GetBackpackActorReply)(nil), // 9: game.v1.GetBackpackActorReply
+	(*GetPlayerActorReq)(nil),     // 10: game.v1.GetPlayerActorReq
+	(*GetPlayerActorReply)(nil),   // 11: game.v1.GetPlayerActorReply
+	(*GetPlayerRequest)(nil),      // 12: game.v1.GetPlayerRequest
+	(*GetPlayerReply)(nil),        // 13: game.v1.GetPlayerReply
+	(*BackpackItem)(nil),          // 14: game.v1.BackpackItem
+	(*GetBackpackRequest)(nil),    // 15: game.v1.GetBackpackRequest
+	(*GetBackpackReply)(nil),      // 16: game.v1.GetBackpackReply
+	(*GrantItemRequest)(nil),      // 17: game.v1.GrantItemRequest
+	(*GrantItemReply)(nil),        // 18: game.v1.GrantItemReply
+	(*v1.PlayerSummary)(nil),      // 19: common.v1.PlayerSummary
 }
 var file_api_game_v1_player_proto_depIdxs = []int32{
-	18, // 0: game.v1.RegisterActorReply.player:type_name -> common.v1.PlayerSummary
-	18, // 1: game.v1.LoginActorReply.player:type_name -> common.v1.PlayerSummary
-	13, // 2: game.v1.GetBackpackActorReply.items:type_name -> game.v1.BackpackItem
-	18, // 3: game.v1.GetPlayerActorReply.player:type_name -> common.v1.PlayerSummary
-	18, // 4: game.v1.GetPlayerReply.player:type_name -> common.v1.PlayerSummary
-	13, // 5: game.v1.GetBackpackReply.items:type_name -> game.v1.BackpackItem
-	11, // 6: game.v1.Player.GetPlayer:input_type -> game.v1.GetPlayerRequest
-	14, // 7: game.v1.Player.GetBackpack:input_type -> game.v1.GetBackpackRequest
-	16, // 8: game.v1.Player.GrantItem:input_type -> game.v1.GrantItemRequest
-	12, // 9: game.v1.Player.GetPlayer:output_type -> game.v1.GetPlayerReply
-	15, // 10: game.v1.Player.GetBackpack:output_type -> game.v1.GetBackpackReply
-	17, // 11: game.v1.Player.GrantItem:output_type -> game.v1.GrantItemReply
-	9,  // [9:12] is the sub-list for method output_type
-	6,  // [6:9] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	19, // 0: game.v1.RegisterActorReply.player:type_name -> common.v1.PlayerSummary
+	19, // 1: game.v1.LoginActorReply.player:type_name -> common.v1.PlayerSummary
+	0,  // 2: game.v1.LogoutActorMsg.reason:type_name -> game.v1.LogoutReason
+	14, // 3: game.v1.GetBackpackActorReply.items:type_name -> game.v1.BackpackItem
+	19, // 4: game.v1.GetPlayerActorReply.player:type_name -> common.v1.PlayerSummary
+	19, // 5: game.v1.GetPlayerReply.player:type_name -> common.v1.PlayerSummary
+	14, // 6: game.v1.GetBackpackReply.items:type_name -> game.v1.BackpackItem
+	12, // 7: game.v1.Player.GetPlayer:input_type -> game.v1.GetPlayerRequest
+	15, // 8: game.v1.Player.GetBackpack:input_type -> game.v1.GetBackpackRequest
+	17, // 9: game.v1.Player.GrantItem:input_type -> game.v1.GrantItemRequest
+	13, // 10: game.v1.Player.GetPlayer:output_type -> game.v1.GetPlayerReply
+	16, // 11: game.v1.Player.GetBackpack:output_type -> game.v1.GetBackpackReply
+	18, // 12: game.v1.Player.GrantItem:output_type -> game.v1.GrantItemReply
+	10, // [10:13] is the sub-list for method output_type
+	7,  // [7:10] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_api_game_v1_player_proto_init() }
@@ -1032,13 +1093,14 @@ func file_api_game_v1_player_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_game_v1_player_proto_rawDesc), len(file_api_game_v1_player_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_api_game_v1_player_proto_goTypes,
 		DependencyIndexes: file_api_game_v1_player_proto_depIdxs,
+		EnumInfos:         file_api_game_v1_player_proto_enumTypes,
 		MessageInfos:      file_api_game_v1_player_proto_msgTypes,
 	}.Build()
 	File_api_game_v1_player_proto = out.File

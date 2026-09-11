@@ -35,7 +35,6 @@ func TestSendFrameInputRoundtrip(t *testing.T) {
 // TestJoinBattleReplyCarriesSnapshot 校验加入战斗回执携带断线重连所需字段。
 func TestJoinBattleReplyCarriesSnapshot(t *testing.T) {
 	in := &JoinBattleReply{
-		Ok:           true,
 		Meta:         &locksteppb.SessionMeta{SessionId: "b-0001", MaxPlayers: 2},
 		CurrentFrame: 42,
 		Snapshot:     &locksteppb.SnapshotMeta{FrameId: 40, StorageKey: "snap/b-0001/40"},

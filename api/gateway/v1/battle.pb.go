@@ -88,13 +88,12 @@ func (x *JoinBattleRequest) GetBattleId() string {
 }
 
 // JoinBattleReply 加入回执：携带会话元信息、当前帧与快照，支持断线重连恢复。
+// 业务失败以结构化 error 返回（error 通道），回执仅承载数据。
 type JoinBattleReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	ErrorReason   string                 `protobuf:"bytes,2,opt,name=error_reason,json=errorReason,proto3" json:"error_reason,omitempty"`
-	Meta          *lockstep.SessionMeta  `protobuf:"bytes,3,opt,name=meta,proto3" json:"meta,omitempty"`                                      // 会话元信息
-	CurrentFrame  uint64                 `protobuf:"varint,4,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"` // 当前帧号
-	Snapshot      *lockstep.SnapshotMeta `protobuf:"bytes,5,opt,name=snapshot,proto3" json:"snapshot,omitempty"`                              // 最新快照（重连恢复）
+	Meta          *lockstep.SessionMeta  `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`                                      // 会话元信息
+	CurrentFrame  uint64                 `protobuf:"varint,2,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"` // 当前帧号
+	Snapshot      *lockstep.SnapshotMeta `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`                              // 最新快照（重连恢复）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -127,20 +126,6 @@ func (x *JoinBattleReply) ProtoReflect() protoreflect.Message {
 // Deprecated: Use JoinBattleReply.ProtoReflect.Descriptor instead.
 func (*JoinBattleReply) Descriptor() ([]byte, []int) {
 	return file_api_gateway_v1_battle_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *JoinBattleReply) GetOk() bool {
-	if x != nil {
-		return x.Ok
-	}
-	return false
-}
-
-func (x *JoinBattleReply) GetErrorReason() string {
-	if x != nil {
-		return x.ErrorReason
-	}
-	return ""
 }
 
 func (x *JoinBattleReply) GetMeta() *lockstep.SessionMeta {
@@ -437,13 +422,11 @@ const file_api_gateway_v1_battle_proto_rawDesc = "" +
 	"\x11JoinBattleRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1b\n" +
 	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\x12\x1b\n" +
-	"\tbattle_id\x18\x03 \x01(\tR\bbattleId\"\xde\x01\n" +
-	"\x0fJoinBattleReply\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12!\n" +
-	"\ferror_reason\x18\x02 \x01(\tR\verrorReason\x124\n" +
-	"\x04meta\x18\x03 \x01(\v2 .atlas.game.lockstep.SessionMetaR\x04meta\x12#\n" +
-	"\rcurrent_frame\x18\x04 \x01(\x04R\fcurrentFrame\x12=\n" +
-	"\bsnapshot\x18\x05 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\"n\n" +
+	"\tbattle_id\x18\x03 \x01(\tR\bbattleId\"\xab\x01\n" +
+	"\x0fJoinBattleReply\x124\n" +
+	"\x04meta\x18\x01 \x01(\v2 .atlas.game.lockstep.SessionMetaR\x04meta\x12#\n" +
+	"\rcurrent_frame\x18\x02 \x01(\x04R\fcurrentFrame\x12=\n" +
+	"\bsnapshot\x18\x03 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\"n\n" +
 	"\x15SendFrameInputRequest\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x128\n" +
 	"\x05input\x18\x02 \x01(\v2\".atlas.game.lockstep.LockstepInputR\x05input\"\x15\n" +

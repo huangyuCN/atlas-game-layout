@@ -24,6 +24,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// KickedReason 是被挤下线的原因。
+type KickedReason int32
+
+const (
+	KickedReason_KICKED_REASON_UNSPECIFIED         KickedReason = 0
+	KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE KickedReason = 1 // 被新登录挤下线
+	KickedReason_KICKED_REASON_SESSION_EXPIRED     KickedReason = 2 // 会话过期（预留）
+)
+
+// Enum value maps for KickedReason.
+var (
+	KickedReason_name = map[int32]string{
+		0: "KICKED_REASON_UNSPECIFIED",
+		1: "KICKED_REASON_LOGGED_IN_ELSEWHERE",
+		2: "KICKED_REASON_SESSION_EXPIRED",
+	}
+	KickedReason_value = map[string]int32{
+		"KICKED_REASON_UNSPECIFIED":         0,
+		"KICKED_REASON_LOGGED_IN_ELSEWHERE": 1,
+		"KICKED_REASON_SESSION_EXPIRED":     2,
+	}
+)
+
+func (x KickedReason) Enum() *KickedReason {
+	p := new(KickedReason)
+	*p = x
+	return p
+}
+
+func (x KickedReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (KickedReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_gateway_v1_auth_proto_enumTypes[0].Descriptor()
+}
+
+func (KickedReason) Type() protoreflect.EnumType {
+	return &file_api_gateway_v1_auth_proto_enumTypes[0]
+}
+
+func (x KickedReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use KickedReason.Descriptor instead.
+func (KickedReason) EnumDescriptor() ([]byte, []int) {
+	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{0}
+}
+
 // RegisterRequest 注册：账号不存在则创建玩家。
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -449,7 +499,7 @@ func (*LogoutReply) Descriptor() ([]byte, []int) {
 // KickedNotify 服务端推送：被挤下线（旧连接断开前收到）。
 type KickedNotify struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason        KickedReason           `protobuf:"varint,1,opt,name=reason,proto3,enum=gateway.v1.KickedReason" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -484,11 +534,11 @@ func (*KickedNotify) Descriptor() ([]byte, []int) {
 	return file_api_gateway_v1_auth_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *KickedNotify) GetReason() string {
+func (x *KickedNotify) GetReason() KickedReason {
 	if x != nil {
 		return x.Reason
 	}
-	return ""
+	return KickedReason_KICKED_REASON_UNSPECIFIED
 }
 
 var File_api_gateway_v1_auth_proto protoreflect.FileDescriptor
@@ -521,9 +571,13 @@ const file_api_gateway_v1_auth_proto_rawDesc = "" +
 	"\rLogoutRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1b\n" +
 	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\"\r\n" +
-	"\vLogoutReply\"&\n" +
-	"\fKickedNotify\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason2\x91\x02\n" +
+	"\vLogoutReply\"@\n" +
+	"\fKickedNotify\x120\n" +
+	"\x06reason\x18\x01 \x01(\x0e2\x18.gateway.v1.KickedReasonR\x06reason*w\n" +
+	"\fKickedReason\x12\x1d\n" +
+	"\x19KICKED_REASON_UNSPECIFIED\x10\x00\x12%\n" +
+	"!KICKED_REASON_LOGGED_IN_ELSEWHERE\x10\x01\x12!\n" +
+	"\x1dKICKED_REASON_SESSION_EXPIRED\x10\x022\x91\x02\n" +
 	"\vGatewayAuth\x12B\n" +
 	"\bRegister\x12\x1b.gateway.v1.RegisterRequest\x1a\x19.gateway.v1.RegisterReply\x129\n" +
 	"\x05Login\x12\x18.gateway.v1.LoginRequest\x1a\x16.gateway.v1.LoginReply\x12E\n" +
@@ -542,34 +596,37 @@ func file_api_gateway_v1_auth_proto_rawDescGZIP() []byte {
 	return file_api_gateway_v1_auth_proto_rawDescData
 }
 
+var file_api_gateway_v1_auth_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_api_gateway_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_api_gateway_v1_auth_proto_goTypes = []any{
-	(*RegisterRequest)(nil),  // 0: gateway.v1.RegisterRequest
-	(*RegisterReply)(nil),    // 1: gateway.v1.RegisterReply
-	(*LoginRequest)(nil),     // 2: gateway.v1.LoginRequest
-	(*LoginReply)(nil),       // 3: gateway.v1.LoginReply
-	(*HeartbeatRequest)(nil), // 4: gateway.v1.HeartbeatRequest
-	(*HeartbeatReply)(nil),   // 5: gateway.v1.HeartbeatReply
-	(*LogoutRequest)(nil),    // 6: gateway.v1.LogoutRequest
-	(*LogoutReply)(nil),      // 7: gateway.v1.LogoutReply
-	(*KickedNotify)(nil),     // 8: gateway.v1.KickedNotify
-	(*v1.PlayerSummary)(nil), // 9: common.v1.PlayerSummary
+	(KickedReason)(0),        // 0: gateway.v1.KickedReason
+	(*RegisterRequest)(nil),  // 1: gateway.v1.RegisterRequest
+	(*RegisterReply)(nil),    // 2: gateway.v1.RegisterReply
+	(*LoginRequest)(nil),     // 3: gateway.v1.LoginRequest
+	(*LoginReply)(nil),       // 4: gateway.v1.LoginReply
+	(*HeartbeatRequest)(nil), // 5: gateway.v1.HeartbeatRequest
+	(*HeartbeatReply)(nil),   // 6: gateway.v1.HeartbeatReply
+	(*LogoutRequest)(nil),    // 7: gateway.v1.LogoutRequest
+	(*LogoutReply)(nil),      // 8: gateway.v1.LogoutReply
+	(*KickedNotify)(nil),     // 9: gateway.v1.KickedNotify
+	(*v1.PlayerSummary)(nil), // 10: common.v1.PlayerSummary
 }
 var file_api_gateway_v1_auth_proto_depIdxs = []int32{
-	9, // 0: gateway.v1.LoginReply.player:type_name -> common.v1.PlayerSummary
-	0, // 1: gateway.v1.GatewayAuth.Register:input_type -> gateway.v1.RegisterRequest
-	2, // 2: gateway.v1.GatewayAuth.Login:input_type -> gateway.v1.LoginRequest
-	4, // 3: gateway.v1.GatewayAuth.Heartbeat:input_type -> gateway.v1.HeartbeatRequest
-	6, // 4: gateway.v1.GatewayAuth.Logout:input_type -> gateway.v1.LogoutRequest
-	1, // 5: gateway.v1.GatewayAuth.Register:output_type -> gateway.v1.RegisterReply
-	3, // 6: gateway.v1.GatewayAuth.Login:output_type -> gateway.v1.LoginReply
-	5, // 7: gateway.v1.GatewayAuth.Heartbeat:output_type -> gateway.v1.HeartbeatReply
-	7, // 8: gateway.v1.GatewayAuth.Logout:output_type -> gateway.v1.LogoutReply
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	10, // 0: gateway.v1.LoginReply.player:type_name -> common.v1.PlayerSummary
+	0,  // 1: gateway.v1.KickedNotify.reason:type_name -> gateway.v1.KickedReason
+	1,  // 2: gateway.v1.GatewayAuth.Register:input_type -> gateway.v1.RegisterRequest
+	3,  // 3: gateway.v1.GatewayAuth.Login:input_type -> gateway.v1.LoginRequest
+	5,  // 4: gateway.v1.GatewayAuth.Heartbeat:input_type -> gateway.v1.HeartbeatRequest
+	7,  // 5: gateway.v1.GatewayAuth.Logout:input_type -> gateway.v1.LogoutRequest
+	2,  // 6: gateway.v1.GatewayAuth.Register:output_type -> gateway.v1.RegisterReply
+	4,  // 7: gateway.v1.GatewayAuth.Login:output_type -> gateway.v1.LoginReply
+	6,  // 8: gateway.v1.GatewayAuth.Heartbeat:output_type -> gateway.v1.HeartbeatReply
+	8,  // 9: gateway.v1.GatewayAuth.Logout:output_type -> gateway.v1.LogoutReply
+	6,  // [6:10] is the sub-list for method output_type
+	2,  // [2:6] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_api_gateway_v1_auth_proto_init() }
@@ -582,13 +639,14 @@ func file_api_gateway_v1_auth_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_gateway_v1_auth_proto_rawDesc), len(file_api_gateway_v1_auth_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_api_gateway_v1_auth_proto_goTypes,
 		DependencyIndexes: file_api_gateway_v1_auth_proto_depIdxs,
+		EnumInfos:         file_api_gateway_v1_auth_proto_enumTypes,
 		MessageInfos:      file_api_gateway_v1_auth_proto_msgTypes,
 	}.Build()
 	File_api_gateway_v1_auth_proto = out.File

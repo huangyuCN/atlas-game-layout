@@ -27,6 +27,11 @@ type PlayerActorServer interface {
 	EnterMatchQueue(ctx core.ActorContext, req *EnterMatchQueueActorReq) (*EnterMatchQueueActorReply, error)
 	CancelMatch(ctx core.ActorContext, req *CancelMatchActorReq) (*CancelMatchActorReply, error)
 	GetMatchStatus(ctx core.ActorContext, req *GetMatchStatusActorReq) (*MatchStatusActorReply, error)
+	CreateParty(ctx core.ActorContext, req *CreatePartyActorReq) (*PartyActorReply, error)
+	JoinParty(ctx core.ActorContext, req *JoinPartyActorReq) (*PartyActorReply, error)
+	LeaveParty(ctx core.ActorContext, req *LeavePartyActorReq) (*PartyActorReply, error)
+	GetParty(ctx core.ActorContext, req *GetPartyActorReq) (*PartyActorReply, error)
+	QueueParty(ctx core.ActorContext, req *QueuePartyActorReq) (*QueuePartyActorReply, error)
 }
 
 // UnimplementedPlayerActorServer 是兜底基类；业务 actor embed 它获得接口演进安全。
@@ -58,6 +63,21 @@ func (UnimplementedPlayerActorServer) CancelMatch(core.ActorContext, *CancelMatc
 }
 func (UnimplementedPlayerActorServer) GetMatchStatus(core.ActorContext, *GetMatchStatusActorReq) (*MatchStatusActorReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.GetMatchStatus")
+}
+func (UnimplementedPlayerActorServer) CreateParty(core.ActorContext, *CreatePartyActorReq) (*PartyActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.CreateParty")
+}
+func (UnimplementedPlayerActorServer) JoinParty(core.ActorContext, *JoinPartyActorReq) (*PartyActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.JoinParty")
+}
+func (UnimplementedPlayerActorServer) LeaveParty(core.ActorContext, *LeavePartyActorReq) (*PartyActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.LeaveParty")
+}
+func (UnimplementedPlayerActorServer) GetParty(core.ActorContext, *GetPartyActorReq) (*PartyActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.GetParty")
+}
+func (UnimplementedPlayerActorServer) QueueParty(core.ActorContext, *QueuePartyActorReq) (*QueuePartyActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.QueueParty")
 }
 
 // playerActorDecodeTable 是 type_url → 类型化 Unmarshal 闭包的解码表（生成期静态绑定）。
@@ -96,6 +116,26 @@ var playerActorDecodeTable = map[string]func([]byte) (proto.Message, error){
 	},
 	"type.googleapis.com/game.v1.GetMatchStatusActorReq": func(b []byte) (proto.Message, error) {
 		m := new(GetMatchStatusActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.CreatePartyActorReq": func(b []byte) (proto.Message, error) {
+		m := new(CreatePartyActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.JoinPartyActorReq": func(b []byte) (proto.Message, error) {
+		m := new(JoinPartyActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.LeavePartyActorReq": func(b []byte) (proto.Message, error) {
+		m := new(LeavePartyActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.GetPartyActorReq": func(b []byte) (proto.Message, error) {
+		m := new(GetPartyActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.QueuePartyActorReq": func(b []byte) (proto.Message, error) {
+		m := new(QueuePartyActorReq)
 		return m, proto.Unmarshal(b, m)
 	},
 }
@@ -140,6 +180,16 @@ func (d *playerActorDispatch) OnAsk(ctx core.ActorContext, req any) (any, error)
 		return d.impl.CancelMatch(ctx, r)
 	case *GetMatchStatusActorReq:
 		return d.impl.GetMatchStatus(ctx, r)
+	case *CreatePartyActorReq:
+		return d.impl.CreateParty(ctx, r)
+	case *JoinPartyActorReq:
+		return d.impl.JoinParty(ctx, r)
+	case *LeavePartyActorReq:
+		return d.impl.LeaveParty(ctx, r)
+	case *GetPartyActorReq:
+		return d.impl.GetParty(ctx, r)
+	case *QueuePartyActorReq:
+		return d.impl.QueueParty(ctx, r)
 	default:
 		return d.FallbackAsk(ctx, req)
 	}
@@ -332,6 +382,106 @@ func (c *PlayerActorClient) GetMatchStatus(ctx context.Context, pid types.PID, r
 		return v, nil
 	case []byte:
 		out := new(MatchStatusActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// CreateParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) CreateParty(ctx context.Context, pid types.PID, req *CreatePartyActorReq) (*PartyActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *PartyActorReply:
+		return v, nil
+	case []byte:
+		out := new(PartyActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// JoinParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) JoinParty(ctx context.Context, pid types.PID, req *JoinPartyActorReq) (*PartyActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *PartyActorReply:
+		return v, nil
+	case []byte:
+		out := new(PartyActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// LeaveParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) LeaveParty(ctx context.Context, pid types.PID, req *LeavePartyActorReq) (*PartyActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *PartyActorReply:
+		return v, nil
+	case []byte:
+		out := new(PartyActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// GetParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) GetParty(ctx context.Context, pid types.PID, req *GetPartyActorReq) (*PartyActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *PartyActorReply:
+		return v, nil
+	case []byte:
+		out := new(PartyActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// QueueParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) QueueParty(ctx context.Context, pid types.PID, req *QueuePartyActorReq) (*QueuePartyActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *QueuePartyActorReply:
+		return v, nil
+	case []byte:
+		out := new(QueuePartyActorReply)
 		if err := proto.Unmarshal(v, out); err != nil {
 			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
 		}

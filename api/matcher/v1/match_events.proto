@@ -14,11 +14,39 @@ message MatchStartedEvent {
   string battle_endpoint = 4;
 }
 
+// MatchFailReason 是匹配失败原因（客户端可读枚举，对齐状态机终态与处置来源）。
+enum MatchFailReason {
+  MATCH_FAIL_REASON_UNSPECIFIED = 0;
+  MATCH_FAIL_REASON_TIMEOUT = 1;           // 玩家请求/接受超时（匹配未成立）
+  MATCH_FAIL_REASON_CANCELLED = 2;         // 玩家主动取消
+  MATCH_FAIL_REASON_ACCEPTANCE_FAILED = 3; // 接受阶段失败
+  MATCH_FAIL_REASON_PLACEMENT_FAILED = 4;  // 对局实例分配失败
+  MATCH_FAIL_REASON_FAILED = 5;            // 其他失败
+}
+
 // MatchFailedEvent 匹配失败（超时/取消/异常）：单玩家 ticket 终态，
 // 未成局故无对局 ID（match_id 留空）；ticket_id 是取消/查询/事件关联的键。
 message MatchFailedEvent {
-  string match_id = 1;  // 已成局的对局 ID（成局前失败为空）
+  string match_id = 1;                 // 已成局的对局 ID（成局前失败为空）
   repeated string player_ids = 2;
-  string reason = 3;
-  string ticket_id = 4; // 失败的票据 ID
+  MatchFailReason reason = 3;
+  string ticket_id = 4;                // 失败的票据 ID
+}
+
+// PartyRosterReason 是队伍名册变更原因。
+enum PartyRosterReason {
+  PARTY_ROSTER_REASON_UNSPECIFIED = 0;
+  PARTY_ROSTER_REASON_CREATED = 1;  // 建队
+  PARTY_ROSTER_REASON_JOIN = 2;     // 成员加入
+  PARTY_ROSTER_REASON_LEAVE = 3;    // 成员离开
+  PARTY_ROSTER_REASON_DISSOLVE = 4; // 队伍解散（名册清空）
+}
+
+// PartyRosterEvent 队伍名册变更（建队/加入/离开/解散）：
+// matcher 发布，gateway 向全队推送名册快照（PartyRosterNotify）。
+message PartyRosterEvent {
+  string party_id = 1;
+  string leader_id = 2;
+  repeated string player_ids = 3;
+  PartyRosterReason reason = 4;
 }

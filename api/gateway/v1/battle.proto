@@ -17,12 +17,11 @@ message JoinBattleRequest {
 }
 
 // JoinBattleReply 加入回执：携带会话元信息、当前帧与快照，支持断线重连恢复。
+// 业务失败以结构化 error 返回（error 通道），回执仅承载数据。
 message JoinBattleReply {
-  bool ok = 1;
-  string error_reason = 2;
-  atlas.game.lockstep.SessionMeta meta = 3;   // 会话元信息
-  uint64 current_frame = 4;                   // 当前帧号
-  atlas.game.lockstep.SnapshotMeta snapshot = 5;  // 最新快照（重连恢复）
+  atlas.game.lockstep.SessionMeta meta = 1;       // 会话元信息
+  uint64 current_frame = 2;                       // 当前帧号
+  atlas.game.lockstep.SnapshotMeta snapshot = 3;  // 最新快照（重连恢复）
 }
 
 // SendFrameInputRequest 帧输入上行（客户端 → gateway → battle）。

@@ -41,6 +41,11 @@ const (
 	// 匹配
 	ErrorReason_AlreadyInMatch ErrorReason = 2001 // 已在匹配中
 	ErrorReason_MatchNotFound  ErrorReason = 2002 // 匹配不存在
+	ErrorReason_PartyNotFound  ErrorReason = 2003 // 队伍不存在或已解散
+	ErrorReason_PartyFull      ErrorReason = 2004 // 队伍已满
+	ErrorReason_AlreadyInParty ErrorReason = 2005 // 已在队伍中
+	ErrorReason_NotPartyLeader ErrorReason = 2006 // 仅队长可执行该操作
+	ErrorReason_NotInParty     ErrorReason = 2007 // 不在队伍中
 	// 战斗
 	ErrorReason_BattleNotFound ErrorReason = 3001 // 战斗不存在
 	ErrorReason_BattleFull     ErrorReason = 3002 // 战斗已满
@@ -64,6 +69,11 @@ var (
 		1009: "PasswordWrong",
 		2001: "AlreadyInMatch",
 		2002: "MatchNotFound",
+		2003: "PartyNotFound",
+		2004: "PartyFull",
+		2005: "AlreadyInParty",
+		2006: "NotPartyLeader",
+		2007: "NotInParty",
 		3001: "BattleNotFound",
 		3002: "BattleFull",
 		3003: "BattleEnded",
@@ -82,6 +92,11 @@ var (
 		"PasswordWrong":       1009,
 		"AlreadyInMatch":      2001,
 		"MatchNotFound":       2002,
+		"PartyNotFound":       2003,
+		"PartyFull":           2004,
+		"AlreadyInParty":      2005,
+		"NotPartyLeader":      2006,
+		"NotInParty":          2007,
 		"BattleNotFound":      3001,
 		"BattleFull":          3002,
 		"BattleEnded":         3003,
@@ -120,7 +135,7 @@ var File_api_error_v1_errors_proto protoreflect.FileDescriptor
 
 const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\xa4\x03\n" +
+	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\xa1\x04\n" +
 	"\vErrorReason\x12\b\n" +
 	"\x04None\x10\x00\x12\x19\n" +
 	"\x0ePlayerNotFound\x10\xe9\a\x1a\x04\xa8E\x94\x03\x12\x1e\n" +
@@ -133,7 +148,13 @@ const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\rInvalidParams\x10\xf0\a\x1a\x04\xa8E\x90\x03\x12\x18\n" +
 	"\rPasswordWrong\x10\xf1\a\x1a\x04\xa8E\x91\x03\x12\x19\n" +
 	"\x0eAlreadyInMatch\x10\xd1\x0f\x1a\x04\xa8E\x99\x03\x12\x18\n" +
-	"\rMatchNotFound\x10\xd2\x0f\x1a\x04\xa8E\x94\x03\x12\x19\n" +
+	"\rMatchNotFound\x10\xd2\x0f\x1a\x04\xa8E\x94\x03\x12\x18\n" +
+	"\rPartyNotFound\x10\xd3\x0f\x1a\x04\xa8E\x94\x03\x12\x14\n" +
+	"\tPartyFull\x10\xd4\x0f\x1a\x04\xa8E\x99\x03\x12\x19\n" +
+	"\x0eAlreadyInParty\x10\xd5\x0f\x1a\x04\xa8E\x99\x03\x12\x19\n" +
+	"\x0eNotPartyLeader\x10\xd6\x0f\x1a\x04\xa8E\x93\x03\x12\x15\n" +
+	"\n" +
+	"NotInParty\x10\xd7\x0f\x1a\x04\xa8E\x94\x03\x12\x19\n" +
 	"\x0eBattleNotFound\x10\xb9\x17\x1a\x04\xa8E\x94\x03\x12\x15\n" +
 	"\n" +
 	"BattleFull\x10\xba\x17\x1a\x04\xa8E\x99\x03\x12\x16\n" +
