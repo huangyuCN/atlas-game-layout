@@ -212,3 +212,52 @@ func TestMatchStartedNotifyRelay(t *testing.T) {
 		t.Fatal("未收到开局通知")
 	}
 }
+
+// TestMatchFailedNotifyPush 验证失败事件链路：matcher 发布失败事件
+// （atlas.event.match.failed）→ gateway 订阅 → 按玩家推送 MatchFailedNotify。
+func TestMatchFailedNotifyPush(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cli, auth := env.newTCPAuthClient(t)
+	if _, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
+		t.Fatalf("登录: %v", err)
+	}
+	notify := make(chan *gatewayv1.MatchFailedNotify, 1)
+	cli.OnNotify(func(operation string, payload []byte) {
+		if operation != consts.PushOpMatchFailed {
+			return
+		}
+		var n gatewayv1.MatchFailedNotify
+		if err := protojson.Unmarshal(payload, &n); err == nil {
+			notify <- &n
+		}
+	})
+
+	// 模拟 matcher 发布失败事件（与 NatsEventPublisher.PublishFailed 同编解码）。
+	pub, err := nats.Connect(nats.Options{URL: natsURL, Name: "publisher"})
+	if err != nil {
+		t.Fatalf("publisher 连接: %v", err)
+	}
+	t.Cleanup(pub.Close)
+	ev, err := protojson.Marshal(&matcherv1.MatchFailedEvent{
+		PlayerIds: []string{"p-1"}, Reason: "timeout", TicketId: "t-9",
+	})
+	if err != nil {
+		t.Fatalf("事件编码: %v", err)
+	}
+	if err := pub.Publish(consts.MatchFailedTopic(), ev); err != nil {
+		t.Fatalf("发布失败事件: %v", err)
+	}
+
+	select {
+	case n := <-notify:
+		if n.GetTicketId() != "t-9" || n.GetReason() != "timeout" {
+			t.Fatalf("失败通知不符: %+v", n)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("未收到匹配失败通知")
+	}
+}

@@ -181,6 +181,8 @@ func startMatcherForBattle(t *testing.T, ctx context.Context) *matcherassemble.M
 }
 
 // queueTwo 双玩家入队并等待成局事件回执 battleID。
+// 直连 matcher 是服务级白盒测试手段（本测试验证 battle 链路，撮合仅作开局前置；
+// 客户端全链路形态由 scripts/e2e 验证：gateway → PlayerActor → matcher）。
 func queueTwo(t *testing.T, ctx context.Context, m *matcherassemble.Matcher, startedCh <-chan *matcherv1.MatchStartedEvent, a, b *battleClient) string {
 	t.Helper()
 	gcli, err := atlasgrpc.DialInsecure(ctx, atlasgrpc.WithEndpoint(m.GRPCURL))

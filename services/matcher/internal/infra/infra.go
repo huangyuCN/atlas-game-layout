@@ -106,11 +106,12 @@ func (p *NatsEventPublisher) PublishStarted(ctx context.Context, battleID, match
 }
 
 // PublishFailed 实现 biz.MatchEventPublisher（主题 atlas.event.match.failed）。
-func (p *NatsEventPublisher) PublishFailed(ctx context.Context, matchID string, playerIDs []string, reason string) error {
+// ticketID 是失败的票据 ID；未成局故 match_id 留空。
+func (p *NatsEventPublisher) PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason string) error {
 	payload, err := protojson.Marshal(&matcherv1.MatchFailedEvent{
-		MatchId:   matchID,
 		PlayerIds: playerIDs,
 		Reason:    reason,
+		TicketId:  ticketID,
 	})
 	if err != nil {
 		return fmt.Errorf("infra: 失败事件编码失败: %w", err)

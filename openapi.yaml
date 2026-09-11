@@ -298,7 +298,8 @@ components:
             type: object
             properties:
                 state:
-                    type: string
+                    type: integer
+                    format: enum
                 ticketId:
                     type: string
                 matchId:
@@ -319,7 +320,9 @@ components:
                     $ref: '#/components/schemas/PlayerSummary'
                 ruleset:
                     type: string
-            description: QueueMatchRequest 入队：玩家属性快照 ticket（纯撮合，matcher 不查库）。
+            description: |-
+                QueueMatchRequest 入队：玩家属性快照 ticket（纯撮合，matcher 不查库）。
+                 player 字段是服务端权威数据（由 game PlayerActor 从聚合根组装），非客户端自报。
         Status:
             type: object
             properties:

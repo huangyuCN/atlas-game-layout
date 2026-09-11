@@ -4,9 +4,9 @@
 //   - dual（默认）：TCP 业务通道 + KCP 战斗通道（原生双通道）
 //   - single：WS 单通道（业务与战斗共用一条连接）
 //
-// 匹配经 matcher gRPC 直连（v1 简化：客户端直连撮合服务入队）；
-// 成局后 gateway 向参战玩家推送开局通知（MatchStartedNotify，含 battle ID），
-// 客户端据此加入战斗、发送帧输入，直至收到双方一致的战斗结束通知。
+// 匹配经 gateway 业务通道 op 入队（gateway → game PlayerActor → matcher）；
+// 成局/失败由 gateway 主动推送（MatchStartedNotify / MatchFailedNotify），
+// 客户端据开局通知加入战斗、发送帧输入，直至收到双方一致的战斗结束通知。
 //
 // 用法：go run ./scripts/e2e -mode dual
 package main
@@ -19,11 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
-	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
@@ -38,6 +35,13 @@ type authAPI interface {
 	Logout(context.Context, *gatewayv1.LogoutRequest) (*gatewayv1.LogoutReply, error)
 }
 
+// matchAPI 是匹配协议客户端最小接口（TCP/WS 生成客户端满足）。
+type matchAPI interface {
+	QueueMatch(context.Context, *gatewayv1.MatchQueueRequest) (*gatewayv1.MatchQueueReply, error)
+	CancelMatch(context.Context, *gatewayv1.MatchCancelRequest) (*gatewayv1.MatchCancelReply, error)
+	MatchStatus(context.Context, *gatewayv1.MatchStatusRequest) (*gatewayv1.MatchStatusReply, error)
+}
+
 // battleAPI 是战斗协议客户端最小接口（KCP/WS 生成客户端满足）。
 type battleAPI interface {
 	JoinBattle(context.Context, *gatewayv1.JoinBattleRequest) (*gatewayv1.JoinBattleReply, error)
@@ -49,6 +53,7 @@ type player struct {
 	id     string
 	token  string
 	auth   authAPI
+	match  matchAPI
 	battle battleAPI
 
 	started chan *gatewayv1.MatchStartedNotify
@@ -102,6 +107,7 @@ func newDualPlayer(ctx context.Context, tcpAddr, kcpAddr string) (*player, error
 	}
 	p := newPlayer("")
 	p.auth = gatewayv1.NewGatewayAuthTCPClient(tcpCli)
+	p.match = gatewayv1.NewGatewayMatchTCPClient(tcpCli)
 	p.battle = gatewayv1.NewGatewayBattleKCPClient(kcpCli)
 	// 开局通知在绑定战斗通道前走业务通道（回退），帧广播走战斗通道。
 	tcpCli.OnNotify(p.watch)
@@ -117,6 +123,7 @@ func newSinglePlayer(ctx context.Context, wsAddr string) (*player, error) {
 	}
 	p := newPlayer("")
 	p.auth = gatewayv1.NewGatewayAuthWSClient(wsCli)
+	p.match = gatewayv1.NewGatewayMatchWSClient(wsCli)
 	p.battle = gatewayv1.NewGatewayBattleWSClient(wsCli)
 	wsCli.OnNotify(p.watch)
 	return p, nil
@@ -139,18 +146,11 @@ func (p *player) registerLogin(ctx context.Context, step byte) error {
 	return nil
 }
 
-// queueMatch 经 matcher gRPC 入队（等级相近 1v1）。
-func queueMatch(ctx context.Context, matcherAddr string, ps ...*player) error {
-	conn, err := atlasgrpc.DialInsecure(ctx, atlasgrpc.WithEndpoint(matcherAddr))
-	if err != nil {
-		return fmt.Errorf("matcher 连接失败: %w", err)
-	}
-	defer conn.Close()
-	svc := matcherv1.NewMatcherClient(conn)
-	for i, p := range ps {
-		if _, err := svc.QueueMatch(ctx, &matcherv1.QueueMatchRequest{
-			PlayerId: p.id,
-			Player:   &commonv1.PlayerSummary{PlayerId: p.id, Level: int32(10 + i)},
+// queueMatch 经 gateway 业务通道 op 入队（等级相近 1v1；属性由服务端权威填充）。
+func queueMatch(ctx context.Context, ps ...*player) error {
+	for _, p := range ps {
+		if _, err := p.match.QueueMatch(ctx, &gatewayv1.MatchQueueRequest{
+			Token: p.token, PlayerId: p.id, Ruleset: "casual",
 		}); err != nil {
 			return fmt.Errorf("%s 入队失败: %w", p.id, err)
 		}
@@ -223,12 +223,12 @@ func (p *player) waitEnd() (string, error) {
 }
 
 // run 执行闭环；返回错误则脚本非零退出。
-func run(ctx context.Context, mode, tcpAddr, kcpAddr, wsAddr, matcherAddr string, frames uint64) error {
+func run(ctx context.Context, mode, tcpAddr, kcpAddr, wsAddr string, frames uint64) error {
 	ps, err := connectPlayers(ctx, mode, tcpAddr, kcpAddr, wsAddr)
 	if err != nil {
 		return err
 	}
-	battleID, err := matchAndStart(ctx, matcherAddr, ps)
+	battleID, err := matchAndStart(ctx, ps)
 	if err != nil {
 		return err
 	}
@@ -254,14 +254,14 @@ func connectPlayers(ctx context.Context, mode, tcpAddr, kcpAddr, wsAddr string) 
 }
 
 // matchAndStart 双玩家注册登录后入队，等待撮合成局并返回 battleID。
-func matchAndStart(ctx context.Context, matcherAddr string, ps [2]*player) (string, error) {
+func matchAndStart(ctx context.Context, ps [2]*player) (string, error) {
 	for i, p := range ps {
 		if err := p.registerLogin(ctx, byte(i)); err != nil {
 			return "", err
 		}
 	}
 	fmt.Println("[匹配] 双玩家入队（等级相近）")
-	if err := queueMatch(ctx, matcherAddr, ps[0], ps[1]); err != nil {
+	if err := queueMatch(ctx, ps[0], ps[1]); err != nil {
 		return "", err
 	}
 	battleID, err := waitStarted(ps[0], ps[1])
@@ -308,13 +308,12 @@ func main() {
 	tcpAddr := flag.String("gw", "127.0.0.1:9001", "gateway TCP 地址")
 	kcpAddr := flag.String("kcp", "127.0.0.1:9003", "gateway KCP 地址")
 	wsAddr := flag.String("ws", "ws://127.0.0.1:9002", "gateway WS 地址")
-	matcherAddr := flag.String("matcher", "127.0.0.1:9200", "matcher gRPC 地址")
 	frames := flag.Uint64("frames", 20, "每客户端帧输入数")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := run(ctx, *mode, *tcpAddr, *kcpAddr, *wsAddr, *matcherAddr, *frames); err != nil {
+	if err := run(ctx, *mode, *tcpAddr, *kcpAddr, *wsAddr, *frames); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e 失败: %v\n", err)
 		os.Exit(1)
 	}

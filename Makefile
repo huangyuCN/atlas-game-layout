@@ -59,7 +59,7 @@ ATLAS_BIN ?= ../atlas/bin
 ATLAS_DIR ?= $(dir $(ATLAS_BIN))
 API_SERVICE_PROTOS := api/game/v1/player.proto api/matcher/v1/matcher.proto api/battle/v1/battle.proto
 API_GATEWAY_PROTOS := api/gateway/v1/auth.proto api/gateway/v1/battle.proto
-API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_GATEWAY_PROTOS)
+API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_GATEWAY_PROTOS) api/gateway/v1/matcher.proto
 
 .PHONY: proto proto-tools
 
@@ -83,7 +83,7 @@ proto-tools: ## 收集/构建 protoc 插件到 ./bin（Atlas 全家桶 + go/go-g
 proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/openapi/配置）
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--go_out=. --go_opt=paths=source_relative \
-		protobuf/configs/*.proto services/*/internal/conf/conf.proto $(API_ALL_PROTOS)
+		protobuf/configs/*.proto services/*/internal/conf/conf.proto $(API_ALL_PROTOS) api/game/v1/player_actor.proto
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		$(API_SERVICE_PROTOS)
@@ -93,6 +93,10 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-actor_out=. --atlas-actor_opt=paths=source_relative \
 		api/game/v1/player_actor.proto api/battle/v1/battle_actor.proto
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
+		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
+		--atlas-ws_out=. --atlas-ws_opt=paths=source_relative \
+		api/gateway/v1/matcher.proto
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
 		--atlas-udp_out=. --atlas-udp_opt=paths=source_relative \

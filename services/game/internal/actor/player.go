@@ -26,13 +26,14 @@ import (
 type tickSnapshot struct{}
 
 // NewProps 构造 PlayerActor 注册规格（SpawnAuto 懒激活 + 默认中间件链）。
-// snapTTL 是快照缓存租期；snapTick 是定时快照周期（≤0 关闭）。
-func NewProps(svc biz.PlayerService, store repo.PlayerRepo, snapTTL, snapTick time.Duration) core.Props {
+// snapTTL 是快照缓存租期；snapTick 是定时快照周期（≤0 关闭）；
+// match 是匹配队列客户端（nil 降级：匹配方法返回内部错误，单测可注入 fake）。
+func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.MatchQueueClient, snapTTL, snapTick time.Duration) core.Props {
 	return core.Props{
 		Type: consts.ActorTypePlayer,
 		NewHandler: func(pid types.PID) core.Handler {
 			p := &PlayerActor{
-				pid: pid, svc: svc, store: store, snapTTL: snapTTL, snapTick: snapTick,
+				pid: pid, svc: svc, store: store, match: match, snapTTL: snapTTL, snapTick: snapTick,
 			}
 			return gamev1.NewPlayerActorServer(p, core.WithLocalTell(p.onTickSnapshot))
 		},
@@ -51,6 +52,7 @@ type PlayerActor struct {
 	pid                                   types.PID
 	svc                                   biz.PlayerService
 	store                                 repo.PlayerRepo
+	match                                 biz.MatchQueueClient
 	snapTTL                               time.Duration
 	snapTick                              time.Duration
 
@@ -66,9 +68,13 @@ func (p *PlayerActor) OnStart(ctx core.ActorContext) error {
 	return nil
 }
 
-// OnStop 实现 core.Handler 生命周期：下线 mongo 落库（若持有聚合根）。
+// OnStop 实现 core.Handler 生命周期：先联动取消在队匹配（幂等、失败仅忽略，
+// 不阻断下线），再做下线 mongo 落库（若持有聚合根）。
 func (p *PlayerActor) OnStop(ctx core.ActorContext, reason types.ExitReason) error {
 	_ = reason
+	if p.match != nil {
+		_, _ = p.match.Cancel(ctx.Context(), p.pid.UID())
+	}
 	if p.player != nil {
 		if err := p.store.SavePlayer(ctx.Context(), p.player); err != nil {
 			return fmt.Errorf("actor: 下线落库失败: %w", err)

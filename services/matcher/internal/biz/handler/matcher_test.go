@@ -9,6 +9,7 @@ import (
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/matchmaker"
 )
 
@@ -145,8 +146,8 @@ type startCall struct {
 }
 
 type failCall struct {
-	matchID string
-	reason  string
+	ticketID string
+	reason   string
 }
 
 func (s *fakeSink) PublishStarted(_ context.Context, battleID, matchID string, playerIDs []string) error {
@@ -156,10 +157,10 @@ func (s *fakeSink) PublishStarted(_ context.Context, battleID, matchID string, p
 	return nil
 }
 
-func (s *fakeSink) PublishFailed(_ context.Context, matchID string, _ []string, reason string) error {
+func (s *fakeSink) PublishFailed(_ context.Context, ticketID string, _ []string, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.failed = append(s.failed, failCall{matchID: matchID, reason: reason})
+	s.failed = append(s.failed, failCall{ticketID: ticketID, reason: reason})
 	return nil
 }
 
@@ -247,7 +248,7 @@ func TestCancel(t *testing.T) {
 	}
 }
 
-// TestQueryStateMapping 验证状态映射。
+// TestQueryStateMapping 验证状态枚举映射。
 func TestQueryStateMapping(t *testing.T) {
 	ctx := context.Background()
 	h, svc, _, _ := newTestHandler()
@@ -256,19 +257,33 @@ func TestQueryStateMapping(t *testing.T) {
 	}
 	// 排队中。
 	reply, err := h.QueryMatch(ctx, &matcherv1.QueryMatchRequest{PlayerId: "p-1"})
-	if err != nil || reply.GetState() != "waiting" {
+	if err != nil || reply.GetState() != matcherv1.MatchState_MATCH_STATE_WAITING {
 		t.Fatalf("排队状态: reply=%+v err=%v", reply, err)
 	}
 	// 成局终态。
 	svc.tickets["t-a"] = matchmaker.Ticket{ID: "t-a", State: matchmaker.TicketCompleted}
 	reply, err = h.QueryMatch(ctx, &matcherv1.QueryMatchRequest{PlayerId: "p-1"})
-	if err != nil || reply.GetState() != "matched" {
+	if err != nil || reply.GetState() != matcherv1.MatchState_MATCH_STATE_MATCHED {
 		t.Fatalf("成局状态: reply=%+v err=%v", reply, err)
 	}
 	// 无映射。
 	reply, err = h.QueryMatch(ctx, &matcherv1.QueryMatchRequest{PlayerId: "p-none"})
-	if err != nil || reply.GetState() != "none" {
+	if err != nil || reply.GetState() != matcherv1.MatchState_MATCH_STATE_NONE {
 		t.Fatalf("无匹配状态: reply=%+v err=%v", reply, err)
+	}
+}
+
+// TestQueueUnknownRuleset 验证未知规则集白名单拒绝。
+func TestQueueUnknownRuleset(t *testing.T) {
+	ctx := context.Background()
+	h, _, _, _ := newTestHandler()
+	_, err := h.QueueMatch(ctx, &matcherv1.QueueMatchRequest{
+		PlayerId: "p-1",
+		Player:   &commonv1.PlayerSummary{PlayerId: "p-1", Level: 10},
+		Ruleset:  "ranked",
+	})
+	if atlaserrors.Reason(err) != "INVALID_PARAMS" {
+		t.Fatalf("未知规则集应拒绝 INVALID_PARAMS, got %v", err)
 	}
 }
 

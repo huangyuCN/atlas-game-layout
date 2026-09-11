@@ -1,4 +1,7 @@
-// matcher 服务协议：入队/取消（game 玩家 actor 经 grpc 调用）。
+// matcher 服务协议：入队/取消/查询。
+// 调用方为 game 玩家 actor（服务端内部链路）：PlayerActor 用聚合根权威数据
+// 组装 PlayerSummary（客户端不参与属性上报，反作弊前提），
+// gateway 经集群转发客户端请求到 PlayerActor。
 syntax = "proto3";
 
 package matcher.v1;
@@ -8,7 +11,17 @@ option go_package = "github.com/huangyuCN/atlas-game-layout/api/matcher/v1;match
 import "api/common/v1/common.proto";
 import "google/api/annotations.proto";
 
+// MatchState 是玩家匹配状态（QueryMatch 与事件订阅共用语义）。
+enum MatchState {
+  MATCH_STATE_UNSPECIFIED = 0;
+  MATCH_STATE_WAITING = 1;    // 排队中
+  MATCH_STATE_MATCHED = 2;    // 已成局
+  MATCH_STATE_FAILED = 3;     // 失败（超时/取消/异常）
+  MATCH_STATE_NONE = 4;       // 无匹配记录
+}
+
 // QueueMatchRequest 入队：玩家属性快照 ticket（纯撮合，matcher 不查库）。
+// player 字段是服务端权威数据（由 game PlayerActor 从聚合根组装），非客户端自报。
 message QueueMatchRequest {
   string player_id = 1;
   common.v1.PlayerSummary player = 2;
@@ -35,7 +48,7 @@ message QueryMatchRequest {
 
 // QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
 message QueryMatchReply {
-  string state = 1;
+  MatchState state = 1;
   string ticket_id = 2;
   string match_id = 3;
 }

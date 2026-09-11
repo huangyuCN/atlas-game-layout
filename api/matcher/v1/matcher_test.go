@@ -7,9 +7,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TestQueryMatchRoundtrip 校验匹配状态查询消息的编解码往返。
+// TestQueryMatchRoundtrip 校验匹配状态查询消息的编解码往返（枚举语义）。
 func TestQueryMatchRoundtrip(t *testing.T) {
-	in := &QueryMatchReply{State: "matched", MatchId: "m-0001"}
+	in := &QueryMatchReply{State: MatchState_MATCH_STATE_MATCHED, MatchId: "m-0001"}
 	b, err := protojson.Marshal(in)
 	if err != nil {
 		t.Fatalf("protojson.Marshal 失败: %v", err)

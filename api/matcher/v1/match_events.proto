@@ -14,9 +14,11 @@ message MatchStartedEvent {
   string battle_endpoint = 4;
 }
 
-// MatchFailedEvent 匹配失败（超时/取消）。
+// MatchFailedEvent 匹配失败（超时/取消/异常）：单玩家 ticket 终态，
+// 未成局故无对局 ID（match_id 留空）；ticket_id 是取消/查询/事件关联的键。
 message MatchFailedEvent {
-  string match_id = 1;
+  string match_id = 1;  // 已成局的对局 ID（成局前失败为空）
   repeated string player_ids = 2;
   string reason = 3;
+  string ticket_id = 4; // 失败的票据 ID
 }

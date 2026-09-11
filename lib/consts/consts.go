@@ -37,6 +37,7 @@ const (
 const (
 	PushOpKickedOffline  = "gateway.v1.KickedNotify"
 	PushOpMatchStarted   = "gateway.v1.MatchStartedNotify"
+	PushOpMatchFailed    = "gateway.v1.MatchFailedNotify"
 	PushOpFrameBroadcast = "gateway.v1.FrameBroadcast"
 	PushOpBattleEnd      = "gateway.v1.BattleEndNotify"
 )

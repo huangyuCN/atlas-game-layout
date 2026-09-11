@@ -9,6 +9,7 @@ import (
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/models"
@@ -106,8 +107,46 @@ func (s *memSessions) Del(_ context.Context, playerID string) error {
 	return nil
 }
 
+// fakeMatch 是匹配队列客户端的内存实现（记录入队参数、取消与状态查询）。
+type fakeMatch struct {
+	mu       sync.Mutex
+	enters   []enterCall
+	cancels  []string
+	statuses []string
+	canceled bool
+}
+
+type enterCall struct {
+	playerID string
+	level    int32
+	ruleset  string
+}
+
+func newFakeMatch() *fakeMatch { return &fakeMatch{} }
+
+func (f *fakeMatch) Enter(_ context.Context, playerID string, level int32, ruleset string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enters = append(f.enters, enterCall{playerID: playerID, level: level, ruleset: ruleset})
+	return nil
+}
+
+func (f *fakeMatch) Cancel(_ context.Context, playerID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancels = append(f.cancels, playerID)
+	return f.canceled, nil
+}
+
+func (f *fakeMatch) Status(_ context.Context, playerID string) (matcherv1.MatchState, string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statuses = append(f.statuses, playerID)
+	return matcherv1.MatchState_MATCH_STATE_WAITING, "t-1", "m-1", nil
+}
+
 // newActorEnv 构造本地 actor 运行时（注册 PlayerActor，注册/登录 PID 分离）。
-func newActorEnv(t *testing.T, snapTTL, snapTick time.Duration) (*core.LocalRuntime, types.PID, types.PID, *memRepo) {
+func newActorEnv(t *testing.T, snapTTL, snapTick time.Duration) (*core.LocalRuntime, types.PID, types.PID, *memRepo, *fakeMatch) {
 	t.Helper()
 	rt, err := core.NewLocalRuntime()
 	if err != nil {
@@ -118,11 +157,12 @@ func newActorEnv(t *testing.T, snapTTL, snapTick time.Duration) (*core.LocalRunt
 		t.Fatalf("Runtime Start: %v", err)
 	}
 	store := newMemRepo()
+	match := newFakeMatch()
 	svc := handler.NewPlayerHandler(store, newMemSessions(), biz.PlayerServiceOptions{
 		SessionTTL:  time.Minute,
 		NewPlayerID: func() string { return "p-test" },
 	})
-	if err := rt.Register(NewProps(svc, store, snapTTL, snapTick)); err != nil {
+	if err := rt.Register(NewProps(svc, store, match, snapTTL, snapTick)); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	regPID, err := types.NewPID("player", "alice")
@@ -133,14 +173,14 @@ func newActorEnv(t *testing.T, snapTTL, snapTick time.Duration) (*core.LocalRunt
 	if err != nil {
 		t.Fatalf("NewPID(login): %v", err)
 	}
-	return rt, regPID, loginPID, store
+	return rt, regPID, loginPID, store, match
 }
 
 // TestPlayerActorRegisterLogin 验证注册（自停）/登录（聚合根加载）/口令错误
 // （同节点对象直传形态：生成的桩 switch 直接命中具体消息）。
 func TestPlayerActorRegisterLogin(t *testing.T) {
 	ctx := context.Background()
-	rt, regPID, loginPID, _ := newActorEnv(t, 0, 0)
+	rt, regPID, loginPID, _, _ := newActorEnv(t, 0, 0)
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -184,7 +224,7 @@ func TestPlayerActorRegisterLogin(t *testing.T) {
 // TestPlayerActorGrantAndQuery 验证聚合根 undo 写与内存快照查询。
 func TestPlayerActorGrantAndQuery(t *testing.T) {
 	ctx := context.Background()
-	rt, regPID, loginPID, _ := newActorEnv(t, 0, 0)
+	rt, regPID, loginPID, _, _ := newActorEnv(t, 0, 0)
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -223,7 +263,7 @@ func TestPlayerActorGrantAndQuery(t *testing.T) {
 // TestPlayerActorSnapshotAndPersist 验证定时快照与下线落库。
 func TestPlayerActorSnapshotAndPersist(t *testing.T) {
 	ctx := context.Background()
-	rt, regPID, loginPID, store := newActorEnv(t, time.Minute, 30*time.Millisecond)
+	rt, regPID, loginPID, store, _ := newActorEnv(t, time.Minute, 30*time.Millisecond)
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -269,7 +309,7 @@ func TestPlayerActorSnapshotAndPersist(t *testing.T) {
 // TestPlayerActorGrantBeforeLogin 验证未登录发放道具被拒（PLAYER_NOT_ONLINE）。
 func TestPlayerActorGrantBeforeLogin(t *testing.T) {
 	ctx := context.Background()
-	rt, regPID, loginPID, _ := newActorEnv(t, 0, 0)
+	rt, regPID, loginPID, _, _ := newActorEnv(t, 0, 0)
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -286,7 +326,7 @@ func TestPlayerActorGrantBeforeLogin(t *testing.T) {
 // 返回 ErrUnknownMessage 哨兵。Tell 的 handler 错误不回传调用方（异步投递，现状语义）。
 func TestDispatchRejectsUnknownMessage(t *testing.T) {
 	ctx := context.Background()
-	rt, regPID, _, _ := newActorEnv(t, 0, 0)
+	rt, regPID, _, _, _ := newActorEnv(t, 0, 0)
 	if _, err := rt.Spawn(ctx, regPID); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -326,4 +366,118 @@ func TestDispatchBeforeAskHook(t *testing.T) {
 	if _, err := h.OnAsk(nil, &gamev1.GetPlayerActorReq{}); atlaserrors.Reason(err) != "PLAYER_NOT_ONLINE" {
 		t.Fatalf("钩子放行后应分发到业务方法（未登录拒查）, got %v", err)
 	}
+}
+
+// TestPlayerActorMatchQueue 验证匹配域链路：未登录拒绝、登录后入队
+// （属性取聚合根权威 level）、取消与状态查询转发、业务错误透传。
+func TestPlayerActorMatchQueue(t *testing.T) {
+	ctx := context.Background()
+	rt, regPID, loginPID, store, match := newActorEnv(t, 0, 0)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// 未登录入队拒绝（PLAYER_NOT_ONLINE）。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.EnterMatchQueueActorReq{Ruleset: "casual"}); atlaserrors.Reason(err) != "PLAYER_NOT_ONLINE" {
+		t.Fatalf("未登录入队应拒绝, got %v", err)
+	}
+
+	// 登录后入队：属性取聚合根权威 level（非客户端自报）。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.EnterMatchQueueActorReq{Ruleset: "casual"}); err != nil {
+		t.Fatalf("入队: %v", err)
+	}
+	agg, err := store.LoadPlayer(ctx, "p-test")
+	if err != nil {
+		t.Fatalf("LoadPlayer: %v", err)
+	}
+	match.mu.Lock()
+	nEnters := len(match.enters)
+	var call enterCall
+	if nEnters > 0 {
+		call = match.enters[0]
+	}
+	match.mu.Unlock()
+	if nEnters != 1 {
+		t.Fatalf("入队次数 = %d, want 1", nEnters)
+	}
+	if call.playerID != "p-test" || call.level != agg.Level || call.ruleset != "casual" {
+		t.Fatalf("入队参数不符: %+v (聚合根 level=%d)", call, agg.Level)
+	}
+
+	// 取消匹配：幂等转发（回执 canceled 取 fake 预置值）。
+	match.mu.Lock()
+	match.canceled = true
+	match.mu.Unlock()
+	rep, err := rt.Ask(ctx, loginPID, &gamev1.CancelMatchActorReq{})
+	if err != nil {
+		t.Fatalf("取消: %v", err)
+	}
+	if !rep.(*gamev1.CancelMatchActorReply).GetCanceled() {
+		t.Fatal("取消回执应为 true")
+	}
+	// 状态查询：转发回执。
+	st, err := rt.Ask(ctx, loginPID, &gamev1.GetMatchStatusActorReq{})
+	if err != nil {
+		t.Fatalf("状态查询: %v", err)
+	}
+	got := st.(*gamev1.MatchStatusActorReply)
+	if got.GetState() != matcherv1.MatchState_MATCH_STATE_WAITING || got.GetTicketId() != "t-1" || got.GetMatchId() != "m-1" {
+		t.Fatalf("状态回执不符: %+v", got)
+	}
+	if len(match.statuses) != 1 || match.statuses[0] != "p-test" {
+		t.Fatalf("状态查询参数不符: %v", match.statuses)
+	}
+}
+
+// TestPlayerActorOnStopCancelsMatch 验证下线联动：登出自停时自动取消在队匹配。
+func TestPlayerActorOnStopCancelsMatch(t *testing.T) {
+	ctx := context.Background()
+	rt, regPID, loginPID, _, match := newActorEnv(t, 0, 0)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	// 登出（Tell）→ actor 自停 → OnStop 取消匹配。
+	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutActorMsg{Token: "t1"}); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	// 断言「存在登录 actor 的取消记录」而非精确次数：
+	// 注册临时 actor 自停同样触发幂等取消（真实 matcher 中为 no-op）。
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		match.mu.Lock()
+		found := false
+		for _, id := range match.cancels {
+			if id == "p-test" {
+				found = true
+			}
+		}
+		match.mu.Unlock()
+		if found {
+			return
+		}
+		if time.Now().After(deadline) {
+			_, alive := rt.Stats(loginPID)
+			t.Fatalf("下线未联动取消匹配: cancels=%v loginActorAlive=%v", match.cancelSnapshot(), alive)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// cancelSnapshot 复制取消记录（测试断言用，并发安全）。
+func (f *fakeMatch) cancelSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.cancels...)
 }

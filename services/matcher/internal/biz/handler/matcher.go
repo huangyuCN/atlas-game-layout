@@ -42,6 +42,10 @@ func (h *MatcherHandler) QueueMatch(ctx context.Context, req *matcherv1.QueueMat
 	if name == "" {
 		name = biz.DefaultMatchmakerName
 	}
+	// 规则集白名单：注册表当前仅 casual；扩规则时同步 infra.NewMatchmakerRuntime。
+	if name != biz.DefaultMatchmakerName {
+		return nil, errorv1.ErrInvalidParams("未知规则集: %s", name)
+	}
 	attrs := map[string]matchmaker.Attribute{
 		"level": {Type: matchmaker.AttributeNumber, Number: float64(req.GetPlayer().GetLevel())},
 	}
@@ -88,12 +92,12 @@ func (h *MatcherHandler) QueryMatch(ctx context.Context, req *matcherv1.QueryMat
 		return nil, errorv1.ErrInternal("查询匹配映射失败")
 	}
 	if ticketID == "" {
-		return &matcherv1.QueryMatchReply{State: "none"}, nil
+		return &matcherv1.QueryMatchReply{State: matcherv1.MatchState_MATCH_STATE_NONE}, nil
 	}
 	ticket, err := h.svc.Describe(ctx, ticketID)
 	if err != nil {
 		// 后端记录可能已过期：按无匹配处理。
-		return &matcherv1.QueryMatchReply{State: "none"}, nil
+		return &matcherv1.QueryMatchReply{State: matcherv1.MatchState_MATCH_STATE_NONE}, nil
 	}
 	state := mapTicketState(ticket.State)
 	matchID, _ := h.mapper.GetMatch(ctx, req.GetPlayerId())
@@ -145,7 +149,7 @@ func (h *MatcherHandler) onCompleted(playerID string, ev matchmaker.TicketEvent)
 	_ = h.sink.Start(ctx, battleID, ev.Match.ID, playerIDs)
 }
 
-// onFailed 处理失败终态：发布失败事件并清理映射。
+// onFailed 处理失败终态：发布失败事件（带 ticket_id，未成局故无对局 ID）并清理映射。
 func (h *MatcherHandler) onFailed(playerID, ticketID string, ev matchmaker.TicketEvent) {
 	reason := string(ev.State)
 	if ev.Reason != "" {
@@ -155,15 +159,15 @@ func (h *MatcherHandler) onFailed(playerID, ticketID string, ev matchmaker.Ticke
 	_ = h.mapper.Del(context.Background(), playerID)
 }
 
-// mapTicketState 把 matchmaker 状态映射为协议状态。
-func mapTicketState(s matchmaker.TicketState) string {
+// mapTicketState 把 matchmaker 状态映射为协议枚举。
+func mapTicketState(s matchmaker.TicketState) matcherv1.MatchState {
 	switch s {
 	case matchmaker.TicketCompleted:
-		return "matched"
+		return matcherv1.MatchState_MATCH_STATE_MATCHED
 	case matchmaker.TicketFailed, matchmaker.TicketCancelled, matchmaker.TicketTimedOut:
-		return "failed"
+		return matcherv1.MatchState_MATCH_STATE_FAILED
 	default:
-		return "waiting"
+		return matcherv1.MatchState_MATCH_STATE_WAITING
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
@@ -17,10 +18,12 @@ import (
 // 消息为具体对象直传（生成的桩 switch 直接命中），回执直接返回对象（同节点形态）；
 // 注册/登录恒成功（player_id 取 PID uid）；加入战斗按 joinOK 裁决；帧输入/补帧记录投递。
 type mockActorRuntime struct {
-	logoutMsgs  []*gamev1.LogoutActorMsg             // 登出投递记录
-	joinOK      bool                                 // 加入战斗裁决（默认放行）
-	frameInputs map[string][]*battlev1.FrameInputReq // battleID → 帧输入序列
-	reconnects  map[string][]*battlev1.ReconnectReq  // battleID → 补帧请求序列
+	logoutMsgs    []*gamev1.LogoutActorMsg             // 登出投递记录
+	matchEnters   []*gamev1.EnterMatchQueueActorReq    // 入队投递记录
+	matchCanceled bool                                 // 取消投递记录
+	joinOK        bool                                 // 加入战斗裁决（默认放行）
+	frameInputs   map[string][]*battlev1.FrameInputReq // battleID → 帧输入序列
+	reconnects    map[string][]*battlev1.ReconnectReq  // battleID → 补帧请求序列
 }
 
 func newMockActorRuntime() *mockActorRuntime {
@@ -82,6 +85,16 @@ func (m *mockActorRuntime) Ask(_ context.Context, pid types.PID, req any, _ ...c
 					{FrameId: 4, PlayerId: "p-1", Payload: []byte("x")},
 				}},
 			},
+		}, nil
+	case *gamev1.EnterMatchQueueActorReq:
+		m.matchEnters = append(m.matchEnters, r)
+		return &gamev1.EnterMatchQueueActorReply{}, nil
+	case *gamev1.CancelMatchActorReq:
+		m.matchCanceled = true
+		return &gamev1.CancelMatchActorReply{Canceled: true}, nil
+	case *gamev1.GetMatchStatusActorReq:
+		return &gamev1.MatchStatusActorReply{
+			State: matcherv1.MatchState_MATCH_STATE_WAITING, TicketId: "t-1", MatchId: "m-1",
 		}, nil
 	case *battlev1.CreateBattleRequest:
 		return &battlev1.CreateBattleReply{BattleId: pid.UID()}, nil

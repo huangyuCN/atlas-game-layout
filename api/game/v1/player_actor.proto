@@ -8,6 +8,7 @@ package game.v1;
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
 
 import "api/game/v1/player.proto";
+import "api/matcher/v1/matcher.proto";
 import "google/protobuf/empty.proto";
 
 service PlayerActor {
@@ -17,4 +18,37 @@ service PlayerActor {
   rpc GrantItem (GrantItemActorReq) returns (GrantItemActorReply);
   rpc GetBackpack (GetBackpackActorReq) returns (GetBackpackActorReply);
   rpc GetPlayer (GetPlayerActorReq) returns (GetPlayerActorReply);
+  // 匹配域三方法（EnterMatchQueue/CancelMatch/GetMatchStatus）是业务所有权面：
+  // 身份由集群 PID 决定、匹配属性由聚合根权威填充（客户端不参与上报）。
+  // 客户端入口是同语义投影 gateway.v1.GatewayMatch（带 token 鉴权 + 失败推送），
+  // 见 api/gateway/v1/matcher.proto 头注释——两份契约分属两个信任边界，勿合并。
+  // EnterMatchQueue 入队匹配（Ask）：匹配属性由聚合根权威填充，客户端只选规则集。
+  rpc EnterMatchQueue (EnterMatchQueueActorReq) returns (EnterMatchQueueActorReply);
+  // CancelMatch 取消匹配（Ask）：未在队则幂等回执 canceled=false。
+  rpc CancelMatch (CancelMatchActorReq) returns (CancelMatchActorReply);
+  // GetMatchStatus 查询匹配状态（Ask）：轮询兜底用（成局/失败另有主动推送）。
+  rpc GetMatchStatus (GetMatchStatusActorReq) returns (MatchStatusActorReply);
+}
+
+// EnterMatchQueueActorReq 入队：仅规则集名（空串取服务端默认）。
+message EnterMatchQueueActorReq {
+  string ruleset = 1;
+}
+
+message EnterMatchQueueActorReply {}
+
+message CancelMatchActorReq {}
+
+// CancelMatchActorReply 取消回执：canceled=false 表示本就未在队。
+message CancelMatchActorReply {
+  bool canceled = 1;
+}
+
+message GetMatchStatusActorReq {}
+
+// MatchStatusActorReply 匹配状态（枚举语义见 matcher.v1.MatchState）。
+message MatchStatusActorReply {
+  matcher.v1.MatchState state = 1;
+  string ticket_id = 2;
+  string match_id = 3;
 }

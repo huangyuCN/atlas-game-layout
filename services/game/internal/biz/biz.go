@@ -8,6 +8,7 @@ import (
 
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 )
 
 // PlayerService 是玩家注册/登录/登出业务接口（PlayerActor 经此接入业务逻辑）。
@@ -44,4 +45,15 @@ type PlayerServiceOptions struct {
 	SessionTTL time.Duration
 	// NewPlayerID 是玩家 ID 生成器（nil 用 idgen 默认实现）。
 	NewPlayerID func() string
+}
+
+// MatchQueueClient 是匹配队列客户端接口（PlayerActor 转发用，
+// infra 侧 gRPC 实现，经服务发现寻址 matcher 服务）。
+type MatchQueueClient interface {
+	// Enter 入队：level 是聚合根权威属性（服务端填充，客户端不可伪造）。
+	Enter(ctx context.Context, playerID string, level int32, ruleset string) error
+	// Cancel 取消匹配：回执 canceled=false 表示本就未在队（幂等不视为错误）。
+	Cancel(ctx context.Context, playerID string) (bool, error)
+	// Status 查询匹配状态。
+	Status(ctx context.Context, playerID string) (state matcherv1.MatchState, ticketID, matchID string, err error)
 }

@@ -72,6 +72,12 @@ func RegisterGatewayHandlers(tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcp
 	if err := gatewayv1.RegisterGatewayAuthWSServer(wsSrv, g); err != nil {
 		return fmt.Errorf("server: 注册 WS 认证协议失败: %w", err)
 	}
+	if err := gatewayv1.RegisterGatewayMatchTCPServer(tcpSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 TCP 匹配协议失败: %w", err)
+	}
+	if err := gatewayv1.RegisterGatewayMatchWSServer(wsSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 WS 匹配协议失败: %w", err)
+	}
 	if err := gatewayv1.RegisterGatewayBattleWSServer(wsSrv, g); err != nil {
 		return fmt.Errorf("server: 注册 WS 战斗协议失败: %w", err)
 	}

@@ -29,7 +29,7 @@ type pushServer interface {
 }
 
 // Gateway 是 gateway 统一 handler：鉴权 → 会话绑定 → 按 operation 路由。
-// 实现全部生成的服务端接口（GatewayAuthTCP/WS + GatewayBattleWS/KCP/UDP）。
+// 实现全部生成的服务端接口（GatewayAuthTCP/WS + GatewayMatchTCP/WS + GatewayBattleWS/KCP/UDP）。
 type Gateway struct {
 	instanceID string
 	sess       *session.Manager
@@ -192,6 +192,70 @@ func (g *Gateway) Logout(ctx context.Context, req *gatewayv1.LogoutRequest) (*ga
 		_ = g.players.Logout(ctx, pid, &gamev1.LogoutActorMsg{Token: req.GetToken(), Reason: "logout"})
 	}
 	return &gatewayv1.LogoutReply{}, nil
+}
+
+// QueueMatch 入队匹配：令牌校验 → game PlayerActor 入队转发。
+// 客户端只选规则集；匹配属性由 PlayerActor 从聚合根权威填充（反作弊）。
+func (g *Gateway) QueueMatch(ctx context.Context, req *gatewayv1.MatchQueueRequest) (*gatewayv1.MatchQueueReply, error) {
+	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
+	if err != nil {
+		return nil, errorv1.ErrInternal("入队匹配校验失败")
+	}
+	if !ok {
+		return nil, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
+	}
+	pid, err := actorclient.PlayerPID(req.GetPlayerId())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := g.players.EnterMatchQueue(ctx, pid, &gamev1.EnterMatchQueueActorReq{Ruleset: req.GetRuleset()}); err != nil {
+		return nil, err // ALREADY_IN_MATCH 等业务错误透传（产生点即语义）
+	}
+	return &gatewayv1.MatchQueueReply{}, nil
+}
+
+// CancelMatch 取消匹配：令牌校验 → actor 转发（未在队幂等 canceled=false）。
+func (g *Gateway) CancelMatch(ctx context.Context, req *gatewayv1.MatchCancelRequest) (*gatewayv1.MatchCancelReply, error) {
+	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
+	if err != nil {
+		return nil, errorv1.ErrInternal("取消匹配校验失败")
+	}
+	if !ok {
+		return nil, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
+	}
+	pid, err := actorclient.PlayerPID(req.GetPlayerId())
+	if err != nil {
+		return nil, err
+	}
+	rep, err := g.players.CancelMatch(ctx, pid, &gamev1.CancelMatchActorReq{})
+	if err != nil {
+		return nil, err
+	}
+	return &gatewayv1.MatchCancelReply{Canceled: rep.GetCanceled()}, nil
+}
+
+// MatchStatus 查询匹配状态：轮询兜底（成局/失败另有主动推送）。
+func (g *Gateway) MatchStatus(ctx context.Context, req *gatewayv1.MatchStatusRequest) (*gatewayv1.MatchStatusReply, error) {
+	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
+	if err != nil {
+		return nil, errorv1.ErrInternal("匹配状态校验失败")
+	}
+	if !ok {
+		return nil, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
+	}
+	pid, err := actorclient.PlayerPID(req.GetPlayerId())
+	if err != nil {
+		return nil, err
+	}
+	rep, err := g.players.GetMatchStatus(ctx, pid, &gamev1.GetMatchStatusActorReq{})
+	if err != nil {
+		return nil, err
+	}
+	return &gatewayv1.MatchStatusReply{
+		State:    rep.GetState(),
+		TicketId: rep.GetTicketId(),
+		MatchId:  rep.GetMatchId(),
+	}, nil
 }
 
 // Heartbeat 心跳：续租会话 TTL 并对时。

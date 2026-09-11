@@ -10,12 +10,14 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
@@ -370,5 +372,52 @@ func TestSyncFramesForwardsToBattle(t *testing.T) {
 	recs := env.mock.reconnects["b-1"]
 	if len(recs) != 1 || recs[0].GetLastSeenFrame() != 3 || recs[0].GetPlayerId() != "p-1" {
 		t.Fatalf("补帧投递不符: %+v", recs)
+	}
+}
+
+// TestMatchQueueForwardsToPlayerActor 验证匹配端点：入队/取消/状态经生成桩转发到
+// game PlayerActor；无效令牌拒绝（INVALID_TOKEN），业务错误透传。
+func TestMatchQueueForwardsToPlayerActor(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	cli, auth := env.newTCPAuthClient(t)
+	matchCli := gatewayv1.NewGatewayMatchTCPClient(cli)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	// 无效令牌拒绝。
+	if _, err := matchCli.QueueMatch(ctx, &gatewayv1.MatchQueueRequest{Token: "bad", PlayerId: "p-1", Ruleset: "casual"}); atlaserrors.Reason(err) != "INVALID_TOKEN" {
+		t.Fatalf("无效令牌应拒绝, got %v", err)
+	}
+
+	// 有效令牌：入队成功并投递到 actor。
+	if _, err := matchCli.QueueMatch(ctx, &gatewayv1.MatchQueueRequest{Token: login.GetToken(), PlayerId: "p-1", Ruleset: "casual"}); err != nil {
+		t.Fatalf("QueueMatch: %v", err)
+	}
+	if len(env.mock.matchEnters) != 1 || env.mock.matchEnters[0].GetRuleset() != "casual" {
+		t.Fatalf("入队投递不符: %+v", env.mock.matchEnters)
+	}
+
+	// 状态查询转发回执。
+	st, err := matchCli.MatchStatus(ctx, &gatewayv1.MatchStatusRequest{Token: login.GetToken(), PlayerId: "p-1"})
+	if err != nil {
+		t.Fatalf("MatchStatus: %v", err)
+	}
+	if st.GetState() != matcherv1.MatchState_MATCH_STATE_WAITING || st.GetTicketId() != "t-1" {
+		t.Fatalf("状态回执不符: %+v", st)
+	}
+
+	// 取消转发。
+	ca, err := matchCli.CancelMatch(ctx, &gatewayv1.MatchCancelRequest{Token: login.GetToken(), PlayerId: "p-1"})
+	if err != nil {
+		t.Fatalf("CancelMatch: %v", err)
+	}
+	if !ca.GetCanceled() || !env.mock.matchCanceled {
+		t.Fatalf("取消不符: reply=%+v mock=%v", ca, env.mock.matchCanceled)
 	}
 }

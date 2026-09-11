@@ -93,12 +93,14 @@ func (x *MatchStartedEvent) GetBattleEndpoint() string {
 	return ""
 }
 
-// MatchFailedEvent 匹配失败（超时/取消）。
+// MatchFailedEvent 匹配失败（超时/取消/异常）：单玩家 ticket 终态，
+// 未成局故无对局 ID（match_id 留空）；ticket_id 是取消/查询/事件关联的键。
 type MatchFailedEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	MatchId       string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	MatchId       string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"` // 已成局的对局 ID（成局前失败为空）
 	PlayerIds     []string               `protobuf:"bytes,2,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
 	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	TicketId      string                 `protobuf:"bytes,4,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"` // 失败的票据 ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -154,6 +156,13 @@ func (x *MatchFailedEvent) GetReason() string {
 	return ""
 }
 
+func (x *MatchFailedEvent) GetTicketId() string {
+	if x != nil {
+		return x.TicketId
+	}
+	return ""
+}
+
 var File_api_matcher_v1_match_events_proto protoreflect.FileDescriptor
 
 const file_api_matcher_v1_match_events_proto_rawDesc = "" +
@@ -165,12 +174,13 @@ const file_api_matcher_v1_match_events_proto_rawDesc = "" +
 	"\tbattle_id\x18\x02 \x01(\tR\bbattleId\x12\x1d\n" +
 	"\n" +
 	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12'\n" +
-	"\x0fbattle_endpoint\x18\x04 \x01(\tR\x0ebattleEndpoint\"d\n" +
+	"\x0fbattle_endpoint\x18\x04 \x01(\tR\x0ebattleEndpoint\"\x81\x01\n" +
 	"\x10MatchFailedEvent\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1d\n" +
 	"\n" +
 	"player_ids\x18\x02 \x03(\tR\tplayerIds\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reasonBAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
+	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x1b\n" +
+	"\tticket_id\x18\x04 \x01(\tR\bticketIdBAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
 
 var (
 	file_api_matcher_v1_match_events_proto_rawDescOnce sync.Once

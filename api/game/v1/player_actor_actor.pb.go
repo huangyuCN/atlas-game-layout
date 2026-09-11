@@ -24,6 +24,9 @@ type PlayerActorServer interface {
 	GrantItem(ctx core.ActorContext, req *GrantItemActorReq) (*GrantItemActorReply, error)
 	GetBackpack(ctx core.ActorContext, req *GetBackpackActorReq) (*GetBackpackActorReply, error)
 	GetPlayer(ctx core.ActorContext, req *GetPlayerActorReq) (*GetPlayerActorReply, error)
+	EnterMatchQueue(ctx core.ActorContext, req *EnterMatchQueueActorReq) (*EnterMatchQueueActorReply, error)
+	CancelMatch(ctx core.ActorContext, req *CancelMatchActorReq) (*CancelMatchActorReply, error)
+	GetMatchStatus(ctx core.ActorContext, req *GetMatchStatusActorReq) (*MatchStatusActorReply, error)
 }
 
 // UnimplementedPlayerActorServer 是兜底基类；业务 actor embed 它获得接口演进安全。
@@ -46,6 +49,15 @@ func (UnimplementedPlayerActorServer) GetBackpack(core.ActorContext, *GetBackpac
 }
 func (UnimplementedPlayerActorServer) GetPlayer(core.ActorContext, *GetPlayerActorReq) (*GetPlayerActorReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.GetPlayer")
+}
+func (UnimplementedPlayerActorServer) EnterMatchQueue(core.ActorContext, *EnterMatchQueueActorReq) (*EnterMatchQueueActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.EnterMatchQueue")
+}
+func (UnimplementedPlayerActorServer) CancelMatch(core.ActorContext, *CancelMatchActorReq) (*CancelMatchActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.CancelMatch")
+}
+func (UnimplementedPlayerActorServer) GetMatchStatus(core.ActorContext, *GetMatchStatusActorReq) (*MatchStatusActorReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerActor.GetMatchStatus")
 }
 
 // playerActorDecodeTable 是 type_url → 类型化 Unmarshal 闭包的解码表（生成期静态绑定）。
@@ -72,6 +84,18 @@ var playerActorDecodeTable = map[string]func([]byte) (proto.Message, error){
 	},
 	"type.googleapis.com/game.v1.GetPlayerActorReq": func(b []byte) (proto.Message, error) {
 		m := new(GetPlayerActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.EnterMatchQueueActorReq": func(b []byte) (proto.Message, error) {
+		m := new(EnterMatchQueueActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.CancelMatchActorReq": func(b []byte) (proto.Message, error) {
+		m := new(CancelMatchActorReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"type.googleapis.com/game.v1.GetMatchStatusActorReq": func(b []byte) (proto.Message, error) {
+		m := new(GetMatchStatusActorReq)
 		return m, proto.Unmarshal(b, m)
 	},
 }
@@ -110,6 +134,12 @@ func (d *playerActorDispatch) OnAsk(ctx core.ActorContext, req any) (any, error)
 		return d.impl.GetBackpack(ctx, r)
 	case *GetPlayerActorReq:
 		return d.impl.GetPlayer(ctx, r)
+	case *EnterMatchQueueActorReq:
+		return d.impl.EnterMatchQueue(ctx, r)
+	case *CancelMatchActorReq:
+		return d.impl.CancelMatch(ctx, r)
+	case *GetMatchStatusActorReq:
+		return d.impl.GetMatchStatus(ctx, r)
 	default:
 		return d.FallbackAsk(ctx, req)
 	}
@@ -242,6 +272,66 @@ func (c *PlayerActorClient) GetPlayer(ctx context.Context, pid types.PID, req *G
 		return v, nil
 	case []byte:
 		out := new(GetPlayerActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// EnterMatchQueue 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) EnterMatchQueue(ctx context.Context, pid types.PID, req *EnterMatchQueueActorReq) (*EnterMatchQueueActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *EnterMatchQueueActorReply:
+		return v, nil
+	case []byte:
+		out := new(EnterMatchQueueActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// CancelMatch 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) CancelMatch(ctx context.Context, pid types.PID, req *CancelMatchActorReq) (*CancelMatchActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *CancelMatchActorReply:
+		return v, nil
+	case []byte:
+		out := new(CancelMatchActorReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// GetMatchStatus 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
+func (c *PlayerActorClient) GetMatchStatus(ctx context.Context, pid types.PID, req *GetMatchStatusActorReq) (*MatchStatusActorReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *MatchStatusActorReply:
+		return v, nil
+	case []byte:
+		out := new(MatchStatusActorReply)
 		if err := proto.Unmarshal(v, out); err != nil {
 			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
 		}

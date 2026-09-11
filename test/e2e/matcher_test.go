@@ -165,8 +165,8 @@ func TestE2EMatcherQueue(t *testing.T) {
 		if err != nil {
 			t.Fatalf("查询 %s: %v", id, err)
 		}
-		if q.GetState() != "matched" || q.GetMatchId() == "" {
-			t.Fatalf("%s 状态 = %+v, want matched", id, q)
+		if q.GetState() != matcherv1.MatchState_MATCH_STATE_MATCHED || q.GetMatchId() == "" {
+			t.Fatalf("%s 状态 = %+v, want MATCHED", id, q)
 		}
 	}
 

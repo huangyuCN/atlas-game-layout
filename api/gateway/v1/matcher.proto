@@ -1,0 +1,60 @@
+// gateway 匹配协议（业务通道：tcp/ws 传输）：入队/取消/状态查询。
+// 入队只需规则集名——匹配属性由 game PlayerActor 从聚合根权威填充（反作弊）；
+// MatchFailedNotify 是服务端推送（失败/超时/取消），与 MatchStartedNotify 对齐。
+//
+// 与 game.v1.PlayerActor 的匹配三方法是「同一业务在两个边界上的投影」而非重复：
+// 本文件是客户端协议面（携带会话 token 鉴权字段；推送消息按连接路由、只能住在
+// gateway 包；SDK 只消费 gateway.v1 命名空间）；actor 版无鉴权位（身份由集群 PID
+// 决定）、属性由服务端权威填充。生成桩按 service 整体注册——直接暴露 PlayerActor
+// 会使 GrantItem 等服务端能力变成客户端可调 op，故客户端入口只挑这三个方法。
+syntax = "proto3";
+
+package gateway.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1";
+
+import "api/matcher/v1/matcher.proto";
+
+// MatchQueueRequest 入队匹配。
+message MatchQueueRequest {
+  string token = 1;      // 登录令牌（会话校验）
+  string player_id = 2;  // 玩家 ID（服务端按会话校验，防伪造）
+  string ruleset = 3;    // 规则集名（空串取服务端默认）
+}
+
+message MatchQueueReply {}
+
+message MatchCancelRequest {
+  string token = 1;
+  string player_id = 2;
+}
+
+// MatchCancelReply 取消回执：canceled=false 表示本就未在队列。
+message MatchCancelReply {
+  bool canceled = 1;
+}
+
+message MatchStatusRequest {
+  string token = 1;
+  string player_id = 2;
+}
+
+// MatchStatusReply 匹配状态（轮询兜底；成局/失败另有主动推送）。
+message MatchStatusReply {
+  matcher.v1.MatchState state = 1;
+  string ticket_id = 2;
+  string match_id = 3;
+}
+
+// MatchFailedNotify 服务端推送：匹配失败/超时/取消通知。
+message MatchFailedNotify {
+  string ticket_id = 1;
+  string reason = 2;
+}
+
+// GatewayMatch 是网关匹配服务（业务通道协议）。
+service GatewayMatch {
+  rpc QueueMatch (MatchQueueRequest) returns (MatchQueueReply);
+  rpc CancelMatch (MatchCancelRequest) returns (MatchCancelReply);
+  rpc MatchStatus (MatchStatusRequest) returns (MatchStatusReply);
+}

@@ -31,7 +31,8 @@ type MatchEventPublisher interface {
 	// PublishStarted 发布成局事件（battle 已创建/开局已发起）。
 	PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string) error
 	// PublishFailed 发布失败事件（超时/取消）。
-	PublishFailed(ctx context.Context, matchID string, playerIDs []string, reason string) error
+	// ticketID 是失败的票据 ID（未成局故无对局 ID，事件 match_id 为空）。
+	PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason string) error
 }
 
 // MatchEventSink 是成局观察方接口（事件发布与开局调用的组合，runtime 监听用）。

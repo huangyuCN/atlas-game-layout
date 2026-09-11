@@ -29,6 +29,7 @@ type kickNotice struct {
 // StartRelay 启动下行推送与控制通道订阅（D11/D13）：
 //   - 订阅 atlas.push.> 通配主题，按路由表仅持有连接的实例下发；
 //   - 订阅成局事件（atlas.event.match.started），向参战玩家推送开局通知；
+//   - 订阅失败事件（atlas.event.match.failed），向玩家推送失败/取消通知；
 //   - 订阅本实例控制通道，处理跨实例挤下线通知。
 func (g *Gateway) StartRelay(ctx context.Context) error {
 	if g.nc == nil {
@@ -38,6 +39,9 @@ func (g *Gateway) StartRelay(ctx context.Context) error {
 		return err
 	}
 	if _, err := pkgnats.Subscribe(g.nc, consts.MatchStartedTopic(), g.onMatchStarted); err != nil {
+		return err
+	}
+	if _, err := pkgnats.Subscribe(g.nc, consts.MatchFailedTopic(), g.onMatchFailed); err != nil {
 		return err
 	}
 	_, err := pkgnats.Subscribe(g.nc, consts.GatewayTopic(g.instanceID), g.onKickNotice)
@@ -64,6 +68,26 @@ func (g *Gateway) onMatchStarted(_ string, data []byte) {
 	defer cancel()
 	for _, pid := range ev.GetPlayerIds() {
 		_ = pkgnats.PublishEnvelope(ctx, g.nc, pid, consts.PushOpMatchStarted, payload)
+	}
+}
+
+// onMatchFailed 处理失败事件：向玩家推送失败/取消通知（MatchFailedNotify）。
+func (g *Gateway) onMatchFailed(_ string, data []byte) {
+	var ev matcherv1.MatchFailedEvent
+	if err := protojson.Unmarshal(data, &ev); err != nil {
+		return
+	}
+	payload, err := protojson.Marshal(&gatewayv1.MatchFailedNotify{
+		TicketId: ev.GetTicketId(),
+		Reason:   ev.GetReason(),
+	})
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	defer cancel()
+	for _, pid := range ev.GetPlayerIds() {
+		_ = pkgnats.PublishEnvelope(ctx, g.nc, pid, consts.PushOpMatchFailed, payload)
 	}
 }
 
