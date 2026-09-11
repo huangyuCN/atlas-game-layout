@@ -9,6 +9,7 @@ import (
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
 	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
@@ -102,4 +103,27 @@ func serviceOf(rt *matchredis.Runtime) matchmaker.Service { return rt.Service }
 // 测试注入经 fx.Decorate 覆盖本提供器输出（见 assemble）。
 func newSink(nc *natsgo.Conn, rt *pkgactor.Runtime) biz.MatchEventSink {
 	return infra.NewSink(nc, rt)
+}
+
+// rosterOf 把 nats 事件发布器绑定为名册变更发布接口（供 fx 按接口注入）。
+func rosterOf(p *infra.NatsEventPublisher) biz.PartyRosterPublisher { return p }
+
+// NewMatchmakerParty 装配整队名册引擎（redis Party，容量原子校验）。
+func NewMatchmakerParty(svc matchmaker.Service, cli *pkredis.Client) matchmaker.Party {
+	return infra.NewMatchmakerParty(svc, cli)
+}
+
+// newMatcherDeps 聚合撮合 handler 依赖（fx 装配）。
+func newMatcherDeps(svc matchmaker.Service, party matchmaker.Party,
+	mapper biz.PlayerTicketMapper, partyMapper biz.PartyQueueMapper,
+	sink biz.MatchEventSink, deduper biz.MatchSettleDeduper, roster biz.PartyRosterPublisher) handler.MatcherDeps {
+	return handler.MatcherDeps{
+		Svc:         svc,
+		Party:       party,
+		Mapper:      mapper,
+		PartyMapper: partyMapper,
+		Sink:        sink,
+		Deduper:     deduper,
+		Roster:      roster,
+	}
 }

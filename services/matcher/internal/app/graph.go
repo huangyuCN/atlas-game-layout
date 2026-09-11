@@ -33,13 +33,19 @@ var Module = fx.Module("matcher",
 		NewNatsConn,
 		NewActorRuntime,
 		NewMatchmakerRuntime,
+		NewMatchmakerParty,
+		infra.NewNatsEventPublisher,
+		rosterOf,
 		infra.NewRedisPlayerTicketMapper,
+		infra.NewRedisPartyQueueMapper,
 		infra.NewRedisSettleDeduper,
 		ticketMapperOf,
+		partyMapperOf,
 		settleDeduperOf,
 		// ── biz：撮合 API 绑定 + 成局观察方 + grpc handler ──
 		serviceOf,
 		newSink,
+		newMatcherDeps,
 		handler.NewMatcherHandler,
 		// ── server：传输层构造（启停归属驱动方）──
 		fx.Annotate(server.NewHTTPServer, fx.ResultTags(`group:"servers"`)),
@@ -57,6 +63,9 @@ func ticketMapperOf(m *infra.RedisPlayerTicketMapper) biz.PlayerTicketMapper { r
 
 // settleDeduperOf 把 redis 结算去重实现绑定为 biz 接口。
 func settleDeduperOf(d *infra.RedisSettleDeduper) biz.MatchSettleDeduper { return d }
+
+// partyMapperOf 把 redis 队伍票映射实现绑定为 biz 接口。
+func partyMapperOf(m *infra.RedisPartyQueueMapper) biz.PartyQueueMapper { return m }
 
 // registerRuntime 把撮合运行时接入生命周期。
 // 注意：tick 循环是长驻 goroutine，不能用 fx OnStart 的 ctx（15s 超时取消会杀掉循环），

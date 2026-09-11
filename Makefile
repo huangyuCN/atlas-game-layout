@@ -8,7 +8,7 @@ SERVICES := gateway game matcher battle
 GO ?= go
 PROTOC ?= protoc
 
-.PHONY: help build lint comment-lint run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
+.PHONY: help build lint comment-lint check-dup run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
 
 help: ## 列出所有目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -23,9 +23,13 @@ build-%: ## 构建单个服务（make build-gateway）
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -o $(BIN_DIR)/$* ./services/$*/cmd
 
-lint: ## 代码规范检查：包名前缀 + Go doc 注释规范
+lint: ## 代码规范检查：包名前缀 + Go doc 注释 + 重复代码
 	$(GO) run ./scripts/check-pkgname . scripts/check-pkgname/allowlist.txt
 	$(GO) run ./scripts/go-comment-lint .
+	$(GO) run ./scripts/check-dup . scripts/check-dup/allowlist.txt
+
+check-dup: ## 重复代码检查（结构指纹归一，详见 scripts/check-dup/allowlist.txt；违规退出码 1）
+	$(GO) run ./scripts/check-dup . scripts/check-dup/allowlist.txt
 
 comment-lint: ## Go doc 注释规范检查（首词=声明名等，详见 docs/go-comments.md；违规退出码 1）
 	$(GO) run ./scripts/go-comment-lint .

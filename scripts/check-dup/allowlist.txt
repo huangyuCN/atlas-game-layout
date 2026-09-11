@@ -1,0 +1,19 @@
+# 重复代码豁免清单：每行一条函数名（命中该名的重复组不再报告）。
+# 各服务的 internal/app 装配脚手架（NewNatsConn/NewRedisClient 等）为
+# 「进程形态与进程内形态共用同一依赖图」的逐服务同构副本（模板设计如此），
+# 传输构造器（NewTCPServer 等）因各传输类型不同无法泛型收敛——均属设计豁免。
+NewNatsConn
+NewRedisClient
+NewMongoClient
+NewActorRuntime
+registerInstance
+registerResources
+NewHTTPServer
+NewTCPServer
+NewWSServer
+NewKCPServer
+NewUDPServer
+# PlayerClient/GameHandler 的 GetBackpack/GetPlayer 为不同消息类型的
+# 薄映射对（req/resp 类型不同，收敛需引入泛型噪音大于收益）。
+GetBackpack
+GetPlayer

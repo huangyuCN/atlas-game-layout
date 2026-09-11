@@ -9,6 +9,7 @@ import (
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
+	"github.com/huangyuCN/atlas/contrib/matchmaker/memory"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/matchmaker"
 )
@@ -44,6 +45,11 @@ func (s *fakeService) Cancel(_ context.Context, ticketID string) error {
 	defer s.mu.Unlock()
 	s.cancels = append(s.cancels, ticketID)
 	delete(s.tickets, ticketID)
+	// 与真实引擎一致：取消产生终态事件并关闭事件流。
+	if ch, ok := s.events[ticketID]; ok {
+		ch <- matchmaker.TicketEvent{TicketID: ticketID, State: matchmaker.TicketCancelled}
+		close(ch)
+	}
 	return nil
 }
 
@@ -97,10 +103,15 @@ type fakeMapper struct {
 	mu      sync.Mutex
 	ids     map[string]string
 	matches map[string]string
+	battles map[string]string
 }
 
 func newFakeMapper() *fakeMapper {
-	return &fakeMapper{ids: make(map[string]string), matches: make(map[string]string)}
+	return &fakeMapper{
+		ids:     make(map[string]string),
+		matches: make(map[string]string),
+		battles: make(map[string]string),
+	}
 }
 
 func (m *fakeMapper) Get(_ context.Context, playerID string) (string, error) {
@@ -132,12 +143,29 @@ func (m *fakeMapper) GetMatch(_ context.Context, playerID string) (string, error
 	return m.matches[playerID], nil
 }
 
+func (m *fakeMapper) SetBattle(_ context.Context, playerID, battleID string, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.battles == nil {
+		m.battles = make(map[string]string)
+	}
+	m.battles[playerID] = battleID
+	return nil
+}
+
+func (m *fakeMapper) GetBattle(_ context.Context, playerID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.battles[playerID], nil
+}
+
 // fakeSink 是成局观察方的记录实现（发布与开局调用分开记录）。
 type fakeSink struct {
 	mu        sync.Mutex
 	published []startCall
 	started   []startCall
 	failed    []failCall
+	rosters   []rosterCall
 }
 
 type startCall struct {
@@ -147,7 +175,7 @@ type startCall struct {
 
 type failCall struct {
 	ticketID string
-	reason   string
+	reason   matcherv1.MatchFailReason
 }
 
 func (s *fakeSink) PublishStarted(_ context.Context, battleID, matchID string, playerIDs []string) error {
@@ -157,7 +185,7 @@ func (s *fakeSink) PublishStarted(_ context.Context, battleID, matchID string, p
 	return nil
 }
 
-func (s *fakeSink) PublishFailed(_ context.Context, ticketID string, _ []string, reason string) error {
+func (s *fakeSink) PublishFailed(_ context.Context, ticketID string, _ []string, reason matcherv1.MatchFailReason) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failed = append(s.failed, failCall{ticketID: ticketID, reason: reason})
@@ -169,6 +197,20 @@ func (s *fakeSink) Start(_ context.Context, battleID, matchID string, playerIDs 
 	defer s.mu.Unlock()
 	s.started = append(s.started, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
 	return nil
+}
+
+// PublishRoster 实现 biz.PartyRosterPublisher：名册变更事件记录（party 域测试断言用）。
+func (s *fakeSink) PublishRoster(_ context.Context, partyID, leaderID string, playerIDs []string, reason matcherv1.PartyRosterReason) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rosters = append(s.rosters, rosterCall{partyID: partyID, leaderID: leaderID, playerIDs: playerIDs, reason: reason})
+	return nil
+}
+
+type rosterCall struct {
+	partyID, leaderID string
+	reason            matcherv1.PartyRosterReason
+	playerIDs         []string
 }
 
 // fakeDeduper 是结算去重的内存实现。
@@ -189,12 +231,46 @@ func (d *fakeDeduper) TrySettle(_ context.Context, matchID string, _ time.Durati
 	return true, nil
 }
 
-// newTestHandler 构造测试用 handler。
+// fakePartyMapper 是队伍→整队票映射的内存实现。
+type fakePartyMapper struct {
+	mu      sync.Mutex
+	tickets map[string]string
+}
+
+func newFakePartyMapper() *fakePartyMapper {
+	return &fakePartyMapper{tickets: make(map[string]string)}
+}
+
+func (m *fakePartyMapper) GetPartyTicket(_ context.Context, partyID string) (string, error) {
+	return m.tickets[partyID], nil
+}
+
+func (m *fakePartyMapper) SetPartyTicket(_ context.Context, partyID, ticketID string, _ time.Duration) error {
+	m.tickets[partyID] = ticketID
+	return nil
+}
+
+func (m *fakePartyMapper) DelPartyTicket(_ context.Context, partyID string) error {
+	delete(m.tickets, partyID)
+	return nil
+}
+
+// newTestHandler 构造测试用 handler（party 用 memory 引擎真实实现）。
 func newTestHandler() (*MatcherHandler, *fakeService, *fakeMapper, *fakeSink) {
 	svc := newFakeService()
 	mapper := newFakeMapper()
 	sink := &fakeSink{}
-	return NewMatcherHandler(svc, mapper, sink, newFakeDeduper()), svc, mapper, sink
+	partyMapper := newFakePartyMapper()
+	h := NewMatcherHandler(MatcherDeps{
+		Svc:         svc,
+		Party:       memory.NewPartyWithCapacity(svc, biz.DefaultPartyCapacity),
+		Mapper:      mapper,
+		PartyMapper: partyMapper,
+		Sink:        sink,
+		Deduper:     newFakeDeduper(),
+		Roster:      sink,
+	})
+	return h, svc, mapper, sink
 }
 
 // TestQueue 验证入队与重复入队拒绝。
@@ -334,6 +410,12 @@ func TestWatchCompleted(t *testing.T) {
 	if got, _ := mapper.GetMatch(ctx, "p-1"); got != "m-1" {
 		t.Fatalf("对局关联 = %q, want m-1", got)
 	}
+	// battle 关联：开局推送丢失后重登恢复用（stub 的 StartMatchmaking 自增票据，
+	// 成局票据为 t-a/t-b，battle_id 由 fake 记录即可验证写入发生）。
+	bid, _ := mapper.GetBattle(ctx, "p-1")
+	if bid == "" {
+		t.Fatal("battle 关联未写入")
+	}
 }
 
 // TestWatchFailed 验证失败终态：发布失败事件 + 清理映射。
@@ -364,6 +446,7 @@ func TestWatchFailed(t *testing.T) {
 
 // 静态保证 fake 实现接口。
 var (
-	_ matchmaker.Service = (*fakeService)(nil)
-	_ biz.MatchEventSink = (*fakeSink)(nil)
+	_ matchmaker.Service       = (*fakeService)(nil)
+	_ biz.MatchEventSink       = (*fakeSink)(nil)
+	_ biz.PartyRosterPublisher = (*fakeSink)(nil)
 )

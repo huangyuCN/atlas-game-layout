@@ -17,6 +17,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
+	"github.com/huangyuCN/atlas/contrib/actor/types"
 	"github.com/huangyuCN/atlas/transport"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	"github.com/nats-io/nats.go"
@@ -41,6 +42,25 @@ type Gateway struct {
 	udpSrv     *udpt.Server // UDP 按 peer 寻址（无 connID 语义）
 }
 
+// onSessionsExpired 异常下线联动撮合域（会话过期清扫回调）：
+// 对「确认属主且未被接管」的过期会话，向 game PlayerActor 发 Logout（SESSION_EXPIRED）
+// → 触发现有 OnStop 联动（取消匹配 / 离队 / 下线落库），登出与断线语义归一。
+// 携带过期会话的旧令牌：game 侧据此裁决接管（新登录存在不同令牌则跳过停止）。
+func (g *Gateway) onSessionsExpired(swept []session.SweptSession) {
+	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	defer cancel()
+	for _, s := range swept {
+		pid, err := actorclient.PlayerPID(s.PlayerID)
+		if err != nil {
+			continue
+		}
+		_ = g.players.Logout(ctx, pid, &gamev1.LogoutActorMsg{
+			Token:  s.Token,
+			Reason: gamev1.LogoutReason_LOGOUT_REASON_SESSION_EXPIRED,
+		})
+	}
+}
+
 // NewGateway 构造统一 handler 并按协议注册到各传输 Server。
 func NewGateway(
 	instanceID string,
@@ -50,7 +70,7 @@ func NewGateway(
 	tcpSrv, wsSrv, kcpSrv pushServer,
 	udpSrv *udpt.Server,
 ) *Gateway {
-	return &Gateway{
+	g := &Gateway{
 		instanceID: instanceID,
 		sess:       sess,
 		actors:     actors,
@@ -64,6 +84,9 @@ func NewGateway(
 		},
 		udpSrv: udpSrv,
 	}
+	// 会话过期联动撮合域（异常下线兜底）。
+	g.sess.SetSweptHook(g.onSessionsExpired)
+	return g
 }
 
 // connFrom 从请求上下文提取连接寻址信息（connID + 传输种类 + 回写函数）。
@@ -189,7 +212,9 @@ func (g *Gateway) Logout(ctx context.Context, req *gatewayv1.LogoutRequest) (*ga
 	}
 	// 联动 game PlayerActor：令牌匹配才清理会话并停止（异步投递）。
 	if pid, perr := actorclient.PlayerPID(req.GetPlayerId()); perr == nil {
-		_ = g.players.Logout(ctx, pid, &gamev1.LogoutActorMsg{Token: req.GetToken(), Reason: "logout"})
+		_ = g.players.Logout(ctx, pid, &gamev1.LogoutActorMsg{
+			Token: req.GetToken(), Reason: gamev1.LogoutReason_LOGOUT_REASON_LOGOUT,
+		})
 	}
 	return &gatewayv1.LogoutReply{}, nil
 }
@@ -197,14 +222,7 @@ func (g *Gateway) Logout(ctx context.Context, req *gatewayv1.LogoutRequest) (*ga
 // QueueMatch 入队匹配：令牌校验 → game PlayerActor 入队转发。
 // 客户端只选规则集；匹配属性由 PlayerActor 从聚合根权威填充（反作弊）。
 func (g *Gateway) QueueMatch(ctx context.Context, req *gatewayv1.MatchQueueRequest) (*gatewayv1.MatchQueueReply, error) {
-	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
-	if err != nil {
-		return nil, errorv1.ErrInternal("入队匹配校验失败")
-	}
-	if !ok {
-		return nil, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
-	}
-	pid, err := actorclient.PlayerPID(req.GetPlayerId())
+	pid, err := g.playerCall(ctx, req.GetPlayerId(), req.GetToken(), "入队匹配")
 	if err != nil {
 		return nil, err
 	}
@@ -216,14 +234,7 @@ func (g *Gateway) QueueMatch(ctx context.Context, req *gatewayv1.MatchQueueReque
 
 // CancelMatch 取消匹配：令牌校验 → actor 转发（未在队幂等 canceled=false）。
 func (g *Gateway) CancelMatch(ctx context.Context, req *gatewayv1.MatchCancelRequest) (*gatewayv1.MatchCancelReply, error) {
-	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
-	if err != nil {
-		return nil, errorv1.ErrInternal("取消匹配校验失败")
-	}
-	if !ok {
-		return nil, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
-	}
-	pid, err := actorclient.PlayerPID(req.GetPlayerId())
+	pid, err := g.playerCall(ctx, req.GetPlayerId(), req.GetToken(), "取消匹配")
 	if err != nil {
 		return nil, err
 	}
@@ -236,14 +247,7 @@ func (g *Gateway) CancelMatch(ctx context.Context, req *gatewayv1.MatchCancelReq
 
 // MatchStatus 查询匹配状态：轮询兜底（成局/失败另有主动推送）。
 func (g *Gateway) MatchStatus(ctx context.Context, req *gatewayv1.MatchStatusRequest) (*gatewayv1.MatchStatusReply, error) {
-	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
-	if err != nil {
-		return nil, errorv1.ErrInternal("匹配状态校验失败")
-	}
-	if !ok {
-		return nil, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
-	}
-	pid, err := actorclient.PlayerPID(req.GetPlayerId())
+	pid, err := g.playerCall(ctx, req.GetPlayerId(), req.GetToken(), "匹配状态")
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +259,7 @@ func (g *Gateway) MatchStatus(ctx context.Context, req *gatewayv1.MatchStatusReq
 		State:    rep.GetState(),
 		TicketId: rep.GetTicketId(),
 		MatchId:  rep.GetMatchId(),
+		BattleId: rep.GetBattleId(),
 	}, nil
 }
 
@@ -272,12 +277,8 @@ func (g *Gateway) Heartbeat(ctx context.Context, req *gatewayv1.HeartbeatRequest
 // JoinBattle 加入战斗：令牌校验 → battle actor 裁决参战资格并回执
 // 会话元信息/当前帧/快照（M7）→ 绑定战斗通道。
 func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleRequest) (*gatewayv1.JoinBattleReply, error) {
-	ok, err := g.sess.Validate(ctx, req.GetPlayerId(), req.GetToken())
-	if err != nil {
-		return nil, errorv1.ErrInternal("加入战斗校验失败")
-	}
-	if !ok {
-		return nil, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
+	if _, err := g.playerCall(ctx, req.GetPlayerId(), req.GetToken(), "加入战斗"); err != nil {
+		return nil, err
 	}
 	conn := g.connFrom(ctx)
 	if conn == nil {
@@ -296,7 +297,6 @@ func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleReque
 		return nil, errorv1.ErrInternal("战斗通道绑定失败")
 	}
 	return &gatewayv1.JoinBattleReply{
-		Ok:           true,
 		Meta:         reply.GetMeta(),
 		CurrentFrame: reply.GetCurrentFrame(),
 		Snapshot:     reply.GetSnapshot(),
@@ -371,9 +371,15 @@ func (g *Gateway) playerFromConn(ctx context.Context) (string, error) {
 
 // kickOld 处理挤下线（D10+D13）：新登录覆盖旧路由后，
 // 本实例旧连接直接推送被挤下线通知；跨实例经 nats 定向控制通道通知旧实例。
+// 接管即联动撮合域：清理被挤会话的匹配/组队在线态（覆盖「先重登后清扫」窗口，
+// 新会话以干净状态起步），失败仅忽略（幂等，未在队/未组队为 no-op）。
 func (g *Gateway) kickOld(ctx context.Context, playerID string, old *session.Route, oldSess *session.Session) {
 	if old == nil {
 		return
+	}
+	if pid, perr := actorclient.PlayerPID(playerID); perr == nil {
+		_, _ = g.players.CancelMatch(ctx, pid, &gamev1.CancelMatchActorReq{})
+		_, _ = g.players.LeaveParty(ctx, pid, &gamev1.LeavePartyActorReq{})
 	}
 	if old.InstanceID == g.instanceID {
 		if oldSess != nil {
@@ -390,7 +396,9 @@ func (g *Gateway) kickOld(ctx context.Context, playerID string, old *session.Rou
 
 // pushKicked 向会话的全部通道推送「被挤下线」通知。
 func (g *Gateway) pushKicked(sess *session.Session) {
-	payload, err := protojson.Marshal(&gatewayv1.KickedNotify{Reason: "logged_in_elsewhere"})
+	payload, err := protojson.Marshal(&gatewayv1.KickedNotify{
+		Reason: gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE,
+	})
 	if err != nil {
 		return
 	}
@@ -399,4 +407,92 @@ func (g *Gateway) pushKicked(sess *session.Session) {
 			_ = c.Send(consts.PushOpKickedOffline, payload)
 		}
 	}
+}
+
+// ---- 灵活组队（客户端只传队伍标识/规则集；身份由会话校验，属性服务端权威填充）----
+
+// playerCall 是匹配/组域请求的公共前置：会话令牌校验 + 玩家 PID 组装。
+// action 用于校验错误消息定位（如「入队匹配」）；业务错误由调用方透传。
+func (g *Gateway) playerCall(ctx context.Context, playerID, token, action string) (types.PID, error) {
+	ok, err := g.sess.Validate(ctx, playerID, token)
+	if err != nil {
+		return types.PID{}, errorv1.ErrInternal("%s校验失败", action)
+	}
+	if !ok {
+		return types.PID{}, errorv1.ErrInvalidToken("会话令牌无效或已被接管")
+	}
+	return actorclient.PlayerPID(playerID)
+}
+
+// partyInfoReply 把 actor 名册回执映射为网关快照回执。
+func partyInfoReply(rep *gamev1.PartyActorReply) *gatewayv1.PartyInfoReply {
+	return &gatewayv1.PartyInfoReply{
+		PartyId:  rep.GetPartyId(),
+		LeaderId: rep.GetLeaderId(),
+		Members:  rep.GetMembers(),
+	}
+}
+
+// partyActorCall 是组域无额外参数请求的公共路径：前置校验 → 调 actor → 映射快照。
+func (g *Gateway) partyActorCall(ctx context.Context, playerID, token, action string,
+	call func(pid types.PID) (*gamev1.PartyActorReply, error)) (*gatewayv1.PartyInfoReply, error) {
+	pid, err := g.playerCall(ctx, playerID, token, action)
+	if err != nil {
+		return nil, err
+	}
+	rep, err := call(pid)
+	if err != nil {
+		return nil, err
+	}
+	return partyInfoReply(rep), nil
+}
+
+// PartyCreate 建队：本玩家为队长，回执名册快照。
+func (g *Gateway) PartyCreate(ctx context.Context, req *gatewayv1.PartyCreateRequest) (*gatewayv1.PartyInfoReply, error) {
+	return g.partyActorCall(ctx, req.GetPlayerId(), req.GetToken(), "建队",
+		func(pid types.PID) (*gamev1.PartyActorReply, error) {
+			return g.players.CreateParty(ctx, pid, &gamev1.CreatePartyActorReq{})
+		})
+}
+
+// PartyJoin 按 party_id 加入：容量原子校验（满员/队伍不存在业务错误透传）。
+func (g *Gateway) PartyJoin(ctx context.Context, req *gatewayv1.PartyJoinRequest) (*gatewayv1.PartyInfoReply, error) {
+	pid, err := g.playerCall(ctx, req.GetPlayerId(), req.GetToken(), "加入队伍")
+	if err != nil {
+		return nil, err
+	}
+	rep, err := g.players.JoinParty(ctx, pid, &gamev1.JoinPartyActorReq{PartyId: req.GetPartyId()})
+	if err != nil {
+		return nil, err
+	}
+	return partyInfoReply(rep), nil
+}
+
+// PartyLeave 离开队伍（幂等；空快照表示未组队）。
+func (g *Gateway) PartyLeave(ctx context.Context, req *gatewayv1.PartyLeaveRequest) (*gatewayv1.PartyInfoReply, error) {
+	return g.partyActorCall(ctx, req.GetPlayerId(), req.GetToken(), "离开队伍",
+		func(pid types.PID) (*gamev1.PartyActorReply, error) {
+			return g.players.LeaveParty(ctx, pid, &gamev1.LeavePartyActorReq{})
+		})
+}
+
+// PartyStatus 名册快照（轮询兜底）。
+func (g *Gateway) PartyStatus(ctx context.Context, req *gatewayv1.PartyStatusRequest) (*gatewayv1.PartyInfoReply, error) {
+	return g.partyActorCall(ctx, req.GetPlayerId(), req.GetToken(), "队伍状态",
+		func(pid types.PID) (*gamev1.PartyActorReply, error) {
+			return g.players.GetParty(ctx, pid, &gamev1.GetPartyActorReq{})
+		})
+}
+
+// PartyQueue 队长发整队入队（1..N 人都可入队）。
+func (g *Gateway) PartyQueue(ctx context.Context, req *gatewayv1.PartyQueueRequest) (*gatewayv1.PartyQueueReply, error) {
+	pid, err := g.playerCall(ctx, req.GetPlayerId(), req.GetToken(), "整队入队")
+	if err != nil {
+		return nil, err
+	}
+	rep, err := g.players.QueueParty(ctx, pid, &gamev1.QueuePartyActorReq{Ruleset: req.GetRuleset()})
+	if err != nil {
+		return nil, err
+	}
+	return &gatewayv1.PartyQueueReply{TicketId: rep.GetTicketId()}, nil
 }

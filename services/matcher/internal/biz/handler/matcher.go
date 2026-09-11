@@ -3,6 +3,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
@@ -15,18 +16,41 @@ import (
 // ticketTTL 是玩家→ticket 映射与结算去重的租期（与 matchmaker 后端 ticket TTL 对齐）。
 const ticketTTL = 5 * time.Minute
 
-// MatcherHandler 是 biz.MatcherService 的实现（入队/取消/查询）。
+// MatcherDeps 聚合撮合 handler 的依赖（graph 装配与测试共用）；
+// Party/PartyMapper/Roster 可为 nil：party 域方法降级返回内部错误（单测可只测单人域）。
+type MatcherDeps struct {
+	Svc         matchmaker.Service
+	Party       matchmaker.Party
+	Mapper      biz.PlayerTicketMapper
+	PartyMapper biz.PartyQueueMapper
+	Sink        biz.MatchEventSink
+	Deduper     biz.MatchSettleDeduper
+	Roster      biz.PartyRosterPublisher
+}
+
+// MatcherHandler 是 biz.MatcherService 与 party 域的 grpc 实现。
 type MatcherHandler struct {
 	matcherv1.UnimplementedMatcherServer
-	svc     matchmaker.Service
-	mapper  biz.PlayerTicketMapper
-	sink    biz.MatchEventSink
-	deduper biz.MatchSettleDeduper
+	svc         matchmaker.Service
+	party       matchmaker.Party
+	mapper      biz.PlayerTicketMapper
+	partyMapper biz.PartyQueueMapper
+	sink        biz.MatchEventSink
+	deduper     biz.MatchSettleDeduper
+	roster      biz.PartyRosterPublisher
 }
 
 // NewMatcherHandler 构造撮合 grpc 实现。
-func NewMatcherHandler(svc matchmaker.Service, mapper biz.PlayerTicketMapper, sink biz.MatchEventSink, deduper biz.MatchSettleDeduper) *MatcherHandler {
-	return &MatcherHandler{svc: svc, mapper: mapper, sink: sink, deduper: deduper}
+func NewMatcherHandler(d MatcherDeps) *MatcherHandler {
+	return &MatcherHandler{
+		svc:         d.Svc,
+		party:       d.Party,
+		mapper:      d.Mapper,
+		partyMapper: d.PartyMapper,
+		sink:        d.Sink,
+		deduper:     d.Deduper,
+		roster:      d.Roster,
+	}
 }
 
 // QueueMatch 实现 biz.MatcherService：组装属性快照 ticket 入队并监听成局事件。
@@ -62,8 +86,8 @@ func (h *MatcherHandler) QueueMatch(ctx context.Context, req *matcherv1.QueueMat
 	if err := h.mapper.Set(ctx, req.GetPlayerId(), ticketID, ticketTTL); err != nil {
 		return nil, errorv1.ErrInternal("登记匹配映射失败")
 	}
-	// 后台监听 ticket 事件（成局发布/失败清理）。
-	go h.watchTicket(req.GetPlayerId(), ticketID)
+	// 后台监听 ticket 事件（成局发布/失败清理；单人票 partyID 为空）。
+	go h.watchTicket(req.GetPlayerId(), ticketID, "")
 	return &matcherv1.QueueMatchReply{TicketId: ticketID}, nil
 }
 
@@ -101,13 +125,17 @@ func (h *MatcherHandler) QueryMatch(ctx context.Context, req *matcherv1.QueryMat
 	}
 	state := mapTicketState(ticket.State)
 	matchID, _ := h.mapper.GetMatch(ctx, req.GetPlayerId())
-	return &matcherv1.QueryMatchReply{State: state, TicketId: ticketID, MatchId: matchID}, nil
+	battleID, _ := h.mapper.GetBattle(ctx, req.GetPlayerId())
+	return &matcherv1.QueryMatchReply{
+		State: state, TicketId: ticketID, MatchId: matchID, BattleId: battleID,
+	}, nil
 }
 
 // watchTicket 监听 ticket 事件直至终态：
-// 成局 → 发布事件 + 开局调用 + 写入 match 关联；
+// 成局 → 发布事件 + 开局调用 + 写入全部参战玩家的对局关联；
 // 失败/超时/取消 → 发布失败事件 + 清理映射。
-func (h *MatcherHandler) watchTicket(playerID, ticketID string) {
+// partyID 非空为整队票：失败事件的推送名单按队伍名册快照取（含已离队前的成员不可得，取剩余名册）。
+func (h *MatcherHandler) watchTicket(playerID, ticketID, partyID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), ticketTTL)
 	defer cancel()
 	events, err := h.svc.Watch(ctx, ticketID)
@@ -117,25 +145,23 @@ func (h *MatcherHandler) watchTicket(playerID, ticketID string) {
 	for ev := range events {
 		switch ev.State {
 		case matchmaker.TicketCompleted:
-			h.onCompleted(playerID, ev)
+			h.onCompleted(ev)
 			return
 		case matchmaker.TicketFailed, matchmaker.TicketTimedOut, matchmaker.TicketCancelled:
-			h.onFailed(playerID, ticketID, ev)
+			h.onFailed(playerID, ticketID, partyID, ev)
 			return
 		}
 	}
 }
 
 // onCompleted 处理成局：按 matchID 幂等（同局每张 ticket 各触发一次，
-// 仅首个处理者执行发布与开局，见 biz.MatchSettleDeduper）。
-func (h *MatcherHandler) onCompleted(playerID string, ev matchmaker.TicketEvent) {
+// 仅首个处理者执行，见 biz.MatchSettleDeduper——去重前置避免双写关联）。
+// 对局关联写入全部参战玩家（整队票含全队成员）。
+func (h *MatcherHandler) onCompleted(ev matchmaker.TicketEvent) {
 	if ev.Match == nil {
 		return
 	}
 	ctx := context.Background()
-	// 无论结算是否由本实例执行，都关联玩家与对局（查询回执用）。
-	_ = h.mapper.SetMatch(ctx, playerID, ev.Match.ID, ticketTTL)
-	// 结算去重：同局其它 ticket 的 TicketCompleted 直接跳过。
 	if h.deduper != nil {
 		ok, err := h.deduper.TrySettle(ctx, ev.Match.ID, ticketTTL)
 		if err != nil || !ok {
@@ -144,19 +170,52 @@ func (h *MatcherHandler) onCompleted(playerID string, ev matchmaker.TicketEvent)
 	}
 	battleID := idgen.Battle()
 	playerIDs := matchPlayerIDs(ev.Match)
+	for _, pid := range playerIDs {
+		_ = h.mapper.SetMatch(ctx, pid, ev.Match.ID, ticketTTL)
+		// battle 关联：开局推送丢失后，玩家重登可经查询接口恢复加入。
+		_ = h.mapper.SetBattle(ctx, pid, battleID, ticketTTL)
+	}
 	_ = h.sink.PublishStarted(ctx, battleID, ev.Match.ID, playerIDs)
-	// 开局调用（可观测）：失败不阻断事件发布（M7 battle 服务接入后自然成功）。
+	// 开局调用（可观测）：失败不阻断事件发布。
 	_ = h.sink.Start(ctx, battleID, ev.Match.ID, playerIDs)
 }
 
-// onFailed 处理失败终态：发布失败事件（带 ticket_id，未成局故无对局 ID）并清理映射。
-func (h *MatcherHandler) onFailed(playerID, ticketID string, ev matchmaker.TicketEvent) {
-	reason := string(ev.State)
-	if ev.Reason != "" {
-		reason = ev.Reason
+// onFailed 处理失败终态：发布失败事件（整队票按名册快照推送）并清理映射。
+func (h *MatcherHandler) onFailed(playerID, ticketID, partyID string, ev matchmaker.TicketEvent) {
+	playerIDs := []string{playerID}
+	if partyID != "" {
+		if info, err := h.party.Describe(context.Background(), partyID); err == nil && len(info.Players) > 0 {
+			playerIDs = rosterPlayerIDs(info.Players)
+		}
 	}
-	_ = h.sink.PublishFailed(context.Background(), ticketID, []string{playerID}, reason)
+	_ = h.sink.PublishFailed(context.Background(), ticketID, playerIDs, matchFailReason(ev))
 	_ = h.mapper.Del(context.Background(), playerID)
+}
+
+// matchFailReason 把引擎终态/处置来源映射为协议失败原因枚举
+// （引擎 Reason 为内部自由文本，仅在服务端日志保留）。
+func matchFailReason(ev matchmaker.TicketEvent) matcherv1.MatchFailReason {
+	switch {
+	case ev.State == matchmaker.TicketTimedOut:
+		return matcherv1.MatchFailReason_MATCH_FAIL_REASON_TIMEOUT
+	case ev.State == matchmaker.TicketCancelled:
+		return matcherv1.MatchFailReason_MATCH_FAIL_REASON_CANCELLED
+	case strings.HasPrefix(ev.Reason, "acceptance_failed"):
+		return matcherv1.MatchFailReason_MATCH_FAIL_REASON_ACCEPTANCE_FAILED
+	case strings.HasPrefix(ev.Reason, "placement_failed"):
+		return matcherv1.MatchFailReason_MATCH_FAIL_REASON_PLACEMENT_FAILED
+	default:
+		return matcherv1.MatchFailReason_MATCH_FAIL_REASON_FAILED
+	}
+}
+
+// rosterPlayerIDs 汇总名册的玩家 ID 列表（保序）。
+func rosterPlayerIDs(players []matchmaker.Player) []string {
+	out := make([]string, 0, len(players))
+	for _, p := range players {
+		out = append(out, p.ID)
+	}
+	return out
 }
 
 // mapTicketState 把 matchmaker 状态映射为协议枚举。
