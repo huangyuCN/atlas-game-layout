@@ -247,10 +247,8 @@ func TestJoinBattleBindsChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JoinBattle: %v", err)
 	}
-	if !join.GetOk() {
-		t.Fatal("JoinBattle 回执 ok=false")
-	}
 	// 会话元信息/当前帧/快照由 battle actor 回执（M7）。
+
 	if join.GetMeta().GetSessionId() != "b-1" || join.GetCurrentFrame() != 3 || join.GetSnapshot() == nil {
 		t.Fatalf("JoinBattle 元信息回执不符: %+v", join)
 	}
@@ -419,5 +417,63 @@ func TestMatchQueueForwardsToPlayerActor(t *testing.T) {
 	}
 	if !ca.GetCanceled() || !env.mock.matchCanceled {
 		t.Fatalf("取消不符: reply=%+v mock=%v", ca, env.mock.matchCanceled)
+	}
+}
+
+// TestPartyProjectionForwardsToPlayerActor 验证组队投影：建队/加入/状态/整队入队
+// 经生成桩转发到 PlayerActor；无效令牌拒绝；离开回执空快照。
+func TestPartyProjectionForwardsToPlayerActor(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	cli, auth := env.newTCPAuthClient(t)
+	matchCli := gatewayv1.NewGatewayMatchTCPClient(cli)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	token := login.GetToken()
+
+	// 无效令牌拒绝。
+	if _, err := matchCli.PartyCreate(ctx, &gatewayv1.PartyCreateRequest{Token: "bad", PlayerId: "p-1"}); atlaserrors.Reason(err) != "INVALID_TOKEN" {
+		t.Fatalf("无效令牌应拒绝, got %v", err)
+	}
+
+	// 建队：回执快照（队长自身）。
+	cp, err := matchCli.PartyCreate(ctx, &gatewayv1.PartyCreateRequest{Token: token, PlayerId: "p-1"})
+	if err != nil {
+		t.Fatalf("PartyCreate: %v", err)
+	}
+	if cp.GetPartyId() != "party-p-1" || cp.GetLeaderId() != "p-1" || len(cp.GetMembers()) != 1 {
+		t.Fatalf("建队回执不符: %+v", cp)
+	}
+
+	// 名册快照查询。
+	st, err := matchCli.PartyStatus(ctx, &gatewayv1.PartyStatusRequest{Token: token, PlayerId: "p-1"})
+	if err != nil {
+		t.Fatalf("PartyStatus: %v", err)
+	}
+	if st.GetPartyId() != "party-x" {
+		t.Fatalf("快照回执不符: %+v", st)
+	}
+
+	// 整队入队转发。
+	qr, err := matchCli.PartyQueue(ctx, &gatewayv1.PartyQueueRequest{Token: token, PlayerId: "p-1", Ruleset: "casual"})
+	if err != nil {
+		t.Fatalf("PartyQueue: %v", err)
+	}
+	if qr.GetTicketId() != "t-party-1" {
+		t.Fatalf("整队入队回执不符: %+v", qr)
+	}
+
+	// 离开回执空快照（mock LeaveParty 返回空）。
+	lv, err := matchCli.PartyLeave(ctx, &gatewayv1.PartyLeaveRequest{Token: token, PlayerId: "p-1"})
+	if err != nil {
+		t.Fatalf("PartyLeave: %v", err)
+	}
+	if lv.GetPartyId() != "" {
+		t.Fatalf("离开回执应为空快照: %+v", lv)
 	}
 }

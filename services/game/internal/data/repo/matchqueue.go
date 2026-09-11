@@ -1,4 +1,4 @@
-// Package repo 的 matcher 服务 gRPC 客户端（本文件）：实现 biz.MatchQueueClient，
+// Package repo 的 matcher 服务 gRPC 客户端（本文件）：实现 biz.MatchmakerClient，
 // 经 etcd 服务发现寻址（discovery:///atlas.matcher），game 节点无须静态配置 matcher 地址。
 package repo
 
@@ -18,7 +18,7 @@ import (
 // discoveryTarget 是 matcher 服务的发现寻址目标（discovery scheme + 服务名）。
 const discoveryTarget = "discovery:///" + consts.ServiceMatcher
 
-// MatchQueueGRPC 是 biz.MatchQueueClient 的 gRPC 实现。
+// MatchQueueGRPC 是 biz.MatchmakerClient 的 gRPC 实现。
 type MatchQueueGRPC struct {
 	cli matcherv1.MatcherClient
 }
@@ -39,7 +39,10 @@ func NewMatchQueueGRPC(ctx context.Context, ec *clientv3.Client) (*MatchQueueGRP
 	return &MatchQueueGRPC{cli: matcherv1.NewMatcherClient(conn)}, nil
 }
 
-// Enter 实现 biz.MatchQueueClient：入队（level 为聚合根权威属性）。
+// 静态保证实现接口。
+var _ biz.MatchmakerClient = (*MatchQueueGRPC)(nil)
+
+// Enter 实现 biz.MatchmakerClient：入队（level 为聚合根权威属性）。
 func (m *MatchQueueGRPC) Enter(ctx context.Context, playerID string, level int32, ruleset string) error {
 	_, err := m.cli.QueueMatch(ctx, &matcherv1.QueueMatchRequest{
 		PlayerId: playerID,
@@ -49,7 +52,7 @@ func (m *MatchQueueGRPC) Enter(ctx context.Context, playerID string, level int32
 	return err
 }
 
-// Cancel 实现 biz.MatchQueueClient：取消匹配（未在队回执 canceled=false 不视为错误）。
+// Cancel 实现 biz.MatchmakerClient：取消匹配（未在队回执 canceled=false 不视为错误）。
 func (m *MatchQueueGRPC) Cancel(ctx context.Context, playerID string) (bool, error) {
 	rep, err := m.cli.CancelMatch(ctx, &matcherv1.CancelMatchRequest{PlayerId: playerID})
 	if err != nil {
@@ -58,14 +61,51 @@ func (m *MatchQueueGRPC) Cancel(ctx context.Context, playerID string) (bool, err
 	return rep.GetCanceled(), nil
 }
 
-// Status 实现 biz.MatchQueueClient：查询匹配状态。
-func (m *MatchQueueGRPC) Status(ctx context.Context, playerID string) (matcherv1.MatchState, string, string, error) {
-	rep, err := m.cli.QueryMatch(ctx, &matcherv1.QueryMatchRequest{PlayerId: playerID})
-	if err != nil {
-		return matcherv1.MatchState_MATCH_STATE_UNSPECIFIED, "", "", err
-	}
-	return rep.GetState(), rep.GetTicketId(), rep.GetMatchId(), nil
+// Status 实现 biz.MatchmakerClient：查询匹配状态（matched 态含 battle_id）。
+func (m *MatchQueueGRPC) Status(ctx context.Context, playerID string) (*matcherv1.QueryMatchReply, error) {
+	return m.cli.QueryMatch(ctx, &matcherv1.QueryMatchRequest{PlayerId: playerID})
 }
 
-// 静态保证实现接口。
-var _ biz.MatchQueueClient = (*MatchQueueGRPC)(nil)
+// ---- 灵活组队（1..N 人）----
+
+// Create 实现 biz.MatchmakerClient：队长建队（属性权威）。
+func (m *MatchQueueGRPC) Create(ctx context.Context, playerID string, level int32) (string, error) {
+	rep, err := m.cli.CreateParty(ctx, &matcherv1.CreatePartyRequest{
+		PlayerId: playerID,
+		Player:   &commonv1.PlayerSummary{PlayerId: playerID, Level: level},
+	})
+	if err != nil {
+		return "", err
+	}
+	return rep.GetPartyId(), nil
+}
+
+// Join 实现 biz.MatchmakerClient：加入队伍（容量原子校验）。
+func (m *MatchQueueGRPC) Join(ctx context.Context, partyID, playerID string, level int32) error {
+	_, err := m.cli.JoinParty(ctx, &matcherv1.JoinPartyRequest{
+		PartyId:  partyID,
+		PlayerId: playerID,
+		Player:   &commonv1.PlayerSummary{PlayerId: playerID, Level: level},
+	})
+	return err
+}
+
+// Leave 实现 biz.MatchmakerClient：离开队伍。
+func (m *MatchQueueGRPC) Leave(ctx context.Context, partyID, playerID string) error {
+	_, err := m.cli.LeaveParty(ctx, &matcherv1.LeavePartyRequest{PartyId: partyID, PlayerId: playerID})
+	return err
+}
+
+// Describe 实现 biz.MatchmakerClient：名册快照。
+func (m *MatchQueueGRPC) Describe(ctx context.Context, partyID string) (*matcherv1.PartyInfo, error) {
+	return m.cli.DescribeParty(ctx, &matcherv1.DescribePartyRequest{PartyId: partyID})
+}
+
+// Queue 实现 biz.MatchmakerClient：队长发整队入队。
+func (m *MatchQueueGRPC) Queue(ctx context.Context, partyID, ruleset string) (string, error) {
+	rep, err := m.cli.QueueParty(ctx, &matcherv1.QueuePartyRequest{PartyId: partyID, Ruleset: ruleset})
+	if err != nil {
+		return "", err
+	}
+	return rep.GetTicketId(), nil
+}

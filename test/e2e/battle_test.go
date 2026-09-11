@@ -90,7 +90,7 @@ func (c *battleClient) joinBattle(t *testing.T, ctx context.Context, battleID st
 		join, err := c.battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{
 			Token: c.token, PlayerId: c.playerID, BattleId: battleID,
 		})
-		if err == nil && join.GetOk() {
+		if err == nil {
 			return join
 		}
 		lastJoin, lastErr = join, err

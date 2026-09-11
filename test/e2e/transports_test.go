@@ -62,7 +62,7 @@ func TestE2EWSAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JoinBattle: %v", err)
 	}
-	if !join.GetOk() {
+	if join == nil {
 		t.Fatal("ws 战斗绑定回执 ok=false")
 	}
 }
@@ -91,7 +91,7 @@ func TestE2EKCPBattle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("kcp JoinBattle: %v", err)
 	}
-	if !join.GetOk() {
+	if join == nil {
 		t.Fatal("kcp 战斗绑定回执 ok=false")
 	}
 }
@@ -120,7 +120,7 @@ func TestE2EUDPBattle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("udp JoinBattle: %v", err)
 	}
-	if !join.GetOk() {
+	if join == nil {
 		t.Fatal("udp 战斗绑定回执 ok=false")
 	}
 }

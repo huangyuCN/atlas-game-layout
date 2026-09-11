@@ -128,7 +128,7 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 			return
 		}
 		var kn gatewayv1.KickedNotify
-		if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == "logged_in_elsewhere" {
+		if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE {
 			kicked <- struct{}{}
 		}
 	})

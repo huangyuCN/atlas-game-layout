@@ -37,7 +37,7 @@ var Module = fx.Module("game",
 		repo.NewRedisPlayerCache,
 		repo.NewRedisSessionStore,
 		newMatchQueueClient,
-		matchQueueClientOf,
+		matchmakerClientOf,
 		newMongoPlayerRepo,
 		newPlayerStore,
 		// ── biz：业务服务与 actor 访问客户端 ──

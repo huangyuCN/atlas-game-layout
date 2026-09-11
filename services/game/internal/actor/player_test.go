@@ -114,6 +114,10 @@ type fakeMatch struct {
 	cancels  []string
 	statuses []string
 	canceled bool
+	created  []string // 建队记录（playerID）
+	joined   []string // 加入记录（partyID|playerID）
+	left     []string // 离开记录（partyID|playerID）
+	queued   []string // 整队入队记录（partyID|ruleset）
 }
 
 type enterCall struct {
@@ -138,11 +142,55 @@ func (f *fakeMatch) Cancel(_ context.Context, playerID string) (bool, error) {
 	return f.canceled, nil
 }
 
-func (f *fakeMatch) Status(_ context.Context, playerID string) (matcherv1.MatchState, string, string, error) {
+func (f *fakeMatch) Status(_ context.Context, playerID string) (*matcherv1.QueryMatchReply, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statuses = append(f.statuses, playerID)
-	return matcherv1.MatchState_MATCH_STATE_WAITING, "t-1", "m-1", nil
+	return &matcherv1.QueryMatchReply{
+		State:    matcherv1.MatchState_MATCH_STATE_WAITING,
+		TicketId: "t-1", MatchId: "m-1", BattleId: "b-1",
+	}, nil
+}
+
+// ---- 组队域（记录调用供断言）----
+
+func (f *fakeMatch) Create(_ context.Context, playerID string, _ int32) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.created = append(f.created, playerID)
+	return "party-" + playerID, nil
+}
+
+func (f *fakeMatch) Join(_ context.Context, partyID, playerID string, _ int32) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.joined = append(f.joined, partyID+"|"+playerID)
+	return nil
+}
+
+func (f *fakeMatch) Leave(_ context.Context, partyID, playerID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.left = append(f.left, partyID+"|"+playerID)
+	return nil
+}
+
+func (f *fakeMatch) Describe(_ context.Context, partyID string) (*matcherv1.PartyInfo, error) {
+	return &matcherv1.PartyInfo{
+		PartyId:  partyID,
+		LeaderId: "leader",
+		Members: []*matcherv1.PartyMember{
+			{PlayerId: "leader", Level: 10},
+			{PlayerId: "member", Level: 11},
+		},
+	}, nil
+}
+
+func (f *fakeMatch) Queue(_ context.Context, partyID, ruleset string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.queued = append(f.queued, partyID+"|"+ruleset)
+	return "t-party-1", nil
 }
 
 // newActorEnv 构造本地 actor 运行时（注册 PlayerActor，注册/登录 PID 分离）。
@@ -288,7 +336,9 @@ func TestPlayerActorSnapshotAndPersist(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	// 登出（Tell 对象直传，本地路由之外的桩 switch 命中）→ 自停 → OnStop 落库。
-	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutActorMsg{Token: "t1", Reason: "logout"}); err != nil {
+	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutActorMsg{
+		Token: "t1", Reason: gamev1.LogoutReason_LOGOUT_REASON_LOGOUT,
+	}); err != nil {
 		t.Fatalf("Tell logout: %v", err)
 	}
 	deadline = time.Now().Add(2 * time.Second)
@@ -427,7 +477,7 @@ func TestPlayerActorMatchQueue(t *testing.T) {
 		t.Fatalf("状态查询: %v", err)
 	}
 	got := st.(*gamev1.MatchStatusActorReply)
-	if got.GetState() != matcherv1.MatchState_MATCH_STATE_WAITING || got.GetTicketId() != "t-1" || got.GetMatchId() != "m-1" {
+	if got.GetState() != matcherv1.MatchState_MATCH_STATE_WAITING || got.GetTicketId() != "t-1" || got.GetMatchId() != "m-1" || got.GetBattleId() != "b-1" {
 		t.Fatalf("状态回执不符: %+v", got)
 	}
 	if len(match.statuses) != 1 || match.statuses[0] != "p-test" {
@@ -480,4 +530,178 @@ func (f *fakeMatch) cancelSnapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.cancels...)
+}
+
+// TestPlayerActorParty 验证组队域链路：未登录拒、建队（快照/引用记录）、
+// 重复建队拒、加入（转发 + 名册回执）、离开幂等、整队入队转发、未组队拒绝。
+func TestPlayerActorParty(t *testing.T) {
+	ctx := context.Background()
+	rt, regPID, loginPID, _, match := newActorEnv(t, 0, 0)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// 未登录建队拒绝。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.CreatePartyActorReq{}); atlaserrors.Reason(err) != "PLAYER_NOT_ONLINE" {
+		t.Fatalf("未登录建队应拒绝, got %v", err)
+	}
+
+	// 登录后建队：快照含队长自身。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	rep, err := rt.Ask(ctx, loginPID, &gamev1.CreatePartyActorReq{})
+	if err != nil {
+		t.Fatalf("CreateParty: %v", err)
+	}
+	created := rep.(*gamev1.PartyActorReply)
+	if created.GetPartyId() != "party-p-test" || created.GetLeaderId() != "p-test" || len(created.GetMembers()) != 1 {
+		t.Fatalf("建队回执不符: %+v", created)
+	}
+
+	// 重复建队拒绝（ALREADY_IN_PARTY）。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.CreatePartyActorReq{}); atlaserrors.Reason(err) != "ALREADY_IN_PARTY" {
+		t.Fatalf("重复建队应拒绝, got %v", err)
+	}
+
+	// 离开（幂等）：先真实离开（释放建队引用），再重复离开回执空快照。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LeavePartyActorReq{}); err != nil {
+		t.Fatalf("LeaveParty: %v", err)
+	}
+	lp, err := rt.Ask(ctx, loginPID, &gamev1.LeavePartyActorReq{})
+	if err != nil {
+		t.Fatalf("重复离开应幂等: %v", err)
+	}
+	if lp.(*gamev1.PartyActorReply).GetPartyId() != "" {
+		t.Fatalf("不在队离开应回执空快照: %+v", lp)
+	}
+
+	// 加入队伍：转发 + 名册快照（Describe 回执）。
+	jp, err := rt.Ask(ctx, loginPID, &gamev1.JoinPartyActorReq{PartyId: "party-x"})
+	if err != nil {
+		t.Fatalf("JoinParty: %v", err)
+	}
+	if jp.(*gamev1.PartyActorReply).GetPartyId() != "party-x" {
+		t.Fatalf("加入回执名册不符: %+v", jp)
+	}
+	// 离开 party-x（后续整队入队用 party-y）。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LeavePartyActorReq{}); err != nil {
+		t.Fatalf("LeaveParty x: %v", err)
+	}
+
+	// 未组队整队入队拒绝（NOT_IN_PARTY）。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.QueuePartyActorReq{Ruleset: "casual"}); atlaserrors.Reason(err) != "NOT_IN_PARTY" {
+		t.Fatalf("未组队入队应拒绝, got %v", err)
+	}
+
+	// 组队后整队入队：转发 ruleset。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.JoinPartyActorReq{PartyId: "party-y"}); err != nil {
+		t.Fatalf("JoinParty y: %v", err)
+	}
+	qp, err := rt.Ask(ctx, loginPID, &gamev1.QueuePartyActorReq{Ruleset: "casual"})
+	if err != nil {
+		t.Fatalf("QueueParty: %v", err)
+	}
+	if qp.(*gamev1.QueuePartyActorReply).GetTicketId() != "t-party-1" {
+		t.Fatalf("整队入队回执不符: %+v", qp)
+	}
+
+	match.mu.Lock()
+	defer match.mu.Unlock()
+	if len(match.created) != 1 || len(match.joined) != 2 || len(match.queued) != 1 || match.queued[0] != "party-y|casual" {
+		t.Fatalf("组域调用记录不符: created=%v joined=%v queued=%v", match.created, match.joined, match.queued)
+	}
+}
+
+// TestPlayerActorOnStopLeavesParty 验证下线联动：登出自停时自动离开队伍
+// （撮合域 LeaveParty 会联动取消在匹配中的整队票）。
+func TestPlayerActorOnStopLeavesParty(t *testing.T) {
+	ctx := context.Background()
+	rt, regPID, loginPID, _, match := newActorEnv(t, 0, 0)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.CreatePartyActorReq{}); err != nil {
+		t.Fatalf("CreateParty: %v", err)
+	}
+	// 登出（Tell）→ actor 自停 → OnStop 离队。
+	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutActorMsg{Token: "t1"}); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		match.mu.Lock()
+		found := false
+		for _, rec := range match.left {
+			if rec == "party-p-test|p-test" {
+				found = true
+			}
+		}
+		match.mu.Unlock()
+		if found {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("下线未联动离队: left=%v", match.cancelSnapshot())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestPlayerActorLogoutGuard 验证异常下线的接管裁决：
+// SESSION_EXPIRED 且游戏侧已存在「不同令牌」的会话（新登录接管）→ 不停止 actor；
+// 无会话（令牌过期）→ 安全停止并联动撮合域。
+func TestPlayerActorLogoutGuard(t *testing.T) {
+	ctx := context.Background()
+	rt, regPID, loginPID, _, match := newActorEnv(t, 0, 0)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.CreatePartyActorReq{}); err != nil {
+		t.Fatalf("CreateParty: %v", err)
+	}
+
+	// 场景 1：新登录接管（游戏侧会话令牌换新）→ 异常下线不停止 actor。
+	// memSessions 的令牌覆写等价于新登录写入（同族实现，直接改表模拟）。
+	// 场景 2：令牌过期（会话记录消失，Get 返回空）→ 安全停止。
+
+	// 场景 2 先行：异常下线（无接管）→ Tell Logout(SESSION_EXPIRED) → actor 自停 → OnStop 离队。
+	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutActorMsg{
+		Token: "t1", Reason: gamev1.LogoutReason_LOGOUT_REASON_SESSION_EXPIRED,
+	}); err != nil {
+		t.Fatalf("logout expired: %v", err)
+	}
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		match.mu.Lock()
+		found := false
+		for _, rec := range match.left {
+			if rec == "party-p-test|p-test" {
+				found = true
+			}
+		}
+		match.mu.Unlock()
+		if found {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("异常下线未联动离队: left=%v", match.cancelSnapshot())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

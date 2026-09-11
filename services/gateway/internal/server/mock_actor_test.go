@@ -96,6 +96,25 @@ func (m *mockActorRuntime) Ask(_ context.Context, pid types.PID, req any, _ ...c
 		return &gamev1.MatchStatusActorReply{
 			State: matcherv1.MatchState_MATCH_STATE_WAITING, TicketId: "t-1", MatchId: "m-1",
 		}, nil
+	case *gamev1.CreatePartyActorReq:
+		return &gamev1.PartyActorReply{
+			PartyId: "party-" + pid.UID(), LeaderId: pid.UID(),
+			Members: []*commonv1.PlayerSummary{{PlayerId: pid.UID(), Level: 10}},
+		}, nil
+	case *gamev1.JoinPartyActorReq:
+		return &gamev1.PartyActorReply{
+			PartyId: r.GetPartyId(), LeaderId: "leader",
+			Members: []*commonv1.PlayerSummary{{PlayerId: "leader"}, {PlayerId: pid.UID()}},
+		}, nil
+	case *gamev1.LeavePartyActorReq:
+		return &gamev1.PartyActorReply{}, nil
+	case *gamev1.GetPartyActorReq:
+		return &gamev1.PartyActorReply{
+			PartyId: "party-x", LeaderId: "leader",
+			Members: []*commonv1.PlayerSummary{{PlayerId: "leader", Level: 10}},
+		}, nil
+	case *gamev1.QueuePartyActorReq:
+		return &gamev1.QueuePartyActorReply{TicketId: "t-party-1"}, nil
 	case *battlev1.CreateBattleRequest:
 		return &battlev1.CreateBattleReply{BattleId: pid.UID()}, nil
 	default:

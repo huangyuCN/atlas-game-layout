@@ -30,9 +30,9 @@ type BattleStarter interface {
 type MatchEventPublisher interface {
 	// PublishStarted 发布成局事件（battle 已创建/开局已发起）。
 	PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string) error
-	// PublishFailed 发布失败事件（超时/取消）。
+	// PublishFailed 发布失败事件（超时/取消/处置失败）。
 	// ticketID 是失败的票据 ID（未成局故无对局 ID，事件 match_id 为空）。
-	PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason string) error
+	PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason matcherv1.MatchFailReason) error
 }
 
 // MatchEventSink 是成局观察方接口（事件发布与开局调用的组合，runtime 监听用）。
@@ -52,6 +52,25 @@ type MatchSettleDeduper interface {
 // DefaultMatchmakerName 是未指定规则集时的默认匹配器名。
 const DefaultMatchmakerName = "casual"
 
+// DefaultPartyCapacity 是队伍容量上限（队伍总人数含队长，1..N 灵活组队）。
+const DefaultPartyCapacity = 5
+
+// PartyQueueMapper 是队伍→整队票映射存储（取消/重复入队校验用）。
+type PartyQueueMapper interface {
+	// GetPartyTicket 读取队伍的整队票（不存在返回空串）。
+	GetPartyTicket(ctx context.Context, partyID string) (string, error)
+	// SetPartyTicket 登记队伍的整队票（TTL 过期自动清理）。
+	SetPartyTicket(ctx context.Context, partyID, ticketID string, ttl time.Duration) error
+	// DelPartyTicket 删除映射。
+	DelPartyTicket(ctx context.Context, partyID string) error
+}
+
+// PartyRosterPublisher 是队伍名册变更事件发布接口（nats 总线）。
+type PartyRosterPublisher interface {
+	// PublishRoster 发布名册变更事件（建队/加入/离开/解散，gateway 推送全队）。
+	PublishRoster(ctx context.Context, partyID, leaderID string, playerIDs []string, reason matcherv1.PartyRosterReason) error
+}
+
 // PlayerTicketMapper 是玩家→ticket 映射存储（取消/查询定位用）。
 type PlayerTicketMapper interface {
 	// Get 读取玩家当前 ticket（不存在返回空串）。
@@ -64,4 +83,8 @@ type PlayerTicketMapper interface {
 	SetMatch(ctx context.Context, playerID, matchID string, ttl time.Duration) error
 	// GetMatch 读取玩家对局关联（不存在返回空串）。
 	GetMatch(ctx context.Context, playerID string) (string, error)
+	// SetBattle 关联玩家已成局的战斗（开局推送丢失后重登恢复加入用）。
+	SetBattle(ctx context.Context, playerID, battleID string, ttl time.Duration) error
+	// GetBattle 读取玩家战斗关联（不存在返回空串）。
+	GetBattle(ctx context.Context, playerID string) (string, error)
 }

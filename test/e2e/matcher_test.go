@@ -45,7 +45,9 @@ func (s *recordSink) PublishStarted(ctx context.Context, battleID, matchID strin
 	return nil
 }
 
-func (s *recordSink) PublishFailed(context.Context, string, []string, string) error { return nil }
+func (s *recordSink) PublishFailed(context.Context, string, []string, matcherv1.MatchFailReason) error {
+	return nil
+}
 
 func (s *recordSink) Start(_ context.Context, battleID, matchID string, playerIDs []string) error {
 	s.mu.Lock()

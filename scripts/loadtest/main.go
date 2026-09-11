@@ -173,10 +173,10 @@ func queueTwo(ctx context.Context, matcherAddr string, ps ...*player) (string, e
 func (p *player) joinBattle(ctx context.Context, battleID string) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		join, err := p.battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{
+		_, err := p.battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{
 			Token: p.token, PlayerId: p.id, BattleId: battleID,
 		})
-		if err == nil && join.GetOk() {
+		if err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {

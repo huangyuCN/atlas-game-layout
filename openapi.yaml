@@ -78,6 +78,131 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /v1/matcher/party/create:
+        post:
+            tags:
+                - Matcher
+            description: CreateParty 队长建队（名册权威在撮合域 redis，带 TTL）。
+            operationId: Matcher_CreateParty
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreatePartyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreatePartyReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/matcher/party/join:
+        post:
+            tags:
+                - Matcher
+            description: JoinParty 按 party_id 加入队伍（容量原子校验，满员拒绝）。
+            operationId: Matcher_JoinParty
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/JoinPartyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/JoinPartyReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/matcher/party/leave:
+        post:
+            tags:
+                - Matcher
+            description: LeaveParty 离开队伍（队长顺延；空队解散）。
+            operationId: Matcher_LeaveParty
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LeavePartyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LeavePartyReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/matcher/party/queue:
+        post:
+            tags:
+                - Matcher
+            description: QueueParty 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+            operationId: Matcher_QueueParty
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/QueuePartyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QueuePartyReply'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/matcher/party/{partyId}:
+        get:
+            tags:
+                - Matcher
+            description: DescribeParty 名册快照（轮询兜底用）。
+            operationId: Matcher_DescribeParty
+            parameters:
+                - name: partyId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PartyInfo'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /v1/matcher/query/{playerId}:
         get:
             tags:
@@ -241,6 +366,19 @@ components:
                     items:
                         type: string
             description: CreateBattleRequest 开局：matcher 成局后调用。
+        CreatePartyReply:
+            type: object
+            properties:
+                partyId:
+                    type: string
+            description: CreatePartyReply 建队回执：party_id 即队伍标识（分享给成员加入）。
+        CreatePartyRequest:
+            type: object
+            properties:
+                playerId:
+                    type: string
+                player:
+                    $ref: '#/components/schemas/PlayerSummary'
         GetBackpackReply:
             type: object
             properties:
@@ -283,6 +421,48 @@ components:
                 reason:
                     type: string
             description: GrantItemRequest/Reply 发道具（管理/活动渠道）。
+        JoinPartyReply:
+            type: object
+            properties: {}
+        JoinPartyRequest:
+            type: object
+            properties:
+                partyId:
+                    type: string
+                playerId:
+                    type: string
+                player:
+                    $ref: '#/components/schemas/PlayerSummary'
+        LeavePartyReply:
+            type: object
+            properties: {}
+        LeavePartyRequest:
+            type: object
+            properties:
+                partyId:
+                    type: string
+                playerId:
+                    type: string
+        PartyInfo:
+            type: object
+            properties:
+                partyId:
+                    type: string
+                leaderId:
+                    type: string
+                members:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PartyMember'
+            description: PartyInfo 队伍名册快照（队长 + 全部成员）。
+        PartyMember:
+            type: object
+            properties:
+                playerId:
+                    type: string
+                level:
+                    type: integer
+                    format: int32
         PlayerSummary:
             type: object
             properties:
@@ -304,7 +484,11 @@ components:
                     type: string
                 matchId:
                     type: string
-            description: QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
+                battleId:
+                    type: string
+            description: |-
+                QueryMatchReply 匹配状态：waiting（排队中）/matched（已成局）/failed（失败）/none（无匹配）。
+                 battle_id 在 matched 态回执，供「开局推送丢失后重登恢复加入对局」。
         QueueMatchReply:
             type: object
             properties:
@@ -323,6 +507,19 @@ components:
             description: |-
                 QueueMatchRequest 入队：玩家属性快照 ticket（纯撮合，matcher 不查库）。
                  player 字段是服务端权威数据（由 game PlayerActor 从聚合根组装），非客户端自报。
+        QueuePartyReply:
+            type: object
+            properties:
+                ticketId:
+                    type: string
+            description: QueuePartyReply 整队入队回执：ticket_id 关联失败/成局事件。
+        QueuePartyRequest:
+            type: object
+            properties:
+                partyId:
+                    type: string
+                ruleset:
+                    type: string
         Status:
             type: object
             properties:

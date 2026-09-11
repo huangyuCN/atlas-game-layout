@@ -28,15 +28,21 @@ import (
 const (
 	mapperKeyPrefix = "atlas:match:player:"
 	resultKeyPrefix = "atlas:match:result:"
+	battleKeyPrefix = "atlas:match:battle:"
 	settleKeyPrefix = "atlas:match:settled:"
+	partyKeyPrefix  = "atlas:match:party:"
 	mapperTTL       = 5 * time.Minute
 )
 
 // DefaultMaxLevelGap 是「等级相近」规则的最大等级差（规则描述与管理端点共用同一来源）。
 const DefaultMaxLevelGap = 3
 
+// DefaultMaxSide 是灵活组队的单侧人数上限（与 biz.DefaultPartyCapacity 对齐）。
+const DefaultMaxSide = 5
+
 // RuleDescription 是 casual 规则集的可读描述（管理端点查询用）。
-var RuleDescription = "等级相近 1v1（最大等级差 " + fmt.Sprint(DefaultMaxLevelGap) + "）"
+var RuleDescription = "等级相近灵活组队（1..N 人，最大等级差 " + fmt.Sprint(DefaultMaxLevelGap) +
+	"，单侧上限 " + fmt.Sprint(DefaultMaxSide) + "）"
 
 // RedisPlayerTicketMapper 是玩家→ticket 映射的 redis 实现。
 type RedisPlayerTicketMapper struct {
@@ -81,6 +87,49 @@ func (m *RedisPlayerTicketMapper) GetMatch(ctx context.Context, playerID string)
 	return v, err
 }
 
+// SetBattle 实现 biz.PlayerTicketMapper。
+func (m *RedisPlayerTicketMapper) SetBattle(ctx context.Context, playerID, battleID string, ttl time.Duration) error {
+	return m.cli.Raw().Set(ctx, battleKeyPrefix+playerID, battleID, ttl).Err()
+}
+
+// GetBattle 实现 biz.PlayerTicketMapper。
+func (m *RedisPlayerTicketMapper) GetBattle(ctx context.Context, playerID string) (string, error) {
+	v, err := m.cli.Raw().Get(ctx, battleKeyPrefix+playerID).Result()
+	if err == goredis.Nil {
+		return "", nil
+	}
+	return v, err
+}
+
+// RedisPartyQueueMapper 是队伍→整队票映射的 redis 实现。
+type RedisPartyQueueMapper struct {
+	cli *pkredis.Client
+}
+
+// NewRedisPartyQueueMapper 构造队伍票映射存储。
+func NewRedisPartyQueueMapper(cli *pkredis.Client) *RedisPartyQueueMapper {
+	return &RedisPartyQueueMapper{cli: cli}
+}
+
+// GetPartyTicket 实现 biz.PartyQueueMapper。
+func (m *RedisPartyQueueMapper) GetPartyTicket(ctx context.Context, partyID string) (string, error) {
+	v, err := m.cli.Raw().Get(ctx, partyKeyPrefix+partyID).Result()
+	if err == goredis.Nil {
+		return "", nil
+	}
+	return v, err
+}
+
+// SetPartyTicket 实现 biz.PartyQueueMapper。
+func (m *RedisPartyQueueMapper) SetPartyTicket(ctx context.Context, partyID, ticketID string, ttl time.Duration) error {
+	return m.cli.Raw().Set(ctx, partyKeyPrefix+partyID, ticketID, ttl).Err()
+}
+
+// DelPartyTicket 实现 biz.PartyQueueMapper。
+func (m *RedisPartyQueueMapper) DelPartyTicket(ctx context.Context, partyID string) error {
+	return m.cli.Raw().Del(ctx, partyKeyPrefix+partyID).Err()
+}
+
 // NatsEventPublisher 是成局/失败事件的 nats 发布器（biz.MatchEventPublisher 实现）。
 type NatsEventPublisher struct {
 	nc *natsgo.Conn
@@ -107,7 +156,7 @@ func (p *NatsEventPublisher) PublishStarted(ctx context.Context, battleID, match
 
 // PublishFailed 实现 biz.MatchEventPublisher（主题 atlas.event.match.failed）。
 // ticketID 是失败的票据 ID；未成局故 match_id 留空。
-func (p *NatsEventPublisher) PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason string) error {
+func (p *NatsEventPublisher) PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason matcherv1.MatchFailReason) error {
 	payload, err := protojson.Marshal(&matcherv1.MatchFailedEvent{
 		PlayerIds: playerIDs,
 		Reason:    reason,
@@ -117,6 +166,20 @@ func (p *NatsEventPublisher) PublishFailed(ctx context.Context, ticketID string,
 		return fmt.Errorf("infra: 失败事件编码失败: %w", err)
 	}
 	return nats.Publish(ctx, p.nc, consts.MatchFailedTopic(), payload)
+}
+
+// PublishRoster 实现 biz.PartyRosterPublisher（主题 atlas.event.party.roster）。
+func (p *NatsEventPublisher) PublishRoster(ctx context.Context, partyID, leaderID string, playerIDs []string, reason matcherv1.PartyRosterReason) error {
+	payload, err := protojson.Marshal(&matcherv1.PartyRosterEvent{
+		PartyId:   partyID,
+		LeaderId:  leaderID,
+		PlayerIds: playerIDs,
+		Reason:    reason,
+	})
+	if err != nil {
+		return fmt.Errorf("infra: 名册事件编码失败: %w", err)
+	}
+	return nats.Publish(ctx, p.nc, consts.PartyRosterTopic(), payload)
 }
 
 // BattleActorStarter 是 biz.BattleStarter 的实现：
@@ -147,7 +210,8 @@ func (s *BattleActorStarter) Start(ctx context.Context, battleID, matchID string
 	return nil
 }
 
-// NewMatchmakerRuntime 装配 matchmaker redis 运行时（等级相近规则集 + 本地 Placement）。
+// NewMatchmakerRuntime 装配 matchmaker redis 运行时
+// （等级相近灵活组队规则集 + 本地 Placement）。
 func NewMatchmakerRuntime(cli *pkredis.Client) (*matchredis.Runtime, error) {
 	reg := matchmaker.Registry{
 		biz.DefaultMatchmakerName: {
@@ -155,13 +219,18 @@ func NewMatchmakerRuntime(cli *pkredis.Client) (*matchredis.Runtime, error) {
 			RequestTimeout:    2 * time.Minute,
 			AcceptanceTimeout: 0, // 跳过确认阶段
 			RequeuePolicy:     matchmaker.RequeueAll,
-			MatchFunction:     matchfunc.LevelClose{MaxGap: DefaultMaxLevelGap},
+			MatchFunction:     matchfunc.FlexTeams{MaxGap: DefaultMaxLevelGap, MaxSide: DefaultMaxSide},
 			Placement:         LocalPlacement{},
 			FetchSize:         10,
 			TickInterval:      50 * time.Millisecond,
 		},
 	}
 	return matchredis.NewRuntime(cli.Raw(), matchredis.Registry(reg))
+}
+
+// NewMatchmakerParty 装配整队名册引擎（redis Party，容量原子校验）。
+func NewMatchmakerParty(svc matchmaker.Service, cli *pkredis.Client) matchmaker.Party {
+	return matchredis.NewParty(svc, cli.Raw(), matchredis.WithPartyCapacity(biz.DefaultPartyCapacity))
 }
 
 // LocalPlacement 是占位 Placement：对局实例的分配由开局调用
@@ -205,8 +274,8 @@ func (s *Sink) PublishStarted(ctx context.Context, battleID, matchID string, pla
 }
 
 // PublishFailed 实现 biz.MatchEventSink：转发失败事件到内部发布器。
-func (s *Sink) PublishFailed(ctx context.Context, matchID string, playerIDs []string, reason string) error {
-	return s.publisher.PublishFailed(ctx, matchID, playerIDs, reason)
+func (s *Sink) PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason matcherv1.MatchFailReason) error {
+	return s.publisher.PublishFailed(ctx, ticketID, playerIDs, reason)
 }
 
 // Start 实现 biz.BattleStarter：转发开局调用到内部 starter。

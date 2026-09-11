@@ -38,13 +38,19 @@ func (p *PlayerActor) CancelMatch(ctx core.ActorContext, _ *gamev1.CancelMatchAc
 }
 
 // GetMatchStatus 实现 gamev1.PlayerActorServer：查询匹配状态（Ask，轮询兜底）。
+// matched 态回执 battle_id：开局推送丢失后，客户端重登据此恢复加入对局。
 func (p *PlayerActor) GetMatchStatus(ctx core.ActorContext, _ *gamev1.GetMatchStatusActorReq) (*gamev1.MatchStatusActorReply, error) {
 	if p.match == nil {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
-	state, ticketID, matchID, err := p.match.Status(ctx.Context(), p.pid.UID())
+	rep, err := p.match.Status(ctx.Context(), p.pid.UID())
 	if err != nil {
 		return nil, err
 	}
-	return &gamev1.MatchStatusActorReply{State: state, TicketId: ticketID, MatchId: matchID}, nil
+	return &gamev1.MatchStatusActorReply{
+		State:    rep.GetState(),
+		TicketId: rep.GetTicketId(),
+		MatchId:  rep.GetMatchId(),
+		BattleId: rep.GetBattleId(),
+	}, nil
 }

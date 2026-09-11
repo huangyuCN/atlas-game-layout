@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
@@ -30,7 +31,7 @@ func TestKickCrossInstance(t *testing.T) {
 	cliA.OnNotify(func(operation string, payload []byte) {
 		if operation == consts.PushOpKickedOffline {
 			var kn gatewayv1.KickedNotify
-			if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == "logged_in_elsewhere" {
+			if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE {
 				kicked <- struct{}{}
 			}
 		}
@@ -243,7 +244,7 @@ func TestMatchFailedNotifyPush(t *testing.T) {
 	}
 	t.Cleanup(pub.Close)
 	ev, err := protojson.Marshal(&matcherv1.MatchFailedEvent{
-		PlayerIds: []string{"p-1"}, Reason: "timeout", TicketId: "t-9",
+		PlayerIds: []string{"p-1"}, Reason: matcherv1.MatchFailReason_MATCH_FAIL_REASON_TIMEOUT, TicketId: "t-9",
 	})
 	if err != nil {
 		t.Fatalf("事件编码: %v", err)
@@ -254,10 +255,55 @@ func TestMatchFailedNotifyPush(t *testing.T) {
 
 	select {
 	case n := <-notify:
-		if n.GetTicketId() != "t-9" || n.GetReason() != "timeout" {
+		if n.GetTicketId() != "t-9" || n.GetReason() != matcherv1.MatchFailReason_MATCH_FAIL_REASON_TIMEOUT {
 			t.Fatalf("失败通知不符: %+v", n)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("未收到匹配失败通知")
+	}
+}
+
+// TestSessionSweepNotifiesPlayerActor 验证异常下线联动：心跳过期清扫后
+// （未被接管）向 PlayerActor 发 Logout（SESSION_EXPIRED）→ 触发撮合域 OnStop 兜底。
+func TestSessionSweepNotifiesPlayerActor(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+	_, auth := env.newTCPAuthClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	// 模拟心跳超时（把本地会话心跳拨回过期窗口），再手动驱动一次清扫。
+	// 真实环境由 Start 的清扫循环周期驱动。
+	sess, ok := env.sess.LocalSession("p-1")
+	if !ok {
+		t.Fatal("本地会话缺失")
+	}
+	sess.LastHeartbeat = time.Now().Add(-time.Hour)
+
+	if got := env.sess.SweepOnce(ctx); got != 1 {
+		t.Fatalf("过期清扫应移除 1 个会话, got %d", got)
+	}
+	// 路由应已被属主确认删除。
+	if r, err := env.sess.Route(ctx, "p-1"); err != nil || r != nil {
+		t.Fatalf("清扫后路由残留: r=%+v err=%v", r, err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		expiredReason := false
+		for _, lg := range env.mock.logoutMsgs {
+			if lg.GetReason() == gamev1.LogoutReason_LOGOUT_REASON_SESSION_EXPIRED {
+				expiredReason = true
+			}
+		}
+		if expiredReason {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("清扫联动未发 Logout(SESSION_EXPIRED)")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

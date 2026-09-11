@@ -38,9 +38,18 @@ func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginActorReq) (*
 }
 
 // Logout 实现 gamev1.PlayerActorServer（Tell，单向）：令牌校验后停止自身
-// （Locator 移除，集群目录归属释放，OnStop 落库）。
+// （Locator 移除，集群目录归属释放，OnStop 联动撮合域 + 落库）。
+// 异常下线（SESSION_EXPIRED / LOGGED_IN_ELSEWHERE）先做接管裁决：
+// 存在「不同令牌」的游戏侧会话 = 新登录接管本 actor，跳过停止以保护新会话；
+// 无会话（令牌过期）或仍为旧令牌则安全停止。
 func (p *PlayerActor) Logout(ctx core.ActorContext, msg *gamev1.LogoutActorMsg) error {
 	_ = p.svc.Logout(ctx.Context(), p.pid.UID(), msg.GetToken())
+	if msg.GetReason() != gamev1.LogoutReason_LOGOUT_REASON_LOGOUT {
+		cur, err := p.svc.SessionToken(ctx.Context(), p.pid.UID())
+		if err == nil && cur != "" && cur != msg.GetToken() {
+			return nil // 新登录接管：不停止
+		}
+	}
 	ctx.Stop(types.ExitNormal())
 	return nil
 }

@@ -103,5 +103,11 @@ func (h *PlayerHandler) Logout(ctx context.Context, playerID, token string) erro
 	return nil
 }
 
+// SessionToken 实现 biz.PlayerService：读取玩家当前会话令牌（空表示无会话）。
+// 异常下线联动（SESSION_EXPIRED）的接管裁决用：存在「不同令牌」的会话 = 新登录接管。
+func (h *PlayerHandler) SessionToken(ctx context.Context, playerID string) (string, error) {
+	return h.sessions.Get(ctx, playerID)
+}
+
 // 静态保证 PlayerHandler 实现 biz.PlayerService。
 var _ biz.PlayerService = (*PlayerHandler)(nil)

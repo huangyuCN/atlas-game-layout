@@ -62,6 +62,7 @@ type Manager struct {
 	store      Store
 	instanceID string
 	ttl        time.Duration
+	sweptHook  func(swept []SweptSession) // 过期清扫联动钩子（nil = 不联动）
 
 	mu    sync.RWMutex
 	local map[string]*Session // playerID → 本地会话
@@ -203,7 +204,23 @@ func (m *Manager) PlayerByRef(ref string) (string, bool) {
 	return pid, ok
 }
 
-// deleteRouteIfOwned 仅当 redis 路由仍归属本实例的该连接时删除。
+// routeTakenOver 判断路由是否已被其他会话接管（另一实例或本实例新连接）。
+// 路由不存在（TTL 自然过期）不算接管。
+func (m *Manager) routeTakenOver(ctx context.Context, playerID string, connID uint64) bool {
+	r, err := m.store.Get(ctx, playerID)
+	if err != nil || r == nil {
+		return false
+	}
+	if r.InstanceID != m.instanceID {
+		return true
+	}
+	if r.BizConnID != connID && r.BattleConnID != connID {
+		return true
+	}
+	return false
+}
+
+// deleteRouteOwned 仅当路由仍归属本实例的该连接时删除（挤下线清理用）。
 func (m *Manager) deleteRouteIfOwned(ctx context.Context, playerID string, connID uint64) {
 	r, err := m.store.Get(ctx, playerID)
 	if err != nil || r == nil {
@@ -278,7 +295,15 @@ func (m *Manager) PushRaw(playerID string, operation string, payload []byte) err
 	return target.Send(operation, payload)
 }
 
-// SweepOnce 清扫心跳超过 ttl 的过期会话（本地 + redis 同步删除），返回清理数。
+// SweptSession 是一次过期清扫的记录（联动通知用）。
+type SweptSession struct {
+	PlayerID string
+	Token    string // 过期会话的令牌（接管裁决依据）
+}
+
+// SweepOnce 清扫心跳超过 ttl 的过期会话（本地 + redis 同步删除），
+// 返回清理数；对「确认属主且未被新登录接管」的会话回调 SweptHook
+// （异常下线联动撮合域：取消匹配/离队）。
 func (m *Manager) SweepOnce(ctx context.Context) int {
 	deadline := time.Now().Add(-m.ttl)
 	var expired []string
@@ -291,6 +316,7 @@ func (m *Manager) SweepOnce(ctx context.Context) int {
 	m.mu.RUnlock()
 
 	removed := 0
+	var swept []SweptSession
 	for _, id := range expired {
 		// 删除前复核心跳：避免与并发 Bind/Heartbeat 竞争误删。
 		m.mu.Lock()
@@ -301,14 +327,31 @@ func (m *Manager) SweepOnce(ctx context.Context) int {
 			removed++
 		}
 		m.mu.Unlock()
-		// 路由删除同样做属主校验：会话已被新实例接管时保留新路由。
+		// 属主校验：路由被其他会话接管时保留新路由且跳过联动（新会话接管）；
+		// 路由自然过期（TTL 先于清扫）视为无接管，同样联动。
 		connID := uint64(0)
 		if sess != nil && sess.Biz != nil {
 			connID = sess.Biz.ID
 		}
-		m.deleteRouteIfOwned(ctx, id, connID)
+		if !m.routeTakenOver(ctx, id, connID) {
+			m.deleteRouteIfOwned(ctx, id, connID) // 属主路由删除
+			token := ""
+			if sess != nil {
+				token = sess.Token
+			}
+			swept = append(swept, SweptSession{PlayerID: id, Token: token})
+		}
+	}
+	if len(swept) > 0 && m.sweptHook != nil {
+		m.sweptHook(swept)
 	}
 	return removed
+}
+
+// SetSweptHook 设置过期清扫联动钩子（Gateway 注入，向 game PlayerActor 发下线联动）。
+// 仅「未被接管」的会话触发：新登录接管（路由属主变更）时跳过，避免误停新会话的 actor。
+func (m *Manager) SetSweptHook(fn func(swept []SweptSession)) {
+	m.sweptHook = fn
 }
 
 // Start 启动后台心跳清扫循环；ctx 取消时退出。
