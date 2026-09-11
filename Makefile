@@ -8,7 +8,7 @@ SERVICES := gateway game matcher battle
 GO ?= go
 PROTOC ?= protoc
 
-.PHONY: help build lint run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
+.PHONY: help build lint comment-lint run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
 
 help: ## 列出所有目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -23,8 +23,12 @@ build-%: ## 构建单个服务（make build-gateway）
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -o $(BIN_DIR)/$* ./services/$*/cmd
 
-lint: ## 代码规范检查：导出标识符不得以包名开头（go run ./scripts/check-pkgname . scripts/check-pkgname/allowlist.txt）
+lint: ## 代码规范检查：包名前缀 + Go doc 注释规范
 	$(GO) run ./scripts/check-pkgname . scripts/check-pkgname/allowlist.txt
+	$(GO) run ./scripts/go-comment-lint .
+
+comment-lint: ## Go doc 注释规范检查（首词=声明名等，详见 docs/go-comments.md；违规退出码 1）
+	$(GO) run ./scripts/go-comment-lint .
 
 run-%: ## 运行单个服务（make run-gateway）
 	$(GO) run ./services/$*/cmd
