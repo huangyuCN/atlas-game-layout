@@ -6,6 +6,7 @@ package actor
 import (
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/usecase"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
@@ -22,12 +23,19 @@ func (p *PlayerActor) Register(ctx core.ActorContext, req *gamev1.RegisterActorR
 	return reply, nil
 }
 
-// Login 实现 gamev1.PlayerActorServer（D10 会话令牌裁决）：业务裁决成功后
-// 加载聚合根到内存（redis→mongo 三级链路）。
+// Login 实现 gamev1.PlayerActorServer（D10 会话令牌裁决）：首登加载聚合根
+// 到内存（redis→mongo 三级链路）。
+// 重复登录（本 actor 已持聚合根）时复用内存权威态、不重载：在线期间内存比存储
+// 新（定时快照 + 下线落库），重载会用陈旧快照覆盖快照间隙的内存写
+// （如顶号重登丢失刚发放的道具）。
 func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginActorReq) (*gamev1.LoginActorReply, error) {
 	reply, berr := p.svc.Login(ctx.Context(), req)
 	if berr != nil {
 		return nil, berr
+	}
+	if p.player != nil {
+		reply.Player = usecase.PlayerSummary(p.player) // 以内存聚合根为准
+		return reply, nil
 	}
 	player, err := p.store.LoadPlayer(ctx.Context(), req.GetPlayerId())
 	if err != nil {

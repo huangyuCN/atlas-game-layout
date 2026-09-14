@@ -705,3 +705,44 @@ func TestPlayerActorLogoutGuard(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// TestPlayerActorReloginKeepsInMemoryState 验证重复登录的幂等守卫（顶号回归）：
+// 重登复用内存聚合根（在线权威态），不重载存储——快照间隙的内存写（如发放道具）
+// 不被陈旧快照覆盖。回归背景：旧实现重登无条件重载，redis 快照（最多旧 snapTick）
+// 会盖掉未落盘的内存写，玩家刚领的道具丢失。
+func TestPlayerActorReloginKeepsInMemoryState(t *testing.T) {
+	ctx := context.Background()
+	rt, regPID, loginPID, _, _ := newActorEnv(t, 0, 0)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterActorReq{Account: "alice", Password: "pw"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	// 发放道具（仅内存：snapTick=0 无定时快照，存储层没有该数据）。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.GrantItemActorReq{ItemId: 1001, Count: 6}); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+
+	// 重复登录（新令牌顶号重登）：应复用内存权威态。
+	relog, err := rt.Ask(ctx, loginPID, &gamev1.LoginActorReq{PlayerId: "p-test", Password: "pw", Token: "t2"})
+	if err != nil {
+		t.Fatalf("relogin: %v", err)
+	}
+	if got := relog.(*gamev1.LoginActorReply); got.GetPlayer().GetPlayerId() != "p-test" {
+		t.Fatalf("重登回执不符: %+v", got)
+	}
+
+	// 道具不被重载覆盖：背包与重登前内存一致。
+	bp, err := rt.Ask(ctx, loginPID, &gamev1.GetBackpackActorReq{})
+	if err != nil {
+		t.Fatalf("backpack: %v", err)
+	}
+	items := bp.(*gamev1.GetBackpackActorReply).GetItems()
+	if len(items) != 1 || items[0].GetCount() != 6 {
+		t.Fatalf("重登后背包被重载覆盖: %+v", items)
+	}
+}
