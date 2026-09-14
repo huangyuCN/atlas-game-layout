@@ -143,18 +143,18 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 }
 
 // newTCPAuthClient 建立 TCP 业务连接与认证客户端。
-func (e *gwEnv) newTCPAuthClient(t *testing.T) (*tcpt.Client, gatewayv1.GatewayAuthTCPClient) {
+func (e *gwEnv) newTCPAuthClient(t *testing.T) (*tcpt.Client, gatewayv1.GatewayPlayerTCPClient) {
 	t.Helper()
 	cli, err := tcpt.NewClient(e.tcpURL)
 	if err != nil {
 		t.Fatalf("tcp client: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	return cli, gatewayv1.NewGatewayAuthTCPClient(cli)
+	return cli, gatewayv1.NewGatewayPlayerTCPClient(cli)
 }
 
 // newWSClients 建立 WS 连接（单通道形态：认证 + 战斗共用）。
-func (e *gwEnv) newWSClients(t *testing.T) (*wst.Client, gatewayv1.GatewayAuthWSClient, gatewayv1.GatewayBattleWSClient) {
+func (e *gwEnv) newWSClients(t *testing.T) (*wst.Client, gatewayv1.GatewayPlayerWSClient, gatewayv1.GatewayBattleWSClient) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
@@ -163,7 +163,7 @@ func (e *gwEnv) newWSClients(t *testing.T) (*wst.Client, gatewayv1.GatewayAuthWS
 		t.Fatalf("ws client: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	return cli, gatewayv1.NewGatewayAuthWSClient(cli), gatewayv1.NewGatewayBattleWSClient(cli)
+	return cli, gatewayv1.NewGatewayPlayerWSClient(cli), gatewayv1.NewGatewayBattleWSClient(cli)
 }
 
 // TestLoginHeartbeatLogout 验证登录 → 心跳 → 登出的会话闭环。

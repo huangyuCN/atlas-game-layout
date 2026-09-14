@@ -2,11 +2,12 @@
 // versions:
 // - protoc-gen-atlas-tcp v1.0.0
 // - protoc             v5.26.1
-// source: api/gateway/v1/battle.proto
+// source: api/gateway/v1/battle_client.proto
 
 package gatewayv1
 
 import (
+	v1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	lockstep "github.com/huangyuCN/atlas/api/lockstep"
 )
 
@@ -29,7 +30,7 @@ const OperationGatewayBattleSyncFramesTCP = "/gateway.v1.GatewayBattle/SyncFrame
 
 // GatewayBattleTCPClient 定义通过 TCP 调用服务的方法集合。
 type GatewayBattleTCPClient interface {
-	JoinBattle(ctx context.Context, req *JoinBattleRequest) (*JoinBattleReply, error)
+	JoinBattle(ctx context.Context, req *JoinBattleRequest) (*v1.JoinBattleReply, error)
 	SendFrameInput(ctx context.Context, req *SendFrameInputRequest) (*SendFrameInputReply, error)
 	SyncFrames(ctx context.Context, req *lockstep.SyncFrameRequest) (*lockstep.SyncFrameReply, error)
 }
@@ -43,8 +44,8 @@ func NewGatewayBattleTCPClient(cc *tcpt.Client) GatewayBattleTCPClient {
 	return &gatewayBattleTCPClient{cc: cc}
 }
 
-func (c *gatewayBattleTCPClient) JoinBattle(ctx context.Context, in *JoinBattleRequest) (*JoinBattleReply, error) {
-	var out JoinBattleReply
+func (c *gatewayBattleTCPClient) JoinBattle(ctx context.Context, in *JoinBattleRequest) (*v1.JoinBattleReply, error) {
+	var out v1.JoinBattleReply
 	if err := c.cc.Invoke(ctx, OperationGatewayBattleJoinBattleTCP, in, &out); err != nil {
 		return nil, err
 	}
@@ -69,7 +70,7 @@ func (c *gatewayBattleTCPClient) SyncFrames(ctx context.Context, in *lockstep.Sy
 
 // GatewayBattleTCPServer 定义需要由用户实现的服务端接口。
 type GatewayBattleTCPServer interface {
-	JoinBattle(context.Context, *JoinBattleRequest) (*JoinBattleReply, error)
+	JoinBattle(context.Context, *JoinBattleRequest) (*v1.JoinBattleReply, error)
 	SendFrameInput(context.Context, *SendFrameInputRequest) (*SendFrameInputReply, error)
 	// SyncFrames SyncFrames 补帧：断线重连后按帧区间拉取缺失帧（复用 lockstep 协议）。
 	SyncFrames(context.Context, *lockstep.SyncFrameRequest) (*lockstep.SyncFrameReply, error)

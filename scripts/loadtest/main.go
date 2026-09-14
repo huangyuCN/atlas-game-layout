@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
@@ -64,7 +65,7 @@ type player struct {
 
 // battleAPI 是战斗协议客户端最小接口。
 type battleAPI interface {
-	JoinBattle(context.Context, *gatewayv1.JoinBattleRequest) (*gatewayv1.JoinBattleReply, error)
+	JoinBattle(context.Context, *gatewayv1.JoinBattleRequest) (*battlev1.JoinBattleReply, error)
 	SendFrameInput(context.Context, *gatewayv1.SendFrameInputRequest) (*gatewayv1.SendFrameInputReply, error)
 }
 
@@ -75,7 +76,7 @@ func newPlayer(ctx context.Context, tcpAddr, battleAddr, transport string) (*pla
 	if err != nil {
 		return nil, fmt.Errorf("tcp: %w", err)
 	}
-	auth := gatewayv1.NewGatewayAuthTCPClient(tcpCli)
+	auth := gatewayv1.NewGatewayPlayerTCPClient(tcpCli)
 	account := fmt.Sprintf("lt-%s-%d", transport, time.Now().UnixNano())
 	reg, err := auth.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
 	if err != nil {

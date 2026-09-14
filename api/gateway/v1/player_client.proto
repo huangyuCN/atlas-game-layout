@@ -1,4 +1,12 @@
-// gateway 客户端协议（业务通道：tcp/ws 传输）：注册/登录/心跳与挤下线通知。
+// gateway 客户端协议（业务通道 tcp/ws 传输）：玩家注册/登录/心跳/登出
+// （会话生命周期）+ 玩家数据同步 + 挤下线通知。
+//
+// 协议边界约定（api/gateway/v1 是唯一客户端命名空间——客户端 op 的家）：
+//   - 客户端 op：定义在 GatewayXxx 服务（携带 token 鉴权位，gateway 校验
+//     会话并防伪造 player_id 后转发；SDK 只消费 gateway.v1 命名空间）；
+//   - 集群内部方法：定义在域包的 XxxActor 服务（无鉴权位，身份由集群 PID 决定，
+//     生成桩按 service 整体注册——GrantItem 等服务端能力不得出现在客户端面）；
+//   - gateway handler 是两者的转发桥：会话校验 → PID 组装 → actor 请求。
 syntax = "proto3";
 
 package gateway.v1;
@@ -6,6 +14,7 @@ package gateway.v1;
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1";
 
 import "api/common/v1/common.proto";
+import "api/game/v1/player.proto";
 
 // RegisterRequest 注册：账号不存在则创建玩家。
 message RegisterRequest {
@@ -25,6 +34,7 @@ message LoginRequest {
 }
 
 // LoginReply 登录回执：token 用于战斗通道绑定与后续鉴权。
+// 只回 PlayerSummary（登录轻回执）；完整数据经 GetPlayerData 按需同步。
 message LoginReply {
   string player_id = 1;
   string token = 2;
@@ -64,10 +74,25 @@ message KickedNotify {
   KickedReason reason = 1;
 }
 
-// GatewayAuth 是网关认证服务（业务通道协议）。
-service GatewayAuth {
+// PlayerDataRequest 玩家数据同步请求（登录成功后调用一次完成全量对齐）。
+message PlayerDataRequest {
+  string token = 1;      // 登录令牌（会话校验）
+  string player_id = 2;  // 玩家 ID（服务端按会话校验，防伪造）
+}
+
+// PlayerDataReply 玩家数据全量快照：摘要 + 背包（actor 内存聚合根快照）。
+// 未登录调用回 PLAYER_NOT_ONLINE 错误（客户端应先 Login）。
+message PlayerDataReply {
+  common.v1.PlayerSummary player = 1;
+  repeated game.v1.BackpackItem items = 2;
+}
+
+// GatewayPlayer 是客户端玩家服务（gateway 转发，业务通道协议）：
+// 会话生命周期（注册/登录/心跳/登出）+ 玩家数据同步，均携带 token 鉴权。
+service GatewayPlayer {
   rpc Register (RegisterRequest) returns (RegisterReply);
   rpc Login (LoginRequest) returns (LoginReply);
   rpc Heartbeat (HeartbeatRequest) returns (HeartbeatReply);
   rpc Logout (LogoutRequest) returns (LogoutReply);
+  rpc GetPlayerData (PlayerDataRequest) returns (PlayerDataReply);
 }

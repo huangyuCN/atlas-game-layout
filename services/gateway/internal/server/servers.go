@@ -64,13 +64,13 @@ func NewUDPServer(cfg *conf.Bootstrap) (*udpt.Server, error) {
 }
 
 // RegisterGatewayHandlers 将统一 handler 注册到各协议 Server（按用途绑定，D6）：
-// 业务通道（tcp/ws）注册认证协议，战斗通道（ws/kcp/udp）注册战斗协议。
+// 业务通道（tcp/ws）注册玩家/匹配协议，战斗通道（ws/kcp/udp）注册战斗协议。
 func RegisterGatewayHandlers(tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server, g *Gateway) error {
-	if err := gatewayv1.RegisterGatewayAuthTCPServer(tcpSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 TCP 认证协议失败: %w", err)
+	if err := gatewayv1.RegisterGatewayPlayerTCPServer(tcpSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 TCP 玩家协议失败: %w", err)
 	}
-	if err := gatewayv1.RegisterGatewayAuthWSServer(wsSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 WS 认证协议失败: %w", err)
+	if err := gatewayv1.RegisterGatewayPlayerWSServer(wsSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 WS 玩家协议失败: %w", err)
 	}
 	if err := gatewayv1.RegisterGatewayMatchTCPServer(tcpSrv, g); err != nil {
 		return fmt.Errorf("server: 注册 TCP 匹配协议失败: %w", err)

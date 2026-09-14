@@ -142,10 +142,19 @@ game/battle 的业务 actor（`services/*/internal/actor/`）采用**按域分�
 
 ## api/ — 协议定义
 
-`api/<svc>/v1/*.proto` 是协议事实源（按服务分目录：gateway/game/matcher/battle/common/error）：
+`api/<svc>/v1/*.proto` 是协议事实源（按服务分目录：gateway/game/matcher/battle/common/error）。
+
+**协议边界约定（一句话规则）**：
+
+| 协议面 | 位置 | 服务命名 | 特征 |
+|---|---|---|---|
+| 客户端 op（SDK 消费） | `api/gateway/v1/*_client.proto`（唯一客户端命名空间） | `GatewayXxx` | 携带 token 鉴权位；gateway 校验会话并防伪造 player_id 后转发 |
+| 集群内部方法 | 域包 `*_actor.proto` | `XxxActor` | 无鉴权位，身份由集群 PID 决定；服务端能力不得出现在客户端面 |
+| 管理面（grpc/http） | 域包（如 `player.proto`） | 与域同名 | 运维/活动渠道，google.api.http 注解 |
 
 - 改协议 → `make proto` → 生成桩落在同目录（.pb.go / _grpc.pb.go / 各传输生成代码 / openapi）；
 - 新增业务接口流程：改 proto → `make proto` → 在 `services/<svc>/internal/biz/handler/` 实现生成的服务接口 → 在 `assemble` 挂载；
+- **客户端接口只定义在 `api/gateway/v1/*_client.proto` 的 `GatewayXxx` 服务**（gateway handler 只做转发投影，无自有业务契约）；matcher/battle/game 域包只保留服务端面（域类型/枚举/事件/`XxxActor`/管理面），依赖单向：`gateway.v1` 可引 `game.v1`/`matcher.v1`/`battle.v1`/`common.v1`，反向禁止；推送消息（Notify）按连接路由、只能住在客户端面文件；事件（Event）住服务间契约文件；
 - **手写代码与生成代码同目录**：生成文件有明确生成头（Code generated），不得手改；手写文件注释用中文。
 
 ## lib/ — 代码级公共定义

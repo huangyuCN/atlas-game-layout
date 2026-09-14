@@ -31,7 +31,7 @@ func TestE2ETCPAuth(t *testing.T) {
 		t.Fatalf("tcp client: %v", err)
 	}
 	defer cli.Close()
-	auth := gatewayv1.NewGatewayAuthTCPClient(cli)
+	auth := gatewayv1.NewGatewayPlayerTCPClient(cli)
 	token, playerID := loginFlow(t, ctx, auth)
 	logoutFlow(t, ctx, auth, playerID, token)
 }
@@ -52,7 +52,7 @@ func TestE2EWSAuth(t *testing.T) {
 		t.Fatalf("ws client: %v", err)
 	}
 	defer cli.Close()
-	auth := gatewayv1.NewGatewayAuthWSClient(cli)
+	auth := gatewayv1.NewGatewayPlayerWSClient(cli)
 	token, playerID := loginFlow(t, ctx, auth)
 	seedBattle(t, ctx, battleSvc, "b-1", playerID)
 
@@ -195,7 +195,7 @@ func loginViaTCP(t *testing.T, ctx context.Context, tcpURL string) (string, stri
 		t.Fatalf("tcp client: %v", err)
 	}
 	defer cli.Close()
-	token, playerID := loginFlow(t, ctx, gatewayv1.NewGatewayAuthTCPClient(cli))
+	token, playerID := loginFlow(t, ctx, gatewayv1.NewGatewayPlayerTCPClient(cli))
 	return token, playerID
 }
 

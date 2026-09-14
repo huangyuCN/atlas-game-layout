@@ -38,7 +38,7 @@ func TestE2ERegisterLogin(t *testing.T) {
 		t.Fatalf("tcp client: %v", err)
 	}
 	defer cli.Close()
-	auth := gatewayv1.NewGatewayAuthTCPClient(cli)
+	auth := gatewayv1.NewGatewayPlayerTCPClient(cli)
 	account := testAccount(t, "alice")
 
 	// 注册。
@@ -111,7 +111,7 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 		t.Fatalf("tcp A: %v", err)
 	}
 	defer cliA.Close()
-	authA := gatewayv1.NewGatewayAuthTCPClient(cliA)
+	authA := gatewayv1.NewGatewayPlayerTCPClient(cliA)
 	account := testAccount(t, "bob")
 
 	regA, err := authA.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
@@ -139,7 +139,7 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 		t.Fatalf("tcp B: %v", err)
 	}
 	defer cliB.Close()
-	authB := gatewayv1.NewGatewayAuthTCPClient(cliB)
+	authB := gatewayv1.NewGatewayPlayerTCPClient(cliB)
 	loginB, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.GetPlayerId(), Password: "pw"})
 	if err != nil {
 		t.Fatalf("B 登录: %v", err)

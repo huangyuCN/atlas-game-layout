@@ -4,6 +4,8 @@
 - 状态：已评审（方向经用户确认：PlayerActor 转发 / 失败推送 / 下线自动取消 / 状态枚举化 / 组队后置）
 - 关联：`scripts/e2e/main.go` 第 7 行注释「匹配经 matcher gRPC 直连（v1 简化）」的退役
 
+
+> **演进注记（2026-09-14）**：客户端协议已「归域」——gateway 不再持有业务契约，客户端面迁入域包 `*_client.proto`（GatewayXxx 服务），客户端 op 现统一收敛在 `gateway.v1` 的 `GatewayXxx` 服务（/gateway.v1.GatewayPlayer|GatewayMatch|GatewayBattle/*，唯一客户端命名空间 api/gateway/v1），op 路由键随之变化。历史正文保留原貌。
 ## 1. 背景与现状
 
 matcher 服务内核已是生产形态（redis 撮合引擎多实例安全、幂等结算、NATS 事件、开局懒激活），

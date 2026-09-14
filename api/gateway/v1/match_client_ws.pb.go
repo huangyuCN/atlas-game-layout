@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-atlas-ws v1.0.0
 // - protoc             v5.26.1
-// source: api/gateway/v1/matcher.proto
+// source: api/gateway/v1/match_client.proto
 
 package gatewayv1
 

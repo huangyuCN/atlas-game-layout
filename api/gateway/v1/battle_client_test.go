@@ -3,6 +3,7 @@ package gatewayv1
 import (
 	"testing"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -32,9 +33,9 @@ func TestSendFrameInputRoundtrip(t *testing.T) {
 	}
 }
 
-// TestJoinBattleReplyCarriesSnapshot 校验加入战斗回执携带断线重连所需字段。
+// TestJoinBattleReplyCarriesSnapshot 校验加入战斗回执（复用 battle.v1 actor 回执）携带断线重连所需字段。
 func TestJoinBattleReplyCarriesSnapshot(t *testing.T) {
-	in := &JoinBattleReply{
+	in := &battlev1.JoinBattleReply{
 		Meta:         &locksteppb.SessionMeta{SessionId: "b-0001", MaxPlayers: 2},
 		CurrentFrame: 42,
 		Snapshot:     &locksteppb.SnapshotMeta{FrameId: 40, StorageKey: "snap/b-0001/40"},
@@ -43,7 +44,7 @@ func TestJoinBattleReplyCarriesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("protojson.Marshal 失败: %v", err)
 	}
-	var out JoinBattleReply
+	var out battlev1.JoinBattleReply
 	if err := protojson.Unmarshal(b, &out); err != nil {
 		t.Fatalf("protojson.Unmarshal 失败: %v", err)
 	}

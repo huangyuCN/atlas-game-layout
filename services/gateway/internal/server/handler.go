@@ -276,7 +276,7 @@ func (g *Gateway) Heartbeat(ctx context.Context, req *gatewayv1.HeartbeatRequest
 
 // JoinBattle 加入战斗：令牌校验 → battle actor 裁决参战资格并回执
 // 会话元信息/当前帧/快照（M7）→ 绑定战斗通道。
-func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleRequest) (*gatewayv1.JoinBattleReply, error) {
+func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleRequest) (*battlev1.JoinBattleReply, error) {
 	if _, err := g.playerCall(ctx, req.GetPlayerId(), req.GetToken(), "加入战斗"); err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (g *Gateway) JoinBattle(ctx context.Context, req *gatewayv1.JoinBattleReque
 	if _, err := g.sess.Bind(ctx, req.GetPlayerId(), conn, session.ChannelBattle, req.GetToken()); err != nil {
 		return nil, errorv1.ErrInternal("战斗通道绑定失败")
 	}
-	return &gatewayv1.JoinBattleReply{
+	return &battlev1.JoinBattleReply{
 		Meta:         reply.GetMeta(),
 		CurrentFrame: reply.GetCurrentFrame(),
 		Snapshot:     reply.GetSnapshot(),

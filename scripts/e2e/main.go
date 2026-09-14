@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
@@ -51,8 +52,13 @@ type matchAPI interface {
 
 // battleAPI 是战斗协议客户端最小接口（KCP/WS 生成客户端满足）。
 type battleAPI interface {
-	JoinBattle(context.Context, *gatewayv1.JoinBattleRequest) (*gatewayv1.JoinBattleReply, error)
+	JoinBattle(context.Context, *gatewayv1.JoinBattleRequest) (*battlev1.JoinBattleReply, error)
 	SendFrameInput(context.Context, *gatewayv1.SendFrameInputRequest) (*gatewayv1.SendFrameInputReply, error)
+}
+
+// playerDataAPI 是玩家数据协议客户端最小接口（TCP/WS 生成客户端满足）。
+type playerDataAPI interface {
+	GetPlayerData(context.Context, *gatewayv1.PlayerDataRequest) (*gatewayv1.PlayerDataReply, error)
 }
 
 // closer 是可关闭连接的最小接口（模拟杀进程用）。
@@ -62,12 +68,13 @@ type closer interface {
 
 // player 是一端客户端：认证通道 + 战斗通道 + 推送收集。
 type player struct {
-	id     string
-	token  string
-	auth   authAPI
-	match  matchAPI
-	battle battleAPI
-	conns  []closer // 底层连接（disconnect 模拟杀进程用）
+	id         string
+	token      string
+	auth       authAPI
+	match      matchAPI
+	battle     battleAPI
+	playerData playerDataAPI
+	conns      []closer // 底层连接（disconnect 模拟杀进程用）
 
 	started chan *gatewayv1.MatchStartedNotify
 	end     chan *gatewayv1.BattleEndNotify
@@ -140,8 +147,9 @@ func newDualPlayer(ctx context.Context, tcpAddr, kcpAddr string) (*player, error
 	}
 	p := newPlayer("")
 	p.conns = append(p.conns, tcpCli, kcpCli)
-	p.auth = gatewayv1.NewGatewayAuthTCPClient(tcpCli)
+	p.auth = gatewayv1.NewGatewayPlayerTCPClient(tcpCli)
 	p.match = gatewayv1.NewGatewayMatchTCPClient(tcpCli)
+	p.playerData = gatewayv1.NewGatewayPlayerTCPClient(tcpCli)
 	p.battle = gatewayv1.NewGatewayBattleKCPClient(kcpCli)
 	// 开局通知在绑定战斗通道前走业务通道（回退），帧广播走战斗通道。
 	tcpCli.OnNotify(p.watch)
@@ -157,8 +165,9 @@ func newSinglePlayer(ctx context.Context, wsAddr string) (*player, error) {
 	}
 	p := newPlayer("")
 	p.conns = append(p.conns, wsCli)
-	p.auth = gatewayv1.NewGatewayAuthWSClient(wsCli)
+	p.auth = gatewayv1.NewGatewayPlayerWSClient(wsCli)
 	p.match = gatewayv1.NewGatewayMatchWSClient(wsCli)
+	p.playerData = gatewayv1.NewGatewayPlayerWSClient(wsCli)
 	p.battle = gatewayv1.NewGatewayBattleWSClient(wsCli)
 	wsCli.OnNotify(p.watch)
 	return p, nil
@@ -188,7 +197,15 @@ func (p *player) registerLogin(ctx context.Context, step byte) error {
 	}
 	p.id = login.GetPlayerId()
 	p.token = login.GetToken()
-	fmt.Printf("[%c] 注册+登录 ok（player=%s）\n", 'A'+step, p.id)
+	// 登录后全量数据同步（GetPlayerData：摘要 + 背包，登录轻回执的按需补充）。
+	synced, err := p.playerData.GetPlayerData(ctx, &gatewayv1.PlayerDataRequest{Token: p.token, PlayerId: p.id})
+	if err != nil {
+		return fmt.Errorf("数据同步失败: %w", err)
+	}
+	if synced.GetPlayer().GetPlayerId() != p.id {
+		return fmt.Errorf("数据同步回执不符: %s != %s", synced.GetPlayer().GetPlayerId(), p.id)
+	}
+	fmt.Printf("[%c] 注册+登录+数据同步 ok（player=%s）\n", 'A'+step, p.id)
 	return nil
 }
 

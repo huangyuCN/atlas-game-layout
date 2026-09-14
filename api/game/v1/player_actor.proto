@@ -22,7 +22,8 @@ service PlayerActor {
   // 匹配域三方法（EnterMatchQueue/CancelMatch/GetMatchStatus）是业务所有权面：
   // 身份由集群 PID 决定、匹配属性由聚合根权威填充（客户端不参与上报）。
   // 客户端入口是同语义投影 gateway.v1.GatewayMatch（带 token 鉴权 + 失败推送），
-  // 见 api/gateway/v1/matcher.proto 头注释——两份契约分属两个信任边界，勿合并。
+  // 见 api/gateway/v1/match_client.proto 头注释——客户端面（GatewayXxx 服务，
+  // 统一住 api/gateway/v1）与集群内部面（XxxActor 服务）分属两个信任边界，勿合并。
   // EnterMatchQueue 入队匹配（Ask）：匹配属性由聚合根权威填充，客户端只选规则集。
   rpc EnterMatchQueue (EnterMatchQueueActorReq) returns (EnterMatchQueueActorReply);
   // CancelMatch 取消匹配（Ask）：未在队则幂等回执 canceled=false。

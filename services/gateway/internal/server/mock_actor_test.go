@@ -115,6 +115,14 @@ func (m *mockActorRuntime) Ask(_ context.Context, pid types.PID, req any, _ ...c
 		}, nil
 	case *gamev1.QueuePartyActorReq:
 		return &gamev1.QueuePartyActorReply{TicketId: "t-party-1"}, nil
+	case *gamev1.GetPlayerActorReq:
+		return &gamev1.GetPlayerActorReply{
+			Player: &commonv1.PlayerSummary{PlayerId: pid.UID(), Nickname: "mock", Level: 7},
+		}, nil
+	case *gamev1.GetBackpackActorReq:
+		return &gamev1.GetBackpackActorReply{
+			Items: []*gamev1.BackpackItem{{ItemId: 1001, Count: 6}},
+		}, nil
 	case *battlev1.CreateBattleRequest:
 		return &battlev1.CreateBattleReply{BattleId: pid.UID()}, nil
 	default:

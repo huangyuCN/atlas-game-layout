@@ -1,12 +1,13 @@
-// gateway 匹配协议（业务通道：tcp/ws 传输）：入队/取消/状态查询。
-// 入队只需规则集名——匹配属性由 game PlayerActor 从聚合根权威填充（反作弊）；
-// MatchFailedNotify 是服务端推送（失败/超时/取消），与 MatchStartedNotify 对齐。
+// gateway 匹配协议（业务通道 tcp/ws 传输）：
+// 单人匹配入队/取消/状态查询 + 灵活组队（1..N 人）+ 匹配/名册服务端推送。
 //
-// 与 game.v1.PlayerActor 的匹配三方法是「同一业务在两个边界上的投影」而非重复：
-// 本文件是客户端协议面（携带会话 token 鉴权字段；推送消息按连接路由、只能住在
-// gateway 包；SDK 只消费 gateway.v1 命名空间）；actor 版无鉴权位（身份由集群 PID
-// 决定）、属性由服务端权威填充。生成桩按 service 整体注册——直接暴露 PlayerActor
-// 会使 GrantItem 等服务端能力变成客户端可调 op，故客户端入口只挑这三个方法。
+// 协议边界约定（客户端 op 统一住 api/gateway/v1，与 player_client.proto 一致）：
+//   - 客户端 op 定义在 GatewayXxx 服务（携带 token 鉴权位）；
+//   - 撮合引擎内部契约与事件在 api/matcher/v1（被本文件单向引用）。
+//
+// 与 Matchmaker 的撮合契约是「同一业务在两个边界上的投影」而非重复：
+// 入队只需规则集名——匹配属性由 game PlayerActor 从聚合根权威填充（反作弊）；
+// 推送消息（Notify）按连接路由、只能住在客户端面。
 syntax = "proto3";
 
 package gateway.v1;
@@ -90,6 +91,16 @@ message PartyQueueReply {
   string ticket_id = 1;
 }
 
+// ---- 服务端推送（按连接路由，客户端面专属）----
+
+// MatchStartedNotify 服务端推送：匹配成功开局通知（含 battle 实例地址）。
+message MatchStartedNotify {
+  string match_id = 1;
+  string battle_id = 2;
+  repeated string player_ids = 3;
+  string endpoint = 4;
+}
+
 // MatchFailedNotify 服务端推送：匹配失败/超时/取消通知。
 message MatchFailedNotify {
   string ticket_id = 1;
@@ -104,7 +115,8 @@ message PartyRosterNotify {
   matcher.v1.PartyRosterReason reason = 4;
 }
 
-// GatewayMatch 是网关匹配服务（业务通道协议）：单人匹配 + 灵活组队。
+// GatewayMatch 是客户端匹配服务（client 契约统一住 game.v1，撮合引擎内部契约在 api/matcher/v1）（gateway 转发，业务通道协议）：
+// 单人匹配 + 灵活组队，均携带 token 鉴权。
 service GatewayMatch {
   rpc QueueMatch (MatchQueueRequest) returns (MatchQueueReply);
   rpc CancelMatch (MatchCancelRequest) returns (MatchCancelReply);

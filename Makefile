@@ -62,8 +62,9 @@ PROTO_INC := -I. -Ithird_party
 ATLAS_BIN ?= ../atlas/bin
 ATLAS_DIR ?= $(dir $(ATLAS_BIN))
 API_SERVICE_PROTOS := api/game/v1/player.proto api/matcher/v1/matcher.proto api/battle/v1/battle.proto
-API_GATEWAY_PROTOS := api/gateway/v1/auth.proto api/gateway/v1/battle.proto
-API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_GATEWAY_PROTOS) api/gateway/v1/matcher.proto
+# 客户端面协议（唯一客户端命名空间 = api/gateway/v1）：player/match 走业务通道 tcp+ws；battle 走战斗通道 ws+kcp+udp。
+API_CLIENT_PROTOS := api/gateway/v1/player_client.proto api/gateway/v1/match_client.proto api/gateway/v1/battle_client.proto
+API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_CLIENT_PROTOS)
 
 .PHONY: proto proto-tools
 
@@ -100,13 +101,13 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
 		--atlas-ws_out=. --atlas-ws_opt=paths=source_relative \
-		api/gateway/v1/matcher.proto
+		api/gateway/v1/player_client.proto api/gateway/v1/match_client.proto
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
-		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
+		--atlas-ws_out=. --atlas-ws_opt=paths=source_relative \
 		--atlas-udp_out=. --atlas-udp_opt=paths=source_relative \
 		--atlas-kcp_out=. --atlas-kcp_opt=paths=source_relative \
-		--atlas-ws_out=. --atlas-ws_opt=paths=source_relative \
-		$(API_GATEWAY_PROTOS)
+		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
+		api/gateway/v1/battle_client.proto
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-errors_out=. --atlas-errors_opt=paths=source_relative,biz_code_key=biz_code,biz_reason_key=biz_reason \
 		api/error/v1/errors.proto

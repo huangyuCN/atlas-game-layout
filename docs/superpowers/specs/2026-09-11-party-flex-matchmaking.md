@@ -4,6 +4,8 @@
 - 状态：方向已确认（灵活 1-N 人 / 引擎名册 + PlayerActor 引用 / 成员变更推送 / 引擎原子性本期修）
 - 关联：`2026-09-11-matcher-entry-production.md`（匹配入口生产化的延续）
 
+
+> **演进注记（2026-09-14）**：客户端协议已「归域」——gateway 不再持有业务契约，客户端面迁入域包 `*_client.proto`（GatewayXxx 服务），客户端 op 现统一收敛在 `gateway.v1` 的 `GatewayXxx` 服务（/gateway.v1.GatewayPlayer|GatewayMatch|GatewayBattle/*，唯一客户端命名空间 api/gateway/v1），op 路由键随之变化。历史正文保留原貌。
 ## 1. 语义定义（核心）
 
 - **队伍（party）**：1..N 人的组队单元（N 为规则集容量上限，本期默认 5，可配置）。

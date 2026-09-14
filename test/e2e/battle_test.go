@@ -45,7 +45,7 @@ func newBattleClient(t *testing.T, ctx context.Context, gw *gwassemble.Gateway) 
 		t.Fatalf("ws client: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	token, playerID := loginFlow(t, ctx, gatewayv1.NewGatewayAuthWSClient(cli))
+	token, playerID := loginFlow(t, ctx, gatewayv1.NewGatewayPlayerWSClient(cli))
 	c := &battleClient{
 		cli:      cli,
 		battle:   gatewayv1.NewGatewayBattleWSClient(cli),
@@ -81,10 +81,10 @@ func (c *battleClient) watchNotifies() {
 }
 
 // joinBattle 加入战斗（战斗 actor 懒激活期间重试）。
-func (c *battleClient) joinBattle(t *testing.T, ctx context.Context, battleID string) *gatewayv1.JoinBattleReply {
+func (c *battleClient) joinBattle(t *testing.T, ctx context.Context, battleID string) *battlev1.JoinBattleReply {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	var lastJoin *gatewayv1.JoinBattleReply
+	var lastJoin *battlev1.JoinBattleReply
 	var lastErr error
 	for time.Now().Before(deadline) {
 		join, err := c.battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{
@@ -394,7 +394,7 @@ func newBattleClientWithToken(t *testing.T, ctx context.Context, gw *gwassemble.
 		t.Fatalf("重连 ws client: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	auth := gatewayv1.NewGatewayAuthWSClient(cli)
+	auth := gatewayv1.NewGatewayPlayerWSClient(cli)
 	_, err = auth.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: prev.playerID, Token: prev.token, Ts: 1})
 	if err != nil {
 		t.Fatalf("重连心跳: %v", err)
