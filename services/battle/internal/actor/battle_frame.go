@@ -1,5 +1,5 @@
-// 帧同步/结算域：FrameInput（输入转发）+ onFrameResult/checkSettle（帧广播处理与
-// 结算）+ 帧协议辅助（主题/键/元信息编码）。实现 BattleActorServer 接口的帧部分。
+// 帧同步/结算域：SendFrameInput（输入转发）+ onFrameResult/checkSettle（帧广播处理与
+// 结算）+ 帧协议辅助（主题/键/元信息编码）。实现 BattleServiceServer 接口的帧部分。
 
 package actor
 
@@ -20,22 +20,27 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
 )
 
-// FrameInput 实现 battlev1.BattleActorServer：帧输入转发 lockstep 会话
-// （非参战玩家输入静默丢弃，与现状一致）。
-func (b *BattleActor) FrameInput(ctx core.ActorContext, req *battlev1.FrameInputReq) (*battlev1.FrameInputReply, error) {
-	if _, ok := b.players[req.GetPlayerId()]; !ok {
-		return &battlev1.FrameInputReply{}, nil
+// SendFrameInput 实现 battlev1.BattleServiceServer：帧输入转发 lockstep 会话。
+// 输入者身份由投递 sender 注入（消息体无身份字段）；非参战玩家输入静默丢弃
+// （与现状一致）。
+func (b *BattleActor) SendFrameInput(ctx core.ActorContext, req *battlev1.FrameInputReq) error {
+	playerID, err := b.senderPlayer(ctx, "帧输入")
+	if err != nil {
+		return err
+	}
+	if _, ok := b.players[playerID]; !ok {
+		return nil
 	}
 	in := req.GetInput()
-	err := b.rt.Tell(ctx.Context(), b.sessionPID, lockstep.PlayerInput{
-		Player:  lockstep.PlayerID(req.GetPlayerId()),
+	err = b.rt.Tell(ctx.Context(), b.sessionPID, lockstep.PlayerInput{
+		Player:  lockstep.PlayerID(playerID),
 		Frame:   lockstep.FrameID(in.GetFrameId()),
 		Payload: in.GetPayload(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("actor: 帧输入失败: %w", err)
+		return fmt.Errorf("actor: 帧输入失败: %w", err)
 	}
-	return &battlev1.FrameInputReply{}, nil
+	return nil
 }
 
 // onFrameResult 帧广播到达（本地类型路由注册项）：下发客户端 + 胜负检查与结算。

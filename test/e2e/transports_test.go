@@ -9,14 +9,12 @@ import (
 	"testing"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	kcpt "github.com/huangyuCN/atlas/transport/kcp"
-	tcpt "github.com/huangyuCN/atlas/transport/tcp"
-	udpt "github.com/huangyuCN/atlas/transport/udp"
-	wst "github.com/huangyuCN/atlas/transport/websocket"
+	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 )
 
-// TestE2ETCPAuth 验证业务通道（tcp）：注册 → 登录 → 心跳 → 登出。
+// TestE2ETCPAuth 验证业务通道（tcp，SDK 会话驱动）：注册 → 登录 → 心跳 → 登出。
 func TestE2ETCPAuth(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
@@ -26,17 +24,12 @@ func TestE2ETCPAuth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cli, err := tcpt.NewClient(gw.TCPURL)
-	if err != nil {
-		t.Fatalf("tcp client: %v", err)
-	}
-	defer cli.Close()
-	auth := gatewayv1.NewGatewayPlayerTCPClient(cli)
-	token, playerID := loginFlow(t, ctx, auth)
-	logoutFlow(t, ctx, auth, playerID, token)
+	sess, _ := dialBizSession(t, gw.TCPURL)
+	loginFlow(t, ctx, sess)
+	logoutFlow(t, ctx, sess)
 }
 
-// TestE2EWSAuth 验证单通道形态（ws）：认证与战斗共用一条连接。
+// TestE2EWSAuth 验证单通道形态（SDK ws 单通道：认证与战斗共用一条连接）。
 func TestE2EWSAuth(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
@@ -47,27 +40,22 @@ func TestE2EWSAuth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cli, err := wst.NewClient(ctx, gw.WSURL)
-	if err != nil {
-		t.Fatalf("ws client: %v", err)
-	}
-	defer cli.Close()
-	auth := gatewayv1.NewGatewayPlayerWSClient(cli)
-	token, playerID := loginFlow(t, ctx, auth)
-	seedBattle(t, ctx, battleSvc, "b-1", playerID)
+	sess, cli := dialWSSession(t, gw.WSURL)
+	loginFlow(t, ctx, sess)
+	seedBattle(t, ctx, battleSvc, "b-1", sess.PlayerID())
 
-	// 战斗协议绑定（单通道回退：同一 ws 连接）。
-	battle := gatewayv1.NewGatewayBattleWSClient(cli)
-	join, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: token, PlayerId: playerID, BattleId: "b-1"})
+	// 战斗 op 经同一连接透传（连接绑定身份）。
+	battle := battlev1.NewBattleServiceClient(cli)
+	join, err := battle.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("JoinBattle: %v", err)
 	}
 	if join == nil {
-		t.Fatal("ws 战斗绑定回执 ok=false")
+		t.Fatal("ws 战斗绑定回执为空")
 	}
 }
 
-// TestE2EKCPBattle 验证战斗通道（kcp）：tcp 登录 + kcp 令牌快速绑定。
+// TestE2EKCPBattle 验证战斗通道（kcp）：tcp 登录 + kcp 帧会话槽凭据绑定。
 func TestE2EKCPBattle(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
@@ -81,22 +69,18 @@ func TestE2EKCPBattle(t *testing.T) {
 	token, playerID := loginViaTCP(t, ctx, gw.TCPURL)
 	seedBattle(t, ctx, battle, "b-1", playerID)
 
-	cli, err := kcpt.NewClient(gw.KCPURL)
-	if err != nil {
-		t.Fatalf("kcp client: %v", err)
-	}
-	defer cli.Close()
-	bcli := gatewayv1.NewGatewayBattleKCPClient(cli)
-	join, err := bcli.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: token, PlayerId: playerID, BattleId: "b-1"})
+	cli := dialBattleChannel(t, sdkclient.DialKCP, gw.KCPURL, token)
+	bcli := battlev1.NewBattleServiceClient(cli)
+	join, err := bcli.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("kcp JoinBattle: %v", err)
 	}
 	if join == nil {
-		t.Fatal("kcp 战斗绑定回执 ok=false")
+		t.Fatal("kcp 战斗绑定回执为空")
 	}
 }
 
-// TestE2EUDPBattle 验证战斗通道（udp）：tcp 登录 + udp 令牌快速绑定。
+// TestE2EUDPBattle 验证战斗通道（udp）：tcp 登录 + udp 帧会话槽凭据绑定。
 func TestE2EUDPBattle(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
@@ -110,18 +94,14 @@ func TestE2EUDPBattle(t *testing.T) {
 	token, playerID := loginViaTCP(t, ctx, gw.TCPURL)
 	seedBattle(t, ctx, battle, "b-1", playerID)
 
-	cli, err := udpt.NewClient(gw.UDPURL)
-	if err != nil {
-		t.Fatalf("udp client: %v", err)
-	}
-	defer cli.Close()
-	bcli := gatewayv1.NewGatewayBattleUDPClient(cli)
-	join, err := bcli.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: token, PlayerId: playerID, BattleId: "b-1"})
+	cli := dialBattleChannel(t, sdkclient.DialUDP, gw.UDPURL, token)
+	bcli := battlev1.NewBattleServiceClient(cli)
+	join, err := bcli.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("udp JoinBattle: %v", err)
 	}
 	if join == nil {
-		t.Fatal("udp 战斗绑定回执 ok=false")
+		t.Fatal("udp 战斗绑定回执为空")
 	}
 }
 
@@ -153,50 +133,89 @@ func TestE2EHTTPHealth(t *testing.T) {
 	}
 }
 
-// authClient 是认证客户端的最小公共接口（tcp/ws 生成客户端满足）。
-type authClient interface {
-	Register(context.Context, *gatewayv1.RegisterRequest) (*gatewayv1.RegisterReply, error)
-	Login(context.Context, *gatewayv1.LoginRequest) (*gatewayv1.LoginReply, error)
-	Heartbeat(context.Context, *gatewayv1.HeartbeatRequest) (*gatewayv1.HeartbeatReply, error)
-	Logout(context.Context, *gatewayv1.LogoutRequest) (*gatewayv1.LogoutReply, error)
+// dialBizSession 拨号 TCP 业务通道并绑定 SDK 会话（返回会话与底层客户端，推送订阅用）。
+func dialBizSession(t *testing.T, tcpURL string, opts ...sdkclient.Option) (*sdkclient.Session, *sdkclient.Client) {
+	t.Helper()
+	sess := sdkclient.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
+	cli, err := sdkclient.Dial(tcpURL, append(testDialOpts(sess), opts...)...)
+	if err != nil {
+		t.Fatalf("tcp 拨号: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	sess.Bind(cli)
+	return sess, cli
 }
 
-// loginFlow 跑注册 → 登录 → 心跳（不登出），返回令牌与玩家 ID（战斗通道绑定用）。
-func loginFlow(t *testing.T, ctx context.Context, auth authClient) (string, string) {
+// dialWSSession 拨号 WS 单通道并绑定 SDK 会话（业务与战斗共用连接）。
+func dialWSSession(t *testing.T, wsURL string, opts ...sdkclient.Option) (*sdkclient.Session, *sdkclient.Client) {
+	t.Helper()
+	sess := sdkclient.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
+	cli, err := sdkclient.DialWS(wsURL, "", append(testDialOpts(sess), opts...)...)
+	if err != nil {
+		t.Fatalf("ws 拨号: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	sess.Bind(cli)
+	return sess, cli
+}
+
+// dialBattleChannel 拨号战斗通道（KCP/UDP）并注入帧会话槽凭据提供者。
+func dialBattleChannel(t *testing.T, dial func(string, ...sdkclient.Option) (*sdkclient.Client, error), addr, token string) *sdkclient.Client {
+	t.Helper()
+	cli, err := dial(addr, sdkclient.WithSessionTokenProvider(func() string { return token }))
+	if err != nil {
+		t.Fatalf("战斗通道拨号: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	return cli
+}
+
+// testDialOpts 测试客户端公共参数：传输保活 + 会话凭据装配（会话心跳关闭，
+// 心跳语义由用例显式 Invoke 验证）。
+func testDialOpts(sess *sdkclient.Session) []sdkclient.Option {
+	return append([]sdkclient.Option{sdkclient.WithHeartbeatInterval(5 * time.Second)}, sess.ChannelOptions()...)
+}
+
+// loginFlow 跑注册 → 登录 → 心跳（不登出）；凭据存入会话（Token/PlayerID 取用）。
+func loginFlow(t *testing.T, ctx context.Context, sess *sdkclient.Session) {
 	t.Helper()
 	account := testAccount(t, "auth")
-	reg, err := auth.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "集成"})
+	reg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "集成"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"})
-	if err != nil {
+	if reg.PlayerID == "" {
+		t.Fatal("注册回执缺少 player_id")
+	}
+	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.PlayerID, Password: "pw"}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if _, err := auth.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: login.GetPlayerId(), Token: login.GetToken(), Ts: 1}); err != nil {
+	var hb gatewayv1.HeartbeatReply
+	if err := sess.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &hb); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
-	return login.GetToken(), login.GetPlayerId()
+	if hb.GetServerTimeUnixMs() == 0 {
+		t.Fatal("心跳回执缺 server_time")
+	}
 }
 
 // logoutFlow 登出并断言成功（登出闭环验证）。
-func logoutFlow(t *testing.T, ctx context.Context, auth authClient, playerID, token string) {
+func logoutFlow(t *testing.T, ctx context.Context, sess *sdkclient.Session) {
 	t.Helper()
-	if _, err := auth.Logout(ctx, &gatewayv1.LogoutRequest{PlayerId: playerID, Token: token}); err != nil {
+	if err := sess.Logout(ctx); err != nil {
 		t.Fatalf("Logout: %v", err)
+	}
+	if sess.Token() != "" {
+		t.Fatal("登出后会话凭据应清空")
 	}
 }
 
 // loginViaTCP 经 tcp 完成注册登录（战斗通道测试的令牌来源），返回令牌与玩家 ID。
 func loginViaTCP(t *testing.T, ctx context.Context, tcpURL string) (string, string) {
 	t.Helper()
-	cli, err := tcpt.NewClient(tcpURL)
-	if err != nil {
-		t.Fatalf("tcp client: %v", err)
-	}
-	defer cli.Close()
-	token, playerID := loginFlow(t, ctx, gatewayv1.NewGatewayPlayerTCPClient(cli))
-	return token, playerID
+	sess, _ := dialBizSession(t, tcpURL)
+	loginFlow(t, ctx, sess)
+	return sess.Token(), sess.PlayerID()
 }
 
 // httpGet 发起 GET 请求并返回响应体（超时受 ctx 约束）。

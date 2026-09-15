@@ -32,6 +32,7 @@ require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
+	github.com/huangyuCN/atlas-sdk-go v0.0.0
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/klauspost/reedsolomon v1.14.2 // indirect
@@ -73,3 +74,5 @@ replace github.com/huangyuCN/atlas => ../atlas
 
 // 本地开发：指向相邻的 cow 仓库；模板发布后按需调整
 replace github.com/huangyuCN/cow => ../cow
+
+replace github.com/huangyuCN/atlas-sdk-go => ../atlas-sdk-go

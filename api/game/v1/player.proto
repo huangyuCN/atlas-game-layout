@@ -1,5 +1,6 @@
-// game 服务协议：grpc 服务（gateway/管理调用）与 actor 消息载体
-// （注册/登录经 actor 远程路由 + 懒激活投递到 PlayerActor）。
+// game 管理面协议：grpc 服务（管理/运维调用，google.api.http 注解 REST）。
+// 玩家域统一业务契约（客户端 op + actor 分发）见 player_service.proto；
+// 会话生命周期见 api/gateway/v1/session.proto。
 syntax = "proto3";
 
 package game.v1;
@@ -8,72 +9,6 @@ option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
 
 import "api/common/v1/common.proto";
 import "google/api/annotations.proto";
-
-// RegisterActorReq 是 PlayerActor 的注册消息（注册与登录两段式，D8/D9）：
-// 玩家数据不存在则创建并回执，客户端仍需 Login 建立会话。
-message RegisterActorReq {
-  string account = 1;
-  string password = 2;
-  string nickname = 3;
-  string gateway_instance = 4;
-}
-
-message RegisterActorReply {
-  string player_id = 1;
-  common.v1.PlayerSummary player = 2;
-}
-
-// LoginActorReq 是 PlayerActor 的登录消息（actor Ask 载荷）。
-// 玩家 ID 由注册回执获得（注册与登录两段式，D8）；token 由 gateway 预签发；
-// PlayerActor 校验玩家数据并做会话令牌裁决（D10 兜底）。
-message LoginActorReq {
-  string player_id = 1;
-  string password = 2;
-  string token = 3;
-  string gateway_instance = 4;
-}
-
-message LoginActorReply {
-  common.v1.PlayerSummary player = 1;
-}
-
-// LogoutReason 是登出/退出原因（PlayActor 自停的语义来源）。
-enum LogoutReason {
-  LOGOUT_REASON_UNSPECIFIED = 0;
-  LOGOUT_REASON_LOGOUT = 1;              // 玩家主动登出
-  LOGOUT_REASON_LOGGED_IN_ELSEWHERE = 2; // 被新登录挤下线
-  LOGOUT_REASON_SESSION_EXPIRED = 3;     // 会话过期（心跳超时清理联动，异常下线兜底）
-}
-
-// LogoutActorMsg 是 PlayerActor 的登出/挤下线退出消息（Tell 载荷）：
-// PlayerActor 校验令牌后停止自身（Locator 移除，D10 联动）。
-message LogoutActorMsg {
-  string token = 1;
-  LogoutReason reason = 2;
-}
-
-// GrantItemActorReq 背包发放（经 PlayerActor 聚合根 undo 写，grpc 转发）。
-message GrantItemActorReq {
-  uint32 item_id = 1;
-  uint32 count = 2;
-  string reason = 3;
-}
-
-message GrantItemActorReply {}
-
-// GetBackpackActorReq/Reply 背包查询（聚合根内存快照，grpc 转发）。
-message GetBackpackActorReq {}
-
-message GetBackpackActorReply {
-  repeated BackpackItem items = 1;
-}
-
-// GetPlayerActorReq/Reply 玩家摘要查询（聚合根内存快照，grpc 转发）。
-message GetPlayerActorReq {}
-
-message GetPlayerActorReply {
-  common.v1.PlayerSummary player = 1;
-}
 
 // GetPlayerRequest/Reply 玩家信息查询。
 message GetPlayerRequest {

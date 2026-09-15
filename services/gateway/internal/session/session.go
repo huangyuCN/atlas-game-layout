@@ -67,6 +67,7 @@ type Manager struct {
 	mu    sync.RWMutex
 	local map[string]*Session // playerID → 本地会话
 	refs  map[string]string   // 连接 Ref → playerID（按连接反查玩家身份）
+	toks  map[string]string   // 会话凭据 → playerID（帧会话槽反查玩家身份；Bind 时登记）
 }
 
 // NewManager 构造会话管理器。
@@ -77,6 +78,7 @@ func NewManager(store Store, instanceID string, ttl time.Duration) *Manager {
 		ttl:        ttl,
 		local:      make(map[string]*Session),
 		refs:       make(map[string]string),
+		toks:       make(map[string]string),
 	}
 }
 
@@ -127,6 +129,11 @@ func (m *Manager) bindLocal(playerID string, c *Conn, channel Channel, token str
 	if c.Ref != "" {
 		m.refs[c.Ref] = playerID
 	}
+	// 新凭据登记（覆盖式：接管后旧凭据失效）；旧会话凭据随覆盖失效。
+	if prev != nil && prev.Token != token {
+		m.tokenIndexRemove(prev.Token)
+	}
+	m.tokenIndexSet(next)
 	return next, nil
 }
 
@@ -163,6 +170,7 @@ func (m *Manager) Unbind(ctx context.Context, playerID string, connID uint64) {
 	}
 	delete(m.local, playerID)
 	m.dropConnRefs(sess)
+	m.tokenIndexRemove(sess.Token)
 	m.mu.Unlock()
 	m.deleteRouteIfOwned(ctx, playerID, connID)
 }
@@ -184,6 +192,22 @@ func (m *Manager) dropStaleRefs(prev, next *Session) {
 	}
 }
 
+// tokenIndex 把本地会话凭据登记进 token 反向索引（bindLocal/unbind 共用）。
+func (m *Manager) tokenIndexSet(sess *Session) {
+	if sess == nil || sess.Token == "" {
+		return
+	}
+	m.toks[sess.Token] = sess.PlayerID
+}
+
+// tokenIndexRemove 按凭据移除反向索引。
+func (m *Manager) tokenIndexRemove(token string) {
+	if token == "" {
+		return
+	}
+	delete(m.toks, token)
+}
+
 // dropConnRefs 注销会话全部连接的反向索引（调用方持写锁）。
 func (m *Manager) dropConnRefs(sess *Session) {
 	for _, c := range []*Conn{sess.Biz, sess.Battle} {
@@ -201,6 +225,18 @@ func (m *Manager) PlayerByRef(ref string) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	pid, ok := m.refs[ref]
+	return pid, ok
+}
+
+// PlayerByToken 按帧会话槽携带的凭据反查玩家身份（UDP/KCP 每帧验证用）。
+// 凭据索引与连接绑定同生命周期：接管/清理时随本地会话移除。
+func (m *Manager) PlayerByToken(token string) (string, bool) {
+	if token == "" {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	pid, ok := m.toks[token]
 	return pid, ok
 }
 

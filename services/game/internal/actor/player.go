@@ -1,8 +1,10 @@
 // Package actor 提供 game 服务的 actor 装配：PlayerActor（集群懒激活）承载
-// 玩家在线态：内存聚合根（cow 写）+ 定时 redis 快照 + 下线 mongo 落库（D9/D10）。
+// 玩家在线态：内存聚合根（cow 写）+ 定时 redis 快照 + 下线 mongo 落库。
+// 会话裁决单点收敛到 Gateway（会话管理器）：game 侧不持 token 副本，
+// 收到 LogoutMsg 即保存并停机。
 //
-// 分发由 protoc-gen-atlas-actor 生成的桩接管（gamev1.NewPlayerActorServer）：
-// 业务 actor 只实现 PlayerActorServer 业务接口与可选生命周期（OnStart/OnStop）；
+// 分发由 protoc-gen-atlas-actor 生成的桩接管（gamev1.NewPlayerServiceServer）：
+// 业务 actor 只实现 PlayerServiceServer 业务接口与可选生命周期（OnStart/OnStop）；
 // 本地消息（tickSnapshot）经 WithLocalTell 类型路由注册，无 switch 分发。
 package actor
 
@@ -35,27 +37,27 @@ func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.Matchmaker
 			p := &PlayerActor{
 				pid: pid, svc: svc, store: store, match: match, snapTTL: snapTTL, snapTick: snapTick,
 			}
-			return gamev1.NewPlayerActorServer(p, core.WithLocalTell(p.onTickSnapshot))
+			return gamev1.NewPlayerServiceServer(p, core.WithLocalTell(p.onTickSnapshot))
 		},
 		SpawnMode:     core.SpawnAuto,
 		Tell:          pkgactor.DefaultTellChain(),
 		Ask:           pkgactor.DefaultAskChain(),
-		DecodeInbound: gamev1.NewPlayerActorDecodeInbound(),
+		DecodeInbound: gamev1.NewPlayerServiceDecodeInbound(),
 	}
 }
 
 // PlayerActor 是玩家在线态 actor：同一玩家全局唯一实例（Locator 注册 player:<id>）。
-// 实现 gamev1.PlayerActorServer 业务接口；OnStart/OnStop 为可选生命周期接口
+// 实现 gamev1.PlayerServiceServer 业务接口；OnStart/OnStop 为可选生命周期接口
 // （生成桩断言转发）；OnAsk/OnTell 分发由生成桩全权接管。
 type PlayerActor struct {
-	gamev1.UnimplementedPlayerActorServer // 兜底：service 加新 rpc 未实现也能编译
-	pid                                   types.PID
-	svc                                   biz.PlayerService
-	store                                 repo.PlayerRepo
-	match                                 biz.MatchmakerClient
-	partyID                               string // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
-	snapTTL                               time.Duration
-	snapTick                              time.Duration
+	gamev1.UnimplementedPlayerServiceServer // 兜底：service 加新 rpc 未实现也能编译
+	pid                                     types.PID
+	svc                                     biz.PlayerService
+	store                                   repo.PlayerRepo
+	match                                   biz.MatchmakerClient
+	partyID                                 string // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
+	snapTTL                                 time.Duration
+	snapTick                                time.Duration
 
 	player *models.Player // 内存聚合根（在线缓存；登录后持有）
 }

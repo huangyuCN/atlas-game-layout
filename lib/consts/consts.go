@@ -35,12 +35,12 @@ const (
 // 服务端推送 operation（消息 protobuf 完整名，客户端 OnNotify 按此分发；
 // gateway 下发与 battle 上行通知共用同一套约定，ADR-0002）。
 const (
-	PushOpKickedOffline  = "gateway.v1.KickedNotify"
-	PushOpMatchStarted   = "gateway.v1.MatchStartedNotify"
-	PushOpMatchFailed    = "gateway.v1.MatchFailedNotify"
-	PushOpPartyRoster    = "gateway.v1.PartyRosterNotify"
-	PushOpFrameBroadcast = "gateway.v1.FrameBroadcast"
-	PushOpBattleEnd      = "gateway.v1.BattleEndNotify"
+	PushOpKickedOffline  = "/gateway.v1.KickedNotify"
+	PushOpMatchStarted   = "/game.v1.MatchStartedNotify"
+	PushOpMatchFailed    = "/game.v1.MatchFailedNotify"
+	PushOpPartyRoster    = "/game.v1.PartyRosterNotify"
+	PushOpFrameBroadcast = "/battle.v1.FrameBroadcast"
+	PushOpBattleEnd      = "/battle.v1.BattleEndNotify"
 )
 
 // MatchStartedTopic 返回成局事件主题：atlas.event.match.started。

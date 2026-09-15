@@ -1,5 +1,5 @@
 // Package actor 组队域业务方法：CreateParty/JoinParty/LeaveParty/GetParty/QueueParty
-// （实现 PlayerActorServer 接口的组队部分）。名册权威在撮合域（引擎 redis Party）；
+// （实现 PlayerServiceServer 接口的组队部分）。名册权威在撮合域（引擎 redis Party）；
 // PlayerActor 只持「我所在的 partyID」在线态（纯在线会话语义：下线即离队，
 // 不持久化到聚合根，避免把撮合域状态引入玩家数据模型）；
 // 属性从聚合根权威填充（客户端不可伪造）。
@@ -15,8 +15,8 @@ import (
 )
 
 // partySnapshot 由名册回执组装客户端快照（info 为 nil 时回执空快照）。
-func (p *PlayerActor) partySnapshot(info *matcherv1.PartyInfo) *gamev1.PartyActorReply {
-	out := &gamev1.PartyActorReply{}
+func (p *PlayerActor) partySnapshot(info *matcherv1.PartyInfo) *gamev1.PartyReply {
+	out := &gamev1.PartyReply{}
 	if info == nil {
 		return out
 	}
@@ -31,8 +31,8 @@ func (p *PlayerActor) partySnapshot(info *matcherv1.PartyInfo) *gamev1.PartyActo
 	return out
 }
 
-// CreateParty 实现 gamev1.PlayerActorServer：建队（本玩家为队长，Ask）。
-func (p *PlayerActor) CreateParty(ctx core.ActorContext, _ *gamev1.CreatePartyActorReq) (*gamev1.PartyActorReply, error) {
+// CreateParty 实现 gamev1.PlayerServiceServer：建队（本玩家为队长，Ask）。
+func (p *PlayerActor) CreateParty(ctx core.ActorContext, _ *gamev1.CreatePartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
@@ -48,15 +48,15 @@ func (p *PlayerActor) CreateParty(ctx core.ActorContext, _ *gamev1.CreatePartyAc
 	}
 	p.partyID = partyID
 	// 建队即队长为唯一成员：直接组装快照（免一次 Describe 往返）。
-	return &gamev1.PartyActorReply{
+	return &gamev1.PartyReply{
 		PartyId:  partyID,
 		LeaderId: p.pid.UID(),
 		Members:  []*commonv1.PlayerSummary{usecase.PlayerSummary(p.player)},
 	}, nil
 }
 
-// JoinParty 实现 gamev1.PlayerActorServer：按 party_id 加入（Ask，容量原子校验）。
-func (p *PlayerActor) JoinParty(ctx core.ActorContext, req *gamev1.JoinPartyActorReq) (*gamev1.PartyActorReply, error) {
+// JoinParty 实现 gamev1.PlayerServiceServer：按 party_id 加入（Ask，容量原子校验）。
+func (p *PlayerActor) JoinParty(ctx core.ActorContext, req *gamev1.JoinPartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
@@ -77,9 +77,9 @@ func (p *PlayerActor) JoinParty(ctx core.ActorContext, req *gamev1.JoinPartyActo
 	return p.partySnapshot(info), nil
 }
 
-// LeaveParty 实现 gamev1.PlayerActorServer：离开队伍（Ask，幂等）。
+// LeaveParty 实现 gamev1.PlayerServiceServer：离开队伍（Ask，幂等）。
 // 不在队直接回执空快照；队长离开顺延、空队解散由撮合域保证。
-func (p *PlayerActor) LeaveParty(ctx core.ActorContext, _ *gamev1.LeavePartyActorReq) (*gamev1.PartyActorReply, error) {
+func (p *PlayerActor) LeaveParty(ctx core.ActorContext, _ *gamev1.LeavePartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
@@ -93,8 +93,8 @@ func (p *PlayerActor) LeaveParty(ctx core.ActorContext, _ *gamev1.LeavePartyActo
 	return p.partySnapshot(nil), nil
 }
 
-// GetParty 实现 gamev1.PlayerActorServer：名册快照（Ask，轮询兜底）。
-func (p *PlayerActor) GetParty(ctx core.ActorContext, _ *gamev1.GetPartyActorReq) (*gamev1.PartyActorReply, error) {
+// GetParty 实现 gamev1.PlayerServiceServer：名册快照（Ask，轮询兜底）。
+func (p *PlayerActor) GetParty(ctx core.ActorContext, _ *gamev1.GetPartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
@@ -108,9 +108,9 @@ func (p *PlayerActor) GetParty(ctx core.ActorContext, _ *gamev1.GetPartyActorReq
 	return p.partySnapshot(info), nil
 }
 
-// QueueParty 实现 gamev1.PlayerActorServer：队长发整队入队（Ask）。
+// QueueParty 实现 gamev1.PlayerServiceServer：队长发整队入队（Ask）。
 // 1..N 人都可入队（不要求满员），等对面凑齐等量人数。
-func (p *PlayerActor) QueueParty(ctx core.ActorContext, req *gamev1.QueuePartyActorReq) (*gamev1.QueuePartyActorReply, error) {
+func (p *PlayerActor) QueueParty(ctx core.ActorContext, req *gamev1.QueuePartyReq) (*gamev1.PartyQueueReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
@@ -124,7 +124,7 @@ func (p *PlayerActor) QueueParty(ctx core.ActorContext, req *gamev1.QueuePartyAc
 	if err != nil {
 		return nil, err
 	}
-	return &gamev1.QueuePartyActorReply{TicketId: ticketID}, nil
+	return &gamev1.PartyQueueReply{TicketId: ticketID}, nil
 }
 
 // partyUnavailable 判断撮合客户端是否未装配（nil 降级：组队/匹配方法返回内部错误）。

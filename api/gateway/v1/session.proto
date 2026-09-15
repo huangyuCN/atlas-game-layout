@@ -1,0 +1,90 @@
+// Gateway 会话生命周期协议（业务通道 tcp/ws 传输）：注册/登录/断线恢复/登出/心跳
+// + 被挤下线推送。这是 Gateway 自留接口（本地 handler 实现，不经透传引擎）；
+// 业务 op 直接指向各域 service（见 api/game/v1/player_service.proto 等）。
+//
+// 协议边界约定（连接即会话，主体身份永不来自客户端 payload）：
+//   - 会话接口由 Gateway 本地实现，用于建立/恢复/清理连接与玩家的绑定；
+//   - 业务请求 operation 直接指向域 service：Gateway 按透传路由表校验登录态、
+//     组装 target PID 并注入 sender（发起者身份），客户端消息不含身份字段；
+//   - token 只在 Login 回执出现一次；UDP/KCP 的业务请求经帧会话槽携带凭据，
+//     TCP/WS 按连接绑定；Resume 经请求体携带凭据（各传输形态一致）。
+syntax = "proto3";
+
+package gateway.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1";
+
+import "api/common/v1/common.proto";
+
+// RegisterRequest 注册：账号不存在则创建玩家（注册与登录两段式）。
+message RegisterRequest {
+  string account = 1;
+  string password = 2;
+  string nickname = 3;
+}
+
+message RegisterReply {
+  string player_id = 1;
+}
+
+// LoginRequest 登录：凭注册回执的玩家 ID 建立会话。
+message LoginRequest {
+  string player_id = 1;
+  string password = 2;
+}
+
+// LoginReply 登录回执：token 是会话凭据（只在 Login 出现一次；
+// 后续业务请求经连接绑定或帧会话槽承载身份，不再重复下发）。
+message LoginReply {
+  string player_id = 1;
+  string token = 2;
+  common.v1.PlayerSummary player = 3;
+}
+
+// ResumeRequest 断线重连恢复会话：凭据与玩家 ID 经请求体携带（各传输形态一致），
+// 服务端按路由表校验归属后重新绑定连接。
+message ResumeRequest {
+  string token = 1;
+  string player_id = 2;
+}
+
+// ResumeReply 恢复回执（凭据沿用原 token，不轮换）。
+message ResumeReply {
+  string player_id = 1;
+}
+
+// HeartbeatRequest 会话心跳保活（服务端按连接/帧槽定位会话续租）。
+message HeartbeatRequest {
+  int64 ts = 1;
+}
+
+// HeartbeatReply 心跳回执（携带服务端时间用于对时）。
+message HeartbeatReply {
+  uint64 server_time_unix_ms = 1;
+}
+
+// LogoutRequest 登出（清理会话与路由；身份由连接承载）。
+message LogoutRequest {}
+
+message LogoutReply {}
+
+// KickedReason 是被挤下线的原因。
+enum KickedReason {
+  KICKED_REASON_UNSPECIFIED = 0;
+  KICKED_REASON_LOGGED_IN_ELSEWHERE = 1; // 被新登录挤下线
+  KICKED_REASON_SESSION_EXPIRED = 2;     // 会话过期（预留）
+}
+
+// KickedNotify 服务端推送：被挤下线（旧连接断开前收到）。
+message KickedNotify {
+  KickedReason reason = 1;
+}
+
+// Session 是 Gateway 自留的会话生命周期服务（业务通道协议 tcp/ws/kcp/udp）。
+service Session {
+  rpc Register (RegisterRequest) returns (RegisterReply);
+  rpc Login (LoginRequest) returns (LoginReply);
+  rpc Resume (ResumeRequest) returns (ResumeReply);
+  rpc Logout (LogoutRequest) returns (LogoutReply);
+  rpc Heartbeat (HeartbeatRequest) returns (HeartbeatReply);
+}

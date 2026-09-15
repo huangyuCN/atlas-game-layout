@@ -2,28 +2,43 @@ package server
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
-	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
-	atlaserrors "github.com/huangyuCN/atlas/errors"
+	"github.com/huangyuCN/atlas/contrib/actor/relay"
+	"github.com/huangyuCN/atlas/transport"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natss "github.com/nats-io/nats.go"
+	"google.golang.org/protobuf/proto"
+)
+
+// 测试引用的透传 op（注解生成路由表的寻址键，纯协议寻址字符串）。
+const (
+	opJoinBattle     = "/battle.v1.BattleService/JoinBattle"
+	opSendFrameInput = "/battle.v1.BattleService/SendFrameInput"
+	opSyncFrames     = "/battle.v1.BattleService/SyncFrames"
+	opEnterMatch     = "/game.v1.PlayerService/EnterMatchQueue"
+	opCancelMatch    = "/game.v1.PlayerService/CancelMatch"
+	opMatchStatus    = "/game.v1.PlayerService/GetMatchStatus"
+	opCreateParty    = "/game.v1.PlayerService/CreateParty"
+	opJoinParty      = "/game.v1.PlayerService/JoinParty"
+	opLeaveParty     = "/game.v1.PlayerService/LeaveParty"
+	opGetParty       = "/game.v1.PlayerService/GetParty"
+	opQueueParty     = "/game.v1.PlayerService/QueueParty"
 )
 
 // newSharedBackends 起共享中间件：miniredis 与内嵌 nats，返回发布用连接。
@@ -47,25 +62,26 @@ func newSharedBackends(t *testing.T) (*miniredis.Miniredis, string, *natss.Conn)
 	return mr, ns.ClientURL(), nc
 }
 
-// gwEnv 是一个 gateway 实例的完整本地装配（双实例专项用）。
+// gwEnv 是一个 gateway 实例的完整本地装配（会话直调 + 透传 + 推送测试共用）。
 type gwEnv struct {
 	id     string
 	sess   *session.Manager
 	g      *Gateway
 	mock   *mockActorRuntime // game/battle actor 桩（断言投递用）
+	push   *fakePusher       // TCP 业务通道推送记录（会话回写断言用）
+	kcp    *fakePusher       // KCP 战斗通道推送记录（通道绑定优先级断言用）
 	tcpSrv *tcpt.Server
-	wsSrv  *wst.Server
-	wsHTTP *httptest.Server
 	tcpURL string
-	wsURL  string
 }
 
-// newGWEnv 构造一个 gateway 实例（tcp/ws 真启动，kcp/udp 仅构造注册）。
+// newGWEnv 构造一个 gateway 实例（miniredis + 内嵌 nats 装置）。
 func newGWEnv(t *testing.T, id string, mr *miniredis.Miniredis, natsURL string) *gwEnv {
 	return newGWEnvWithRedis(t, id, mr.Addr(), natsURL)
 }
 
-// newGWEnvWithRedis 以真实/内存 redis 地址构造 gateway 实例（集成与单测共用装置）。
+// newGWEnvWithRedis 以真实/内存 redis 地址构造 gateway 实例（单测与集成共用装置）。
+// 四协议 Server 全量构造并完成会话 + 透传注册（验证装配路径），仅 TCP 启动
+// （帧链路端到端用）；会话回写注入推送记录桩，断言不依赖真实客户端连接。
 func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 	t.Helper()
 	cli, err := pkredis.NewClient(pkredis.Options{Addr: redisAddr})
@@ -79,6 +95,42 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 	}
 	t.Cleanup(nc.Close)
 
+	tcpSrv, wsSrv, kcpSrv, udpSrv := newTransportServers(t)
+	push, kcpPush := new(fakePusher), new(fakePusher)
+
+	sess := session.NewManager(session.NewRedisStore(cli), id, 30*time.Second)
+	mock := newMockActorRuntime()
+	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), nc,
+		push, new(fakePusher), kcpPush, udpSrv)
+	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
+	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))
+	if err := RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
+		t.Fatalf("registerHandlers: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := g.StartRelay(ctx); err != nil {
+		t.Fatalf("StartRelay: %v", err)
+	}
+	sess.Start(ctx)
+
+	startTCPServer(t, tcpSrv)
+	return &gwEnv{
+		id:     id,
+		sess:   sess,
+		g:      g,
+		mock:   mock,
+		push:   push,
+		kcp:    kcpPush,
+		tcpSrv: tcpSrv,
+		tcpURL: tcpAddr(t, tcpSrv),
+	}
+}
+
+// newTransportServers 构造四协议传输服务端（仅构造不启动；注册在构造期即可完成）。
+func newTransportServers(t *testing.T) (*tcpt.Server, *wst.Server, *kcpt.Server, *udpt.Server) {
+	t.Helper()
 	tcpSrv, err := tcpt.NewServer(tcpt.WithAddress("127.0.0.1:0"))
 	if err != nil {
 		t.Fatalf("tcp server: %v", err)
@@ -95,385 +147,214 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 	if err != nil {
 		t.Fatalf("udp server: %v", err)
 	}
+	return tcpSrv, wsSrv, kcpSrv, udpSrv
+}
 
-	sess := session.NewManager(session.NewRedisStore(cli), id, 30*time.Second)
-	mock := newMockActorRuntime()
-	g := NewGateway(id, sess, actorclient.NewClient(mock), nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
-	if err := RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
-		t.Fatalf("registerHandlers: %v", err)
+// newRouteTable 合并注解生成的两张域路由表（与生产 graph.go 装配一致）。
+func newRouteTable(t *testing.T) relay.Table {
+	t.Helper()
+	table, err := relay.Merge(gamev1.PlayerServiceRouteTable, battlev1.BattleServiceRouteTable)
+	if err != nil {
+		t.Fatalf("relay.Merge: %v", err)
 	}
+	// 通道绑定副作用按生产装配声明（WithChannelBinding，与 graph.go 一致）：
+	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道。
+	return table
+}
 
+// startTCPServer 启动 TCP 服务端并注册停止清理（帧链路端到端测试用）。
+func startTCPServer(t *testing.T, srv *tcpt.Server) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	if err := g.StartRelay(ctx); err != nil {
-		t.Fatalf("StartRelay: %v", err)
-	}
-	sess.Start(ctx)
-
-	sctx, scancel := context.WithCancel(context.Background())
-	if err := tcpSrv.Start(sctx); err != nil {
+	if err := srv.Start(ctx); err != nil {
+		cancel()
 		t.Fatalf("tcp Start: %v", err)
 	}
 	t.Cleanup(func() {
-		scancel()
-		_ = tcpSrv.Stop(context.Background())
+		cancel()
+		_ = srv.Stop(context.Background())
 	})
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", wsSrv.Handler())
-	wsHTTP := httptest.NewServer(mux)
-	t.Cleanup(wsHTTP.Close)
-
-	tcpEP, err := tcpSrv.Endpoint()
+// tcpAddr 返回 TCP 服务端监听地址。
+func tcpAddr(t *testing.T, srv *tcpt.Server) string {
+	t.Helper()
+	ep, err := srv.Endpoint()
 	if err != nil {
 		t.Fatalf("tcp Endpoint: %v", err)
 	}
-
-	return &gwEnv{
-		id:     id,
-		sess:   sess,
-		g:      g,
-		mock:   mock,
-		tcpSrv: tcpSrv,
-		wsSrv:  wsSrv,
-		wsHTTP: wsHTTP,
-		tcpURL: tcpEP.Host,
-		wsURL:  "ws" + strings.TrimPrefix(wsHTTP.URL, "http") + "/ws",
-	}
+	return ep.Host
 }
 
-// newTCPAuthClient 建立 TCP 业务连接与认证客户端。
-func (e *gwEnv) newTCPAuthClient(t *testing.T) (*tcpt.Client, gatewayv1.GatewayPlayerTCPClient) {
+// newTCPWireClient 建立真实 TCP 连接客户端（验证生成桩与透传 handler 的帧链路行为）。
+func (e *gwEnv) newTCPWireClient(t *testing.T) *tcpt.Client {
 	t.Helper()
 	cli, err := tcpt.NewClient(e.tcpURL)
 	if err != nil {
 		t.Fatalf("tcp client: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	return cli, gatewayv1.NewGatewayPlayerTCPClient(cli)
+	return cli
 }
 
-// newWSClients 建立 WS 连接（单通道形态：认证 + 战斗共用）。
-func (e *gwEnv) newWSClients(t *testing.T) (*wst.Client, gatewayv1.GatewayPlayerWSClient, gatewayv1.GatewayBattleWSClient) {
+// login 以 TCP 业务连接形态直调 Gateway.Login（connID 标识连接，身份由连接承载）。
+func (e *gwEnv) login(t *testing.T, connID uint64, playerID string) *gatewayv1.LoginReply {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	t.Cleanup(cancel)
-	cli, err := wst.NewClient(ctx, e.wsURL)
-	if err != nil {
-		t.Fatalf("ws client: %v", err)
-	}
-	t.Cleanup(func() { _ = cli.Close() })
-	return cli, gatewayv1.NewGatewayPlayerWSClient(cli), gatewayv1.NewGatewayBattleWSClient(cli)
-}
-
-// TestLoginHeartbeatLogout 验证登录 → 心跳 → 登出的会话闭环。
-func TestLoginHeartbeatLogout(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	_, auth := env.newTCPAuthClient(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
+	ctx := connCtx(transport.KindTCP, gatewayv1.OperationSessionLoginTCP, connID, "")
+	rep, err := e.g.Login(ctx, &gatewayv1.LoginRequest{PlayerId: playerID, Password: "x"})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if login.GetToken() == "" || login.GetPlayerId() != "p-1" {
+	return rep
+}
+
+// relayEntry 查询透传路由条目（缺失即失败，防路由表漂移静默跳过）。
+func (e *gwEnv) relayEntry(t *testing.T, operation string) relay.RouteEntry {
+	t.Helper()
+	entry, ok := e.g.Relay().Lookup(operation)
+	if !ok {
+		t.Fatalf("透传路由缺失: %s", operation)
+	}
+	return entry
+}
+
+// forward 是请求-响应型透传的断言包装（失败即终止，返回业务回执）。
+func (e *gwEnv) forward(t *testing.T, ctx context.Context, operation string, req proto.Message) proto.Message {
+	t.Helper()
+	rep, err := e.g.Relay().Forward(ctx, e.relayEntry(t, operation), req)
+	if err != nil {
+		t.Fatalf("Forward %s: %v", operation, err)
+	}
+	return rep
+}
+
+// forwardTell 是单向 Tell 型透传的断言包装（不应有回执）。
+func (e *gwEnv) forwardTell(t *testing.T, ctx context.Context, operation string, req proto.Message) {
+	t.Helper()
+	rep, err := e.g.Relay().Forward(ctx, e.relayEntry(t, operation), req)
+	if err != nil {
+		t.Fatalf("Forward %s: %v", operation, err)
+	}
+	if rep != nil {
+		t.Fatalf("Tell 型透传不应有回执: %T", rep)
+	}
+}
+
+// waitFor 轮询等待异步链路条件成立（nats 订阅/清扫回调），超时返回 false。
+func waitFor(timeout time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return cond()
+}
+
+// hasPush 判断推送记录中是否存在指定连接与 operation 的下行。
+func hasPush(pushes []fakePush, connID uint64, op string) bool {
+	for _, p := range pushes {
+		if p.connID == connID && p.op == op {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLoginLogoutClosesSession 验证登录 → 登出的会话闭环（身份由连接承载）。
+func TestLoginLogoutClosesSession(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+
+	login := env.login(t, 1, "p-1")
+	if login.GetToken() == "" || login.GetPlayerId() != "p-1" || login.GetPlayer().GetNickname() != "p-1" {
 		t.Fatalf("登录回执不符: %+v", login)
 	}
-	if _, err := auth.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: "p-1", Token: login.GetToken(), Ts: 1}); err != nil {
+	// 登录即建立会话（业务通道绑定连接 1）。
+	if sess, ok := env.sess.LocalSession("p-1"); !ok || sess.Biz == nil || sess.Biz.ID != 1 {
+		t.Fatalf("登录会话绑定不符: sess=%+v ok=%v", sess, ok)
+	}
+	// 心跳续租（身份由连接承载，以会话自身凭据续租）。
+	hctx := connCtx(transport.KindTCP, gatewayv1.OperationSessionHeartbeatTCP, 1, "")
+	hb, err := env.g.Heartbeat(hctx, &gatewayv1.HeartbeatRequest{Ts: 1})
+	if err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
-	if _, err := auth.Logout(ctx, &gatewayv1.LogoutRequest{PlayerId: "p-1", Token: login.GetToken()}); err != nil {
+	if hb.GetServerTimeUnixMs() == 0 {
+		t.Fatalf("心跳回执缺服务端时间: %+v", hb)
+	}
+	// 登出（身份从连接反查）后本地会话与路由清除。
+	if _, err := env.g.Logout(connCtx(transport.KindTCP, gatewayv1.OperationSessionLogoutTCP, 1, ""), &gatewayv1.LogoutRequest{}); err != nil {
 		t.Fatalf("Logout: %v", err)
 	}
-	// 登出后路由清除。
+	if _, ok := env.sess.LocalSession("p-1"); ok {
+		t.Fatal("登出后本地会话应清除")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if r, err := env.sess.Route(ctx, "p-1"); err != nil || r != nil {
 		t.Fatalf("登出后路由 = %+v, err = %v, want nil", r, err)
 	}
-	// 登出后令牌失效。
-	if _, err := auth.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: "p-1", Token: login.GetToken()}); err == nil {
-		t.Fatal("登出后心跳应失败")
+}
+
+// TestHeartbeatRejectsUnboundConn 验证未绑定玩家身份的连接心跳被拒。
+func TestHeartbeatRejectsUnboundConn(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+
+	ctx := connCtx(transport.KindTCP, gatewayv1.OperationSessionHeartbeatTCP, 5, "")
+	if _, err := env.g.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{Ts: 1}); !errorv1.IsInvalidToken(err) {
+		t.Fatalf("未绑定连接心跳应 INVALID_TOKEN, got %v", err)
 	}
 }
 
-// TestKickSameInstance 验证同实例二次登录挤下线旧连接。
+// TestResumeRestoresSession 验证断线重连：凭据校验通过后重绑新连接（免密，凭据沿用）。
+func TestResumeRestoresSession(t *testing.T) {
+	mr, natsURL, _ := newSharedBackends(t)
+	env := newGWEnv(t, "gw-a", mr, natsURL)
+
+	token := env.login(t, 1, "p-1").GetToken()
+	// 原连接断开（等价于直接用新连接请求 Resume：身份尚未绑定）。
+	rep, err := env.g.Resume(connCtx(transport.KindTCP, gatewayv1.OperationSessionResumeTCP, 2, ""),
+		&gatewayv1.ResumeRequest{PlayerId: "p-1", Token: token})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if rep.GetPlayerId() != "p-1" {
+		t.Fatalf("恢复回执不符: %+v", rep)
+	}
+	// 恢复后业务通道重绑新连接，旧连接反向索引注销。
+	if sess, ok := env.sess.LocalSession("p-1"); !ok || sess.Biz == nil || sess.Biz.ID != 2 {
+		t.Fatalf("恢复后业务通道应绑定新连接: sess=%+v", sess)
+	}
+	// 凭据不匹配拒绝恢复（旧令牌/被接管）。
+	if _, err := env.g.Resume(connCtx(transport.KindTCP, gatewayv1.OperationSessionResumeTCP, 3, ""),
+		&gatewayv1.ResumeRequest{PlayerId: "p-1", Token: "bad"}); !errorv1.IsInvalidToken(err) {
+		t.Fatalf("错误凭据恢复应拒绝, got %v", err)
+	}
+}
+
+// TestKickSameInstance 验证同实例二次登录挤下线旧连接（旧连接收到被挤通知 + 联动清理）。
 func TestKickSameInstance(t *testing.T) {
 	mr, natsURL, _ := newSharedBackends(t)
 	env := newGWEnv(t, "gw-a", mr, natsURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
-	oldCli, oldAuth := env.newTCPAuthClient(t)
-	login1, err := oldAuth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("首次登录: %v", err)
+	login1 := env.login(t, 1, "p-1")
+	login2 := env.login(t, 2, "p-1")
+	if login2.GetToken() == login1.GetToken() {
+		t.Fatal("二次登录应签发新令牌")
 	}
-	// 注册挤下线监听，然后发起二次登录。
-	kicked := make(chan struct{}, 1)
-	oldCli.OnNotify(func(operation string, payload []byte) {
-		if operation == consts.PushOpKickedOffline {
-			kicked <- struct{}{}
-		}
-	})
-	_, newAuth := env.newTCPAuthClient(t)
-	if _, err := newAuth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"}); err != nil {
-		t.Fatalf("二次登录: %v", err)
+	// 旧连接（connID=1）收到被挤下线推送。
+	if !hasPush(env.push.snapshot(), 1, consts.PushOpKickedOffline) {
+		t.Fatalf("旧连接未收到挤下线推送: %+v", env.push.snapshot())
 	}
-	select {
-	case <-kicked:
-	case <-time.After(2 * time.Second):
-		t.Fatal("旧连接未收到被挤下线通知")
+	// 会话令牌已被新登录覆盖（旧凭据失效）。
+	if sess, ok := env.sess.LocalSession("p-1"); !ok || sess.Token != login2.GetToken() {
+		t.Fatalf("会话令牌应被覆盖: sess=%+v", sess)
 	}
-	// 旧会话令牌已被覆盖：旧 token 心跳失败。
-	if _, err := oldAuth.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: "p-1", Token: login1.GetToken(), Ts: 1}); err == nil {
-		t.Fatal("旧会话心跳应失败")
-	}
-}
-
-// TestJoinBattleBindsChannel 验证 WS 单通道形态：登录后战斗绑定走同一连接。
-func TestJoinBattleBindsChannel(t *testing.T) {
-	mr, natsURL, pub := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cli, auth, battle := env.newWSClients(t)
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
-	join, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: login.GetToken(), PlayerId: "p-1", BattleId: "b-1"})
-	if err != nil {
-		t.Fatalf("JoinBattle: %v", err)
-	}
-	// 会话元信息/当前帧/快照由 battle actor 回执（M7）。
-
-	if join.GetMeta().GetSessionId() != "b-1" || join.GetCurrentFrame() != 3 || join.GetSnapshot() == nil {
-		t.Fatalf("JoinBattle 元信息回执不符: %+v", join)
-	}
-
-	// 战斗通道绑定后推送仍可达（同连接回退）。
-	got := make(chan struct{}, 1)
-	cli.OnNotify(func(operation string, payload []byte) {
-		if operation == consts.PushOpMatchStarted {
-			got <- struct{}{}
-		}
-	})
-	if err := PublishPush(ctx, pub, "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
-		t.Fatalf("PublishPush: %v", err)
-	}
-	select {
-	case <-got:
-	case <-time.After(2 * time.Second):
-		t.Fatal("未收到推送")
-	}
-}
-
-// TestJoinBattleRejectsNonMember 验证 battle actor 拒绝非参战玩家且不绑定战斗通道。
-func TestJoinBattleRejectsNonMember(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	// 注入拒绝加入的 battle 裁决。
-	env.mock.joinOK = false
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, auth, battle := env.newWSClients(t)
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
-	if _, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: login.GetToken(), PlayerId: "p-1", BattleId: "b-1"}); err == nil {
-		t.Fatal("非参战玩家加入战斗应报错")
-	}
-	// 未绑定战斗通道：本地会话无 Battle 连接。
-	sess, ok := env.sess.LocalSession("p-1")
-	if !ok {
-		t.Fatal("本地会话应存在（业务通道绑定）")
-	}
-	if sess.Battle != nil {
-		t.Fatal("被拒加入后不应绑定战斗通道")
-	}
-}
-
-// TestSendFrameInputForwardsToBattle 验证帧输入透传 battle actor（信封 + 路由）。
-func TestSendFrameInputForwardsToBattle(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, auth, battle := env.newWSClients(t)
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
-	if _, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: login.GetToken(), PlayerId: "p-1", BattleId: "b-1"}); err != nil {
-		t.Fatalf("JoinBattle: %v", err)
-	}
-	_, err = battle.SendFrameInput(ctx, &gatewayv1.SendFrameInputRequest{
-		BattleId: "b-1",
-		// 伪造他人身份：gateway 应以连接会话绑定为准改写为 p-1。
-		Input: &locksteppb.LockstepInput{FrameId: 1, PlayerId: "p-9", Payload: []byte("up")},
-	})
-	if err != nil {
-		t.Fatalf("SendFrameInput: %v", err)
-	}
-	// 帧输入已按战斗 ID 路由投递，且身份被改回会话绑定玩家（防伪造）。
-	ins := env.mock.frameInputs["b-1"]
-	if len(ins) != 1 || ins[0].GetPlayerId() != "p-1" ||
-		ins[0].GetInput().GetPlayerId() != "p-1" || string(ins[0].GetInput().GetPayload()) != "up" {
-		t.Fatalf("帧输入投递不符: %+v", ins)
-	}
-}
-
-// TestSendFrameInputRequiresBinding 验证未绑定战斗通道的连接发帧输入被拒。
-func TestSendFrameInputRequiresBinding(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, _, battle := env.newWSClients(t)
-	if _, err := battle.SendFrameInput(ctx, &gatewayv1.SendFrameInputRequest{
-		BattleId: "b-1",
-		Input:    &locksteppb.LockstepInput{FrameId: 1, PlayerId: "p-1", Payload: []byte("up")},
-	}); err == nil {
-		t.Fatal("未绑定身份的连接发帧输入应被拒")
-	}
-}
-
-// TestSyncFramesForwardsToBattle 验证补帧请求透传 battle actor 并回执缺失帧。
-func TestSyncFramesForwardsToBattle(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, auth, battle := env.newWSClients(t)
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
-	if _, err := battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{Token: login.GetToken(), PlayerId: "p-1", BattleId: "b-1"}); err != nil {
-		t.Fatalf("JoinBattle: %v", err)
-	}
-	reply, err := battle.SyncFrames(ctx, &locksteppb.SyncFrameRequest{SessionId: "b-1", FromFrameId: 3, Limit: 10})
-	if err != nil {
-		t.Fatalf("SyncFrames: %v", err)
-	}
-	if reply.GetConfirmedFrameId() != 5 || len(reply.GetFrames()) != 1 || reply.GetFrames()[0].GetFrameId() != 4 {
-		t.Fatalf("补帧回执不符: %+v", reply)
-	}
-	// 补帧请求已携带断点帧号与会话绑定玩家投递。
-	recs := env.mock.reconnects["b-1"]
-	if len(recs) != 1 || recs[0].GetLastSeenFrame() != 3 || recs[0].GetPlayerId() != "p-1" {
-		t.Fatalf("补帧投递不符: %+v", recs)
-	}
-}
-
-// TestMatchQueueForwardsToPlayerActor 验证匹配端点：入队/取消/状态经生成桩转发到
-// game PlayerActor；无效令牌拒绝（INVALID_TOKEN），业务错误透传。
-func TestMatchQueueForwardsToPlayerActor(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	cli, auth := env.newTCPAuthClient(t)
-	matchCli := gatewayv1.NewGatewayMatchTCPClient(cli)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
-
-	// 无效令牌拒绝。
-	if _, err := matchCli.QueueMatch(ctx, &gatewayv1.MatchQueueRequest{Token: "bad", PlayerId: "p-1", Ruleset: "casual"}); atlaserrors.Reason(err) != "INVALID_TOKEN" {
-		t.Fatalf("无效令牌应拒绝, got %v", err)
-	}
-
-	// 有效令牌：入队成功并投递到 actor。
-	if _, err := matchCli.QueueMatch(ctx, &gatewayv1.MatchQueueRequest{Token: login.GetToken(), PlayerId: "p-1", Ruleset: "casual"}); err != nil {
-		t.Fatalf("QueueMatch: %v", err)
-	}
-	if len(env.mock.matchEnters) != 1 || env.mock.matchEnters[0].GetRuleset() != "casual" {
-		t.Fatalf("入队投递不符: %+v", env.mock.matchEnters)
-	}
-
-	// 状态查询转发回执。
-	st, err := matchCli.MatchStatus(ctx, &gatewayv1.MatchStatusRequest{Token: login.GetToken(), PlayerId: "p-1"})
-	if err != nil {
-		t.Fatalf("MatchStatus: %v", err)
-	}
-	if st.GetState() != matcherv1.MatchState_MATCH_STATE_WAITING || st.GetTicketId() != "t-1" {
-		t.Fatalf("状态回执不符: %+v", st)
-	}
-
-	// 取消转发。
-	ca, err := matchCli.CancelMatch(ctx, &gatewayv1.MatchCancelRequest{Token: login.GetToken(), PlayerId: "p-1"})
-	if err != nil {
-		t.Fatalf("CancelMatch: %v", err)
-	}
-	if !ca.GetCanceled() || !env.mock.matchCanceled {
-		t.Fatalf("取消不符: reply=%+v mock=%v", ca, env.mock.matchCanceled)
-	}
-}
-
-// TestPartyProjectionForwardsToPlayerActor 验证组队投影：建队/加入/状态/整队入队
-// 经生成桩转发到 PlayerActor；无效令牌拒绝；离开回执空快照。
-func TestPartyProjectionForwardsToPlayerActor(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	cli, auth := env.newTCPAuthClient(t)
-	matchCli := gatewayv1.NewGatewayMatchTCPClient(cli)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("Login: %v", err)
-	}
-	token := login.GetToken()
-
-	// 无效令牌拒绝。
-	if _, err := matchCli.PartyCreate(ctx, &gatewayv1.PartyCreateRequest{Token: "bad", PlayerId: "p-1"}); atlaserrors.Reason(err) != "INVALID_TOKEN" {
-		t.Fatalf("无效令牌应拒绝, got %v", err)
-	}
-
-	// 建队：回执快照（队长自身）。
-	cp, err := matchCli.PartyCreate(ctx, &gatewayv1.PartyCreateRequest{Token: token, PlayerId: "p-1"})
-	if err != nil {
-		t.Fatalf("PartyCreate: %v", err)
-	}
-	if cp.GetPartyId() != "party-p-1" || cp.GetLeaderId() != "p-1" || len(cp.GetMembers()) != 1 {
-		t.Fatalf("建队回执不符: %+v", cp)
-	}
-
-	// 名册快照查询。
-	st, err := matchCli.PartyStatus(ctx, &gatewayv1.PartyStatusRequest{Token: token, PlayerId: "p-1"})
-	if err != nil {
-		t.Fatalf("PartyStatus: %v", err)
-	}
-	if st.GetPartyId() != "party-x" {
-		t.Fatalf("快照回执不符: %+v", st)
-	}
-
-	// 整队入队转发。
-	qr, err := matchCli.PartyQueue(ctx, &gatewayv1.PartyQueueRequest{Token: token, PlayerId: "p-1", Ruleset: "casual"})
-	if err != nil {
-		t.Fatalf("PartyQueue: %v", err)
-	}
-	if qr.GetTicketId() != "t-party-1" {
-		t.Fatalf("整队入队回执不符: %+v", qr)
-	}
-
-	// 离开回执空快照（mock LeaveParty 返回空）。
-	lv, err := matchCli.PartyLeave(ctx, &gatewayv1.PartyLeaveRequest{Token: token, PlayerId: "p-1"})
-	if err != nil {
-		t.Fatalf("PartyLeave: %v", err)
-	}
-	if lv.GetPartyId() != "" {
-		t.Fatalf("离开回执应为空快照: %+v", lv)
+	// 挤下线联动撮合域清理（kickOld：取消匹配 + 离队）。
+	if !env.mock.matchCanceled {
+		t.Fatal("挤下线应联动向 PlayerActor 取消匹配")
 	}
 }

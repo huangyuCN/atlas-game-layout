@@ -12,6 +12,9 @@ import (
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/server"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/transport"
@@ -99,7 +102,16 @@ func newGateway(
 	if r := cfg.GetRuntime(); r != nil {
 		instanceID = r.GetId()
 	}
-	g := server.NewGateway(instanceID, sess, actors, nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	// 透传引擎：合并各域生成的注解路由表（operation → actor 寻址规则），
+	// 新增域 op 时 gateway 无需改代码（表由 protoc 生成，access=CLIENT 注册）。
+	table, err := relay.Merge(gamev1.PlayerServiceRouteTable, battlev1.BattleServiceRouteTable)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: 透传路由表合并失败: %w", err)
+	}
+	g := server.NewGateway(instanceID, table, sess, actors, nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	// 通道绑定副作用（Gateway 会话模型的领域知识，装配声明——不进注解协议）：
+	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道（battle 帧推送寻址）。
+	g.Relay().WithChannelBinding("/battle.v1.BattleService/JoinBattle", relay.Slot(session.ChannelBattle))
 	if err := server.RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
 		return nil, err
 	}

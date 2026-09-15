@@ -12,15 +12,15 @@ import (
 )
 
 // BattleHandler 是战斗管理 grpc 实现：
-// 开局/查询经生成的 client stub 转发到战斗 actor（懒激活）。
+// 开局/查询经生成的集群 client stub 转发到战斗 actor（懒激活）。
 type BattleHandler struct {
 	battlev1.UnimplementedBattleServer
-	cli *battlev1.BattleActorClient
+	cli *battlev1.BattleServiceClusterClient
 }
 
 // NewBattleHandler 构造战斗管理实现。
 func NewBattleHandler(rt *pkgactor.Runtime) *BattleHandler {
-	return &BattleHandler{cli: battlev1.NewBattleActorClient(rt)}
+	return &BattleHandler{cli: battlev1.NewBattleServiceClusterClient(rt)}
 }
 
 // battlePID 以战斗 ID 构造战斗 actor PID（懒激活 + 跨节点透明）。

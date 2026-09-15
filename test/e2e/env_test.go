@@ -133,7 +133,7 @@ func seedBattle(t *testing.T, ctx context.Context, b *battleassemble.Battle, bat
 	if err != nil {
 		t.Fatalf("seedBattle PID: %v", err)
 	}
-	cli := battlev1.NewBattleActorClient(b.Runtime)
+	cli := battlev1.NewBattleServiceClusterClient(b.Runtime)
 	if _, err := cli.Create(ctx, pid, &battlev1.CreateBattleRequest{
 		MatchId:   "m-seed-" + battleID,
 		PlayerIds: playerIDs,

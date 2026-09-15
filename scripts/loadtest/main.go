@@ -1,8 +1,13 @@
-// loadtest 帧通道压测客户端：对比 KCP 与 WS 战斗通道的帧上行延迟与帧广播吞吐。
+// loadtest 帧通道压测客户端（atlas-sdk-go 驱动）：对比 KCP 与 WS 战斗通道的帧上行延迟与帧广播吞吐。
 //
-// 场景：双玩家入局（driver 实测 + dummy 陪跑），driver 顺序发送 N 个帧输入，
-// 统计每次 SendFrameInput 的往返延迟（client → gateway → battle actor 帧通道）；
-// 再统计 T 秒窗口内收到的帧广播数量（fps）与广播延迟（收到时刻 - 帧 server_time）。
+// 场景：双玩家经 gateway 注册登录 + 入队（SDK 会话，业务通道 op 透传），
+// driver 在战斗通道顺序发送 N 个帧输入，统计每次 SendFrameInput 的往返延迟
+// （client → gateway → battle actor 帧通道）；再统计 T 秒窗口内收到的帧广播数量
+// （fps）与广播延迟（收到时刻 - 帧 server_time）。
+//
+// 通道形态（-transport）：
+//   - kcp：SDK dual 双通道（TCP 业务 + KCP 战斗，帧会话槽携带凭据）
+//   - ws：SDK 单通道（WS 一条连接承载业务与战斗，连接绑定身份）
 //
 // 用法：
 //
@@ -23,15 +28,11 @@ import (
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
-	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
-	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	kcpt "github.com/huangyuCN/atlas/transport/kcp"
-	tcpt "github.com/huangyuCN/atlas/transport/tcp"
-	wst "github.com/huangyuCN/atlas/transport/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -50,73 +51,115 @@ type summary struct {
 	FrameP95  float64 `json:"broadcast_p95_ms"`
 }
 
-// player 是压测客户端：认证（TCP）+ 战斗通道（KCP/WS）。
+// player 是压测客户端：SDK 会话 + 战斗域强类型 stub。
 type player struct {
-	id     string
-	token  string
-	battle battleAPI
-	step   byte
+	id      string
+	sess    *sdkclient.Session
+	cli     *sdkclient.Client
+	players *gamev1.PlayerServiceClient   // 匹配域 op（业务通道）
+	battle  *battlev1.BattleServiceClient // 战斗域 op（KCP 战斗通道 / WS 单通道）
+	step    byte
 
 	started chan string // 开局通知（battleID）
 	mu      sync.Mutex
 	frames  []time.Duration // 帧广播延迟样本（收到时刻 - server_time）
-	end     chan string
 }
 
-// battleAPI 是战斗协议客户端最小接口。
-type battleAPI interface {
-	JoinBattle(context.Context, *gatewayv1.JoinBattleRequest) (*battlev1.JoinBattleReply, error)
-	SendFrameInput(context.Context, *gatewayv1.SendFrameInputRequest) (*gatewayv1.SendFrameInputReply, error)
+// newSession 构造 SDK 会话管理器（关闭 SDK 内置 nil 心跳，改由真 DTO 心跳承担续租）。
+func newSession() *sdkclient.Session {
+	return sdkclient.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
 }
 
-// newPlayer 建立认证 + 战斗通道并注册登录。
-// 开局通知在绑定战斗通道前经业务通道（TCP）回退下发，故两路都挂接监听。
+// commonDialOpts 公共拨号参数：传输保活 + 会话续租心跳（登录后生效）。
+func commonDialOpts(sess *sdkclient.Session) []sdkclient.Option {
+	return []sdkclient.Option{
+		sdkclient.WithHeartbeatInterval(5 * time.Second),
+		sdkclient.WithSessionHeartbeat(10*time.Second, func() (string, any) {
+			if sess.Token() == "" {
+				return "", nil // 未登录：跳过本轮
+			}
+			return sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: time.Now().UnixMilli()}
+		}),
+	}
+}
+
+// newPlayer 建立 SDK 客户端并注册登录；挂接推送监听（开局通知先于战斗通道
+// 绑定走业务通道回退，帧广播走战斗通道，两路都订阅）。
 func newPlayer(ctx context.Context, tcpAddr, battleAddr, transport string) (*player, error) {
-	tcpCli, err := tcpt.NewClient(tcpAddr)
-	if err != nil {
-		return nil, fmt.Errorf("tcp: %w", err)
-	}
-	auth := gatewayv1.NewGatewayPlayerTCPClient(tcpCli)
-	account := fmt.Sprintf("lt-%s-%d", transport, time.Now().UnixNano())
-	reg, err := auth.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
-	if err != nil {
-		return nil, fmt.Errorf("注册: %w", err)
-	}
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"})
-	if err != nil {
-		return nil, fmt.Errorf("登录: %w", err)
-	}
-	p := &player{
-		id:      login.GetPlayerId(),
-		token:   login.GetToken(),
-		started: make(chan string, 2),
-		end:     make(chan string, 2),
-	}
-	tcpCli.OnNotify(p.watch)
+	sess := newSession()
+	var cli *sdkclient.Client
+	var err error
 	switch transport {
 	case "ws":
-		cli, err := wst.NewClient(ctx, battleAddr)
+		// WS 单通道：业务与战斗共用一条连接（连接绑定身份）。
+		cli, err = sdkclient.DialWS(battleAddr, "", append(commonDialOpts(sess), sess.ChannelOptions()...)...)
 		if err != nil {
 			return nil, fmt.Errorf("ws: %w", err)
 		}
-		p.battle = gatewayv1.NewGatewayBattleWSClient(cli)
-		cli.OnNotify(p.watch)
 	default:
-		cli, err := kcpt.NewClient(battleAddr)
+		// dual 双通道：TCP 业务 + KCP 战斗（帧会话槽携带凭据）。
+		cli, err = sdkclient.DialDual(
+			sdkclient.ChannelConfig{Addr: tcpAddr, Opts: sess.ChannelOptions()},
+			sdkclient.ChannelConfig{
+				Transport: sdkclient.TransportKCP,
+				Addr:      battleAddr,
+				Opts: []sdkclient.Option{
+					sdkclient.WithSessionTokenProvider(func() string { return sess.Token() }),
+				},
+			},
+			commonDialOpts(sess)...,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("kcp: %w", err)
+			return nil, fmt.Errorf("dual: %w", err)
 		}
-		p.battle = gatewayv1.NewGatewayBattleKCPClient(cli)
-		cli.OnNotify(p.watch)
 	}
+	sess.Bind(cli)
+	p := &player{
+		sess:    sess,
+		cli:     cli,
+		players: gamev1.NewPlayerServiceClient(sess),
+		battle:  battlev1.NewBattleServiceClient(battleInvoker(cli)),
+		started: make(chan string, 2),
+	}
+	p.watchNotifies()
+	account := fmt.Sprintf("lt-%s-%d", transport, time.Now().UnixNano())
+	if _, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"}); err != nil {
+		return nil, fmt.Errorf("注册: %w", err)
+	}
+	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: sess.PlayerID(), Password: "pw"}); err != nil {
+		return nil, fmt.Errorf("登录: %w", err)
+	}
+	p.id = sess.PlayerID()
 	return p, nil
+}
+
+// battleInvoker 战斗域 op 的通道：dual 形态取战斗通道视图，单通道复用业务通道。
+func battleInvoker(cli *sdkclient.Client) sdkclient.Invoker {
+	if bv := cli.Channel(sdkclient.KindBattle); bv != nil {
+		return bv
+	}
+	return cli
+}
+
+// watchNotifies 订阅开局通知、帧广播与结束通知（业务 + 战斗通道双挂）。
+func (p *player) watchNotifies() {
+	for _, sub := range []func(string, sdkclient.NotifyHandler) func(){p.cli.On} {
+		sub(consts.PushOpMatchStarted, p.watch)
+		sub(consts.PushOpFrameBroadcast, p.watch)
+		sub(consts.PushOpBattleEnd, p.watch)
+	}
+	if bv := p.cli.Channel(sdkclient.KindBattle); bv != nil {
+		bv.On(consts.PushOpMatchStarted, p.watch)
+		bv.On(consts.PushOpFrameBroadcast, p.watch)
+		bv.On(consts.PushOpBattleEnd, p.watch)
+	}
 }
 
 // watch 收集开局通知、帧广播与结束通知。
 func (p *player) watch(operation string, payload []byte) {
 	switch operation {
 	case consts.PushOpMatchStarted:
-		var n gatewayv1.MatchStartedNotify
+		var n gamev1.MatchStartedNotify
 		if err := protojson.Unmarshal(payload, &n); err == nil && n.GetBattleId() != "" {
 			select {
 			case p.started <- n.GetBattleId():
@@ -124,7 +167,7 @@ func (p *player) watch(operation string, payload []byte) {
 			}
 		}
 	case consts.PushOpFrameBroadcast:
-		var fb gatewayv1.FrameBroadcast
+		var fb battlev1.FrameBroadcast
 		if err := protojson.Unmarshal(payload, &fb); err != nil || fb.GetFrame().GetServerTime() == nil {
 			return
 		}
@@ -133,23 +176,14 @@ func (p *player) watch(operation string, payload []byte) {
 		p.frames = append(p.frames, latency)
 		p.mu.Unlock()
 	case consts.PushOpBattleEnd:
-		p.end <- "end"
+		// 压测场景战斗不结束（原地步进输入）；结束通知仅容错记录。
 	}
 }
 
-// queueTwo 双玩家入队并等待双方开局通知（battleID 一致）。
-func queueTwo(ctx context.Context, matcherAddr string, ps ...*player) (string, error) {
-	conn, err := atlasgrpc.DialInsecure(ctx, atlasgrpc.WithEndpoint(matcherAddr))
-	if err != nil {
-		return "", fmt.Errorf("matcher: %w", err)
-	}
-	defer conn.Close()
-	svc := matcherv1.NewMatcherClient(conn)
-	for i, p := range ps {
-		if _, err := svc.QueueMatch(ctx, &matcherv1.QueueMatchRequest{
-			PlayerId: p.id,
-			Player:   &commonv1.PlayerSummary{PlayerId: p.id, Level: int32(10 + i)},
-		}); err != nil {
+// queueTwo 双玩家经 gateway 业务通道 op 入队，等待双方开局通知（battleID 一致）。
+func queueTwo(ctx context.Context, ps ...*player) (string, error) {
+	for _, p := range ps {
+		if _, err := p.players.EnterMatchQueue(ctx, &gamev1.EnterMatchQueueReq{Ruleset: "casual"}); err != nil {
 			return "", fmt.Errorf("%s 入队: %w", p.id, err)
 		}
 	}
@@ -174,9 +208,7 @@ func queueTwo(ctx context.Context, matcherAddr string, ps ...*player) (string, e
 func (p *player) joinBattle(ctx context.Context, battleID string) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		_, err := p.battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{
-			Token: p.token, PlayerId: p.id, BattleId: battleID,
-		})
+		_, err := p.battle.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: battleID})
 		if err == nil {
 			return nil
 		}
@@ -237,7 +269,7 @@ func setupAndOpen(ctx context.Context) (*player, string) {
 	fmt.Printf("[压测] transport=%s driver=%s\n", *transportFlag, driver.id)
 
 	// 开局：双玩家入队并等待成局。
-	battleID, err := queueTwo(ctx, *matcherFlag, driver, dummy)
+	battleID, err := queueTwo(ctx, driver, dummy)
 	if err != nil {
 		fatalf("%v", err)
 	}
@@ -258,7 +290,7 @@ func measureInputLatency(ctx context.Context, driver *player, battleID string) (
 	start := time.Now()
 	for i := 0; i < *inputsFlag; i++ {
 		send := time.Now()
-		if _, err := driver.battle.SendFrameInput(ctx, &gatewayv1.SendFrameInputRequest{
+		if err := driver.battle.SendFrameInput(ctx, &battlev1.FrameInputReq{
 			BattleId: battleID,
 			Input: &locksteppb.LockstepInput{
 				FrameId: uint64(i%30 + 1), PlayerId: driver.id, Payload: []byte{0},
@@ -325,10 +357,9 @@ func fatalf(format string, args ...any) {
 }
 
 var (
-	transportFlag = flag.String("transport", "kcp", "战斗通道：kcp/ws")
-	gwFlag        = flag.String("gw", "127.0.0.1:9001", "gateway TCP 地址")
-	battleFlag    = flag.String("battle", "", "gateway 战斗通道地址（空则按传输形态取默认：kcp 9003 / ws 9002）")
-	matcherFlag   = flag.String("matcher", "127.0.0.1:9200", "matcher gRPC 地址")
+	transportFlag = flag.String("transport", "kcp", "战斗通道：kcp（dual：TCP 业务 + KCP 战斗）/ ws（WS 单通道）")
+	gwFlag        = flag.String("gw", "127.0.0.1:9001", "gateway TCP 业务地址")
+	battleFlag    = flag.String("battle", "", "gateway 战斗通道地址（空则按传输形态取默认：kcp 9003 / ws 9002；ws 形态即单通道地址）")
 	inputsFlag    = flag.Int("inputs", 500, "帧输入次数")
 	windowFlag    = flag.Duration("window", 5*time.Second, "帧广播观测窗口")
 )

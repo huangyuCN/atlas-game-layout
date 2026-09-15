@@ -1,0 +1,86 @@
+// BattleService 是战斗域的统一业务契约：客户端 op 与 actor 分发共用同一份
+// service/消息（帧通道 ws/kcp/udp/tcp 与集群内部同构，不再有镜像投影）。
+//
+// 身份语义（客体寻址）：
+//   - target PID = "battle:{battle_id}"（uid=UID_SOURCE_FIELD，battle_id 是
+//     客体参数/操作目标）；发起者玩家身份由 Gateway 注入投递 sender——
+//     战斗 actor 经 ActorContext.Sender() 取得加入者/输入者，消息体无身份字段；
+//   - access=CLIENT 为客户端 op（战斗通道 SDK 导出、Gateway 透传）；
+//     INTERNAL 为服务端内部（matcher 开局、管理面查询）。
+syntax = "proto3";
+
+package battle.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1";
+
+import "api/atlas/v1/route.proto";
+import "api/battle/v1/battle.proto";
+import "api/lockstep/lockstep.proto";
+import "google/protobuf/empty.proto";
+
+// JoinBattleReq 玩家加入战斗（battle_id 为客体寻址字段；发起者由 sender 承载）。
+message JoinBattleReq {
+  string battle_id = 1;
+}
+
+// JoinBattleReply 加入回执：会话元信息、当前帧与快照（断线重连恢复）。
+message JoinBattleReply {
+  atlas.game.lockstep.SessionMeta meta = 1;
+  uint64 current_frame = 2;
+  atlas.game.lockstep.SnapshotMeta snapshot = 3;
+}
+
+// FrameInputReq 帧输入上行（客户端 → gateway → battle actor 的 lockstep 输入通道）。
+message FrameInputReq {
+  string battle_id = 1;
+  atlas.game.lockstep.LockstepInput input = 2;
+}
+
+message FrameInputReply {}
+
+// SyncFramesReq 补帧：断线重连后携带已见帧号按帧区间拉取缺失帧。
+message SyncFramesReq {
+  string battle_id = 1;
+  uint64 last_seen_frame = 2;
+}
+
+// SyncFramesReply 补帧回执：当前帧、快照与缺失帧输入。
+message SyncFramesReply {
+  uint64 current_frame = 1;
+  atlas.game.lockstep.SnapshotMeta snapshot = 2;
+  repeated atlas.game.lockstep.FrameInputs missed = 3;
+}
+
+// BattleService 是战斗域统一业务契约（客户端 op 与 actor 分发共用一份）。
+service BattleService {
+  option (atlas.route.v1.service_route) = {
+    actor: "battle"
+    access: ACCESS_CLIENT
+    uid: UID_SOURCE_FIELD
+    uid_field: "battle_id"
+  };
+  // 客户端可达（battle:{battle_id} 客体寻址）；转发成功后绑定战斗通道会话
+  //（该副作用由 Gateway 透传装配声明，不在协议注解中表达）。
+  rpc JoinBattle (JoinBattleReq) returns (JoinBattleReply);
+  rpc SendFrameInput (FrameInputReq) returns (google.protobuf.Empty);
+  rpc SyncFrames (SyncFramesReq) returns (SyncFramesReply);
+  // 服务端内部（matcher 开局、管理面 grpc 转发；客户端 op 不存在）。
+  rpc Create (CreateBattleRequest) returns (CreateBattleReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
+  rpc GetState (GetStateReq) returns (GetStateReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
+}
+
+// FrameBroadcast 服务端推送：帧广播下行（op 为消息完整名）。
+message FrameBroadcast {
+  string battle_id = 1;
+  atlas.game.lockstep.LockstepFrame frame = 2;
+}
+
+// BattleEndNotify 服务端推送：战斗结束通知。
+message BattleEndNotify {
+  string battle_id = 1;
+  string winner_player_id = 2;
+}

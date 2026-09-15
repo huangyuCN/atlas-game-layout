@@ -11,9 +11,9 @@ import (
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
+	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -23,7 +23,7 @@ func testAccount(t *testing.T, base string) string {
 	return base + "-" + uuid.NewString()[:8]
 }
 
-// TestE2ERegisterLogin 验证闭环片段：注册 → 登录 → 心跳 → 背包 → 登出 → actor 停止。
+// TestE2ERegisterLogin 验证闭环片段（SDK 会话驱动）：注册 → 登录 → 心跳 → 背包 → 登出 → actor 停止。
 func TestE2ERegisterLogin(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
@@ -33,54 +33,49 @@ func TestE2ERegisterLogin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cli, err := tcpt.NewClient(gw.TCPURL)
-	if err != nil {
-		t.Fatalf("tcp client: %v", err)
-	}
-	defer cli.Close()
-	auth := gatewayv1.NewGatewayPlayerTCPClient(cli)
+	sess, _ := dialBizSession(t, gw.TCPURL)
 	account := testAccount(t, "alice")
 
 	// 注册。
-	reg, err := auth.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "爱丽丝"})
+	reg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "爱丽丝"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if reg.GetPlayerId() == "" {
+	if reg.PlayerID == "" {
 		t.Fatal("注册回执缺少 player_id")
 	}
 	// 重复注册被拒。存量语义：注册临时实例自停并释放目录归属后，同账号重复注册
 	// 在目录未命中窗口内返回 ACTOR_NOT_FOUND（发送侧无该类型 Props 不触发懒激活）；
 	// 该行为改造前后一致。若需重复注册返回 PLAYER_ALREADY_EXISTS，需独立实现
 	// 跨节点懒激活选型（见 2026-09-08-actor-proto-dispatch-codegen-design 已知事项）。
-	if _, err := auth.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"}); err == nil {
+	if _, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"}); err == nil {
 		t.Fatal("重复注册应失败")
 	}
 
-	// 登录。
-	login, err := auth.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"})
-	if err != nil {
+	// 登录（SDK 会话保管回执凭据）。
+	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.PlayerID, Password: "pw"}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if login.GetToken() == "" || login.GetPlayer().GetPlayerId() != reg.GetPlayerId() {
-		t.Fatalf("登录回执不符: %+v", login)
+	if sess.Token() == "" || sess.PlayerID() != reg.PlayerID {
+		t.Fatalf("登录凭据不符: token=%q player=%q", sess.Token(), sess.PlayerID())
 	}
-	// 心跳。
-	if _, err := auth.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: login.GetPlayerId(), Token: login.GetToken(), Ts: 1}); err != nil {
+	// 心跳（显式 Invoke 验证会话续租往返）。
+	var hb gatewayv1.HeartbeatReply
+	if err := sess.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &hb); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 
-	// 背包示例（grpc 直连 game）。
+	// 背包示例（grpc 直连 game 管理面）。
 	gcli, err := atlasgrpc.DialInsecure(ctx, atlasgrpc.WithEndpoint(game.GRPCURL))
 	if err != nil {
 		t.Fatalf("grpc dial: %v", err)
 	}
 	defer gcli.Close()
 	playerSvc := gamev1.NewPlayerClient(gcli)
-	if _, err := playerSvc.GrantItem(ctx, &gamev1.GrantItemRequest{PlayerId: login.GetPlayerId(), ItemId: 1001, Count: 5, Reason: "e2e"}); err != nil {
+	if _, err := playerSvc.GrantItem(ctx, &gamev1.GrantItemRequest{PlayerId: sess.PlayerID(), ItemId: 1001, Count: 5, Reason: "e2e"}); err != nil {
 		t.Fatalf("GrantItem: %v", err)
 	}
-	bp, err := playerSvc.GetBackpack(ctx, &gamev1.GetBackpackRequest{PlayerId: login.GetPlayerId()})
+	bp, err := playerSvc.GetBackpack(ctx, &gamev1.GetBackpackRequest{PlayerId: sess.PlayerID()})
 	if err != nil {
 		t.Fatalf("GetBackpack: %v", err)
 	}
@@ -89,13 +84,12 @@ func TestE2ERegisterLogin(t *testing.T) {
 	}
 
 	// 登出 → 联动 PlayerActor 停止（Locator 移除）。
-	if _, err := auth.Logout(ctx, &gatewayv1.LogoutRequest{PlayerId: login.GetPlayerId(), Token: login.GetToken()}); err != nil {
-		t.Fatalf("Logout: %v", err)
-	}
-	waitActorStopped(t, game, login.GetPlayerId())
+	logoutFlow(t, ctx, sess)
+	waitActorStopped(t, game, reg.PlayerID)
 }
 
-// TestE2ECrossGatewayKick 验证跨 gateway 重复登录挤下线 + actor 存活（新会话接管）。
+// TestE2ECrossGatewayKick 验证跨 gateway 顶号（SDK 会话驱动）：旧端收 KickedNotify、
+// 旧凭据请求被拒，PlayerActor 由新会话接管（不停止）。
 func TestE2ECrossGatewayKick(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
@@ -106,27 +100,18 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cliA, err := tcpt.NewClient(gwA.TCPURL)
-	if err != nil {
-		t.Fatalf("tcp A: %v", err)
-	}
-	defer cliA.Close()
-	authA := gatewayv1.NewGatewayPlayerTCPClient(cliA)
+	sessA, cliA := dialBizSession(t, gwA.TCPURL)
 	account := testAccount(t, "bob")
 
-	regA, err := authA.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
+	regA, err := sessA.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	loginA, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.GetPlayerId(), Password: "pw"})
-	if err != nil {
+	if _, err := sessA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.PlayerID, Password: "pw"}); err != nil {
 		t.Fatalf("A 登录: %v", err)
 	}
 	kicked := make(chan struct{}, 1)
-	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation != consts.PushOpKickedOffline {
-			return
-		}
+	cliA.On(consts.PushOpKickedOffline, func(operation string, payload []byte) {
 		var kn gatewayv1.KickedNotify
 		if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE {
 			kicked <- struct{}{}
@@ -134,14 +119,8 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	})
 
 	// B 登录同一账号：A 旧连接被挤下线，PlayerActor 由新会话接管（不停止）。
-	cliB, err := tcpt.NewClient(gwB.TCPURL)
-	if err != nil {
-		t.Fatalf("tcp B: %v", err)
-	}
-	defer cliB.Close()
-	authB := gatewayv1.NewGatewayPlayerTCPClient(cliB)
-	loginB, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.GetPlayerId(), Password: "pw"})
-	if err != nil {
+	sessB, cliB := dialBizSession(t, gwB.TCPURL)
+	if _, err := sessB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.PlayerID, Password: "pw"}); err != nil {
 		t.Fatalf("B 登录: %v", err)
 	}
 	select {
@@ -149,15 +128,17 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("A 旧连接未收到被挤下线通知")
 	}
-	// A 旧令牌失效。
-	if _, err := authA.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: loginA.GetPlayerId(), Token: loginA.GetToken(), Ts: 1}); err == nil {
+	// A 旧令牌心跳失败（显式携带旧凭据验证服务端拒绝语义）。
+	err = cliA.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &gatewayv1.HeartbeatReply{})
+	if err == nil {
 		t.Fatal("A 旧令牌心跳应失败")
 	}
 	// B 会话与 actor 均存活。
-	if _, err := authB.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: loginB.GetPlayerId(), Token: loginB.GetToken(), Ts: 1}); err != nil {
+	var hb gatewayv1.HeartbeatReply
+	if err := cliB.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &hb); err != nil {
 		t.Fatalf("B 心跳失败: %v", err)
 	}
-	if _, ok := game.Runtime.Raw().Local().Stats(playerPID(loginB.GetPlayerId())); !ok {
+	if _, ok := game.Runtime.Raw().Local().Stats(playerPID(sessB.PlayerID())); !ok {
 		t.Fatal("挤下线后 PlayerActor 不应停止（新会话接管）")
 	}
 }

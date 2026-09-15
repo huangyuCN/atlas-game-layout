@@ -41,10 +41,10 @@ run-all: ## 一键起四服务（前台交错输出，Ctrl-C 全部退出并等�
 	@trap 'kill 0; wait' INT TERM; \
 	for s in $(SERVICES); do $(GO) run ./services/$$s/cmd & done; wait
 
-# e2e 客户端形态：dual（TCP+KCP 双通道）/ single（WS 单通道）。
+# e2e 客户端形态：dual（TCP+KCP 双通道）/ single（WS 单通道）/ party / fault / kick。
 E2E_MODE ?= dual
 
-e2e: ## 运行 e2e 闭环脚本（需 make compose + make run-all；-e E2E_MODE=single 切 WS 单通道）
+e2e: ## 运行 e2e 闭环脚本（脚本自起四服务，仅需先 make compose；-e E2E_MODE=single 切 WS 单通道）
 	$(GO) run ./scripts/e2e -mode $(E2E_MODE)
 
 
@@ -58,13 +58,17 @@ clean:
 # proto 生成：Atlas 插件来自 ATLAS_BIN（本地开发=../atlas/bin，用户项目=atlas upgrade
 # 安装目录，如 `make proto ATLAS_BIN="$(go env GOBIN)"`）。proto-tools 优先收集现成
 # 插件，缺插件且存在 Atlas 源码时回退到源码构建——用户项目不依赖 Atlas 源码仓库。
-PROTO_INC := -I. -Ithird_party
+PROTO_INC := -I. -Ithird_party -I$(abspath $(ATLAS_DIR))
 ATLAS_BIN ?= ../atlas/bin
 ATLAS_DIR ?= $(dir $(ATLAS_BIN))
+# 信任边界三层：管理面（google.api.http REST，atlas-http/go-grpc 生成）、
+# 域统一契约（客户端 op + actor 分发共用一份 service：atlas-actor 生成桩 +
+# atlas-client 生成 SDK stub；透传引擎按注解路由表运行时注册，不再生成传输桩）、
+# 会话生命周期（gateway.v1.Session，Gateway 自留，四传输生成桩）。
 API_SERVICE_PROTOS := api/game/v1/player.proto api/matcher/v1/matcher.proto api/battle/v1/battle.proto
-# 客户端面协议（唯一客户端命名空间 = api/gateway/v1）：player/match 走业务通道 tcp+ws；battle 走战斗通道 ws+kcp+udp。
-API_CLIENT_PROTOS := api/gateway/v1/player_client.proto api/gateway/v1/match_client.proto api/gateway/v1/battle_client.proto
-API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_CLIENT_PROTOS)
+API_DOMAIN_PROTOS := api/game/v1/player_service.proto api/battle/v1/battle_service.proto
+API_SESSION_PROTOS := api/gateway/v1/session.proto
+API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_DOMAIN_PROTOS) $(API_SESSION_PROTOS)
 
 .PHONY: proto proto-tools
 
@@ -88,7 +92,7 @@ proto-tools: ## 收集/构建 protoc 插件到 ./bin（Atlas 全家桶 + go/go-g
 proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/openapi/配置）
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--go_out=. --go_opt=paths=source_relative \
-		protobuf/configs/*.proto services/*/internal/conf/conf.proto $(API_ALL_PROTOS) api/game/v1/player_actor.proto
+		protobuf/configs/*.proto services/*/internal/conf/conf.proto $(API_ALL_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		$(API_SERVICE_PROTOS)
@@ -97,17 +101,17 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 		$(API_SERVICE_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-actor_out=. --atlas-actor_opt=paths=source_relative \
-		api/game/v1/player_actor.proto api/battle/v1/battle_actor.proto
+		$(API_DOMAIN_PROTOS)
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
+		--atlas-client_out=. --atlas-client_opt=paths=source_relative \
+		$(API_DOMAIN_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
-		--atlas-ws_out=. --atlas-ws_opt=paths=source_relative \
-		api/gateway/v1/player_client.proto api/gateway/v1/match_client.proto
-	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-ws_out=. --atlas-ws_opt=paths=source_relative \
 		--atlas-udp_out=. --atlas-udp_opt=paths=source_relative \
 		--atlas-kcp_out=. --atlas-kcp_opt=paths=source_relative \
-		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
-		api/gateway/v1/battle_client.proto
+		$(API_SESSION_PROTOS)
+
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-errors_out=. --atlas-errors_opt=paths=source_relative,biz_code_key=biz_code,biz_reason_key=biz_reason \
 		api/error/v1/errors.proto

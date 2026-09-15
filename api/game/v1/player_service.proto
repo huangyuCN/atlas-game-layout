@@ -1,0 +1,219 @@
+// PlayerService 是玩家域的统一业务契约：客户端 op 与 actor 分发共用同一份
+// service/消息（一份契约，不再有 gateway.v1 ↔ game.v1 镜像投影）。
+//
+// 身份语义（连接即会话，主体身份永不来自客户端 payload）：
+//   - target PID = "player:{会话玩家}"（uid=UID_SOURCE_SESSION，Gateway 按登录
+//     会话组装，客户端不可影响）——actor 只处理自己的数据由此保证；
+//   - 发起者身份由 Gateway 注入投递 sender；JoinParty(party_id) 等字段是客体
+//     参数（操作目标），不是身份字段；
+//   - access=CLIENT 的方法是客户端 op（SDK 导出、Gateway 透传）；
+//     INTERNAL 是服务端内部方法（如 Gateway 调 Login 校验密码、管理面转发），
+//     客户端 op 不存在、SDK 不导出。
+//
+// 撮合/组队回执语义与 api/matcher/v1 的撮合契约对应：属性由聚合根权威填充
+// （客户端不参与上报，反作弊前提）。
+syntax = "proto3";
+
+package game.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
+
+import "api/atlas/v1/route.proto";
+import "api/common/v1/common.proto";
+import "api/matcher/v1/match_events.proto";
+import "google/protobuf/empty.proto";
+import "api/game/v1/player.proto";
+import "api/matcher/v1/matcher.proto";
+
+// LogoutReason 是登出/退出原因（PlayerService.Logout 的语义来源）。
+enum LogoutReason {
+  LOGOUT_REASON_UNSPECIFIED = 0;
+  LOGOUT_REASON_LOGOUT = 1;              // 玩家主动登出
+  LOGOUT_REASON_LOGGED_IN_ELSEWHERE = 2; // 被新登录挤下线
+  LOGOUT_REASON_SESSION_EXPIRED = 3;     // 会话过期（心跳超时清理联动，异常下线兜底）
+}
+
+// ---- 会话生命周期（Gateway 经内部调用链使用；客户端走 gateway.v1.Session）----
+
+// RegisterReq 注册：玩家数据不存在则创建并回执（注册与登录两段式）。
+message RegisterReq {
+  string account = 1;
+  string password = 2;
+  string nickname = 3;
+}
+
+message RegisterReply {
+  string player_id = 1;
+  common.v1.PlayerSummary player = 2;
+}
+
+// LoginReq 登录校验：密码校验与会话令牌落库由 PlayerActor 完成；
+// gateway_instance 由 Gateway 注入（会话路由表写入用），客户端不感知。
+message LoginReq {
+  string player_id = 1;
+  string password = 2;
+  string token = 3; // Gateway 预签发的会话凭据（game 侧不再持有 token 副本，仅校验链路使用）
+  string gateway_instance = 4;
+}
+
+message LoginReply {
+  common.v1.PlayerSummary player = 1;
+}
+
+// LogoutMsg 登出/挤下线退出通知（Tell 载荷）：PlayerActor 收到后保存并停止自身。
+message LogoutMsg {
+  LogoutReason reason = 1;
+}
+
+// ---- 玩家数据（客户端可达：SESSION 寻址）----
+
+// GetPlayerDataReq 玩家数据全量同步请求（登录成功后调用一次完成全量对齐）。
+message GetPlayerDataReq {}
+
+// GetBackpackReq 背包查询请求。
+message GetBackpackReq {}
+
+// PlayerDataReply 玩家数据全量快照：摘要 + 背包（actor 内存聚合根快照）。
+message PlayerDataReply {
+  common.v1.PlayerSummary player = 1;
+  repeated BackpackItem items = 2;
+}
+
+// BackpackReply 背包查询回执（BackpackItem 定义见 player.proto，域内共享）。
+message BackpackReply {
+  repeated BackpackItem items = 1;
+}
+
+// GrantItemReq 背包发放（服务端内部：管理/活动/结算渠道经 grpc 管理面转发）。
+message GrantItemReq {
+  uint32 item_id = 1;
+  uint32 count = 2;
+  string reason = 3; // 发放原因（审计）
+}
+
+// GrantItemReply 定义见 player.proto（管理面/服务端共用回执形状）。
+
+// GetPlayerReq 玩家摘要查询（服务端内部/管理面 grpc 转发；客户端面用 GetPlayerData）。
+message GetPlayerReq {}
+
+// PlayerReply 玩家摘要回执。
+message PlayerReply {
+  common.v1.PlayerSummary player = 1;
+}
+
+// ---- 匹配域（客户端可达：SESSION 寻址；匹配属性由聚合根权威填充）----
+
+// EnterMatchQueueReq 入队匹配：仅规则集名（空串取服务端默认）。
+message EnterMatchQueueReq {
+  string ruleset = 1;
+}
+
+message EnterMatchQueueReply {}
+
+message CancelMatchReq {}
+
+// CancelMatchReply 取消回执：canceled=false 表示本就未在队。
+message CancelMatchReply {
+  bool canceled = 1;
+}
+
+// GetMatchStatusReq 匹配状态查询（轮询兜底用；成局/失败另有主动推送）。
+message GetMatchStatusReq {}
+
+// MatchStatusReply 匹配状态（枚举语义见 matcher.v1.MatchState）。
+// battle_id 供「成局推送丢失后重登恢复」：matched 态据此恢复加入对局。
+message MatchStatusReply {
+  matcher.v1.MatchState state = 1;
+  string ticket_id = 2;
+  string match_id = 3;
+  string battle_id = 4;
+}
+
+// ---- 组队域（灵活 1..N 人；名册权威在撮合域，PlayerActor 持引用与在线态）----
+
+// CreatePartyReq 建队（本玩家为队长）。
+message CreatePartyReq {}
+
+// JoinPartyReq 入队：party_id 是客体参数（队伍标识，队长分享）。
+message JoinPartyReq {
+  string party_id = 1;
+}
+
+message LeavePartyReq {}
+
+// GetPartyReq 名册快照查询（轮询兜底用；成员变更另有主动推送）。
+message GetPartyReq {}
+
+// PartyReply 队伍名册快照（离开/未组队回执空快照）。
+message PartyReply {
+  string party_id = 1;
+  string leader_id = 2;
+  repeated common.v1.PlayerSummary members = 3;
+}
+
+// QueuePartyReq 队长发整队入队（1..N 人都可入队，等对面凑齐等量人数）。
+message QueuePartyReq {
+  string ruleset = 1;
+}
+
+message PartyQueueReply {
+  string ticket_id = 1;
+}
+
+// ---- 服务端推送（撮合域，按连接路由下发；op 为消息完整名）----
+
+// MatchStartedNotify 服务端推送：匹配成功开局通知（含 battle 实例地址）。
+message MatchStartedNotify {
+  string match_id = 1;
+  string battle_id = 2;
+  repeated string player_ids = 3;
+  string endpoint = 4;
+}
+
+// MatchFailedNotify 服务端推送：匹配失败/超时/取消通知。
+message MatchFailedNotify {
+  string ticket_id = 1;
+  matcher.v1.MatchFailReason reason = 2;
+}
+
+// PartyRosterNotify 服务端推送：队伍名册变更（建队/加入/离开/解散，全队下发）。
+message PartyRosterNotify {
+  string party_id = 1;
+  string leader_id = 2;
+  repeated string player_ids = 3;
+  matcher.v1.PartyRosterReason reason = 4;
+}
+
+// PlayerService 是玩家域统一业务契约（客户端 op 与 actor 分发共用一份）。
+service PlayerService {
+  option (atlas.route.v1.service_route) = {
+    actor: "player"
+    access: ACCESS_CLIENT
+    uid: UID_SOURCE_SESSION
+  };
+  // 客户端可达（SESSION 寻址）。
+  rpc Register (RegisterReq) returns (RegisterReply);
+  rpc GetPlayerData (GetPlayerDataReq) returns (PlayerDataReply);
+  rpc GetBackpack (GetBackpackReq) returns (BackpackReply);
+  rpc EnterMatchQueue (EnterMatchQueueReq) returns (EnterMatchQueueReply);
+  rpc CancelMatch (CancelMatchReq) returns (CancelMatchReply);
+  rpc GetMatchStatus (GetMatchStatusReq) returns (MatchStatusReply);
+  rpc CreateParty (CreatePartyReq) returns (PartyReply);
+  rpc JoinParty (JoinPartyReq) returns (PartyReply);
+  rpc LeaveParty (LeavePartyReq) returns (PartyReply);
+  rpc GetParty (GetPartyReq) returns (PartyReply);
+  rpc QueueParty (QueuePartyReq) returns (PartyQueueReply);
+  // 服务端内部（Gateway 登录链路与管理面 grpc 转发；客户端 op 不存在）。
+  rpc Login (LoginReq) returns (LoginReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
+  rpc Logout (LogoutMsg) returns (google.protobuf.Empty) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
+  rpc GrantItem (GrantItemReq) returns (GrantItemReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
+  rpc GetPlayer (GetPlayerReq) returns (PlayerReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
+}

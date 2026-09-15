@@ -14,7 +14,7 @@ import (
 
 // Runtime 是 actorclient 依赖的最小运行时接口（pkg/actor.Runtime 满足，测试可注入实现）。
 type Runtime interface {
-	Tell(ctx context.Context, pid types.PID, msg any) error
+	Tell(ctx context.Context, pid types.PID, msg any, opts ...core.SendOption) error
 	Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error)
 }
 
@@ -85,6 +85,16 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// Ask 按 PID 向集群发起同步请求（透传引擎经 Client 直接以 PID 投递）。
+func (c *Client) Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error) {
+	return c.rt.Ask(ctx, pid, req, opts...)
+}
+
+// Tell 按 PID 向集群投递消息（透传引擎用）。
+func (c *Client) Tell(ctx context.Context, pid types.PID, msg any, opts ...core.SendOption) error {
+	return c.rt.Tell(ctx, pid, msg, opts...)
+}
+
 // TellBattle 向战斗 actor 投递消息（帧输入等，不等待响应）。
 func (c *Client) TellBattle(ctx context.Context, battleID string, msg any) error {
 	pid, err := BattlePID(battleID)
@@ -109,7 +119,7 @@ func (c *Client) AskBattle(ctx context.Context, battleID string, req any) (any, 
 type invoker struct {
 	newPID func(id string) (types.PID, error)
 	ask    func(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error)
-	tell   func(ctx context.Context, pid types.PID, msg any) error
+	tell   func(ctx context.Context, pid types.PID, msg any, opts ...core.SendOption) error
 }
 
 // Ask 实现 core.ActorInvoker：转发到构造时注入的运行时 Ask（SendOption 变参原样透传）。
@@ -117,9 +127,9 @@ func (i invoker) Ask(ctx context.Context, pid types.PID, req any, opts ...core.S
 	return i.ask(ctx, pid, req, opts...)
 }
 
-// Tell 实现 core.ActorInvoker：转发到构造时注入的运行时 Tell。
-func (i invoker) Tell(ctx context.Context, pid types.PID, msg any) error {
-	return i.tell(ctx, pid, msg)
+// Tell 实现 core.ActorInvoker：转发到构造时注入的运行时 Tell（SendOption 变参原样透传）。
+func (i invoker) Tell(ctx context.Context, pid types.PID, msg any, opts ...core.SendOption) error {
+	return i.tell(ctx, pid, msg, opts...)
 }
 
 // PlayerInvoker 返回玩家 actor 的 core.ActorInvoker 适配（生成 client stub 用）。

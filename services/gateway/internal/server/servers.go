@@ -63,29 +63,33 @@ func NewUDPServer(cfg *conf.Bootstrap) (*udpt.Server, error) {
 	return srv, nil
 }
 
-// RegisterGatewayHandlers 将统一 handler 注册到各协议 Server（按用途绑定，D6）：
-// 业务通道（tcp/ws）注册玩家/匹配协议，战斗通道（ws/kcp/udp）注册战斗协议。
+// RegisterGatewayHandlers 将会话生命周期与透传引擎注册到各协议 Server：
+// 会话接口（gateway.v1.Session，Gateway 自留）+ 透传路由表（域 service 的
+// access=CLIENT op，运行时注册，注解驱动）；四传输同构（连接即会话，UDP/KCP 按帧槽验证）。
 func RegisterGatewayHandlers(tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server, g *Gateway) error {
-	if err := gatewayv1.RegisterGatewayPlayerTCPServer(tcpSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 TCP 玩家协议失败: %w", err)
+	if err := gatewayv1.RegisterSessionTCPServer(tcpSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 TCP 会话协议失败: %w", err)
 	}
-	if err := gatewayv1.RegisterGatewayPlayerWSServer(wsSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 WS 玩家协议失败: %w", err)
+	if err := gatewayv1.RegisterSessionWSServer(wsSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 WS 会话协议失败: %w", err)
 	}
-	if err := gatewayv1.RegisterGatewayMatchTCPServer(tcpSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 TCP 匹配协议失败: %w", err)
+	if err := gatewayv1.RegisterSessionKCPServer(kcpSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 KCP 会话协议失败: %w", err)
 	}
-	if err := gatewayv1.RegisterGatewayMatchWSServer(wsSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 WS 匹配协议失败: %w", err)
+	if err := gatewayv1.RegisterSessionUDPServer(udpSrv, g); err != nil {
+		return fmt.Errorf("server: 注册 UDP 会话协议失败: %w", err)
 	}
-	if err := gatewayv1.RegisterGatewayBattleWSServer(wsSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 WS 战斗协议失败: %w", err)
+	if err := RegisterRelayTCPServer(tcpSrv, g.Relay()); err != nil {
+		return fmt.Errorf("server: 注册 TCP 透传路由失败: %w", err)
 	}
-	if err := gatewayv1.RegisterGatewayBattleKCPServer(kcpSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 KCP 战斗协议失败: %w", err)
+	if err := RegisterRelayWSServer(wsSrv, g.Relay()); err != nil {
+		return fmt.Errorf("server: 注册 WS 透传路由失败: %w", err)
 	}
-	if err := gatewayv1.RegisterGatewayBattleUDPServer(udpSrv, g); err != nil {
-		return fmt.Errorf("server: 注册 UDP 战斗协议失败: %w", err)
+	if err := RegisterRelayKCPServer(kcpSrv, g.Relay()); err != nil {
+		return fmt.Errorf("server: 注册 KCP 透传路由失败: %w", err)
+	}
+	if err := RegisterRelayUDPServer(udpSrv, g.Relay()); err != nil {
+		return fmt.Errorf("server: 注册 UDP 透传路由失败: %w", err)
 	}
 	return nil
 }

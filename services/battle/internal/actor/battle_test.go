@@ -16,6 +16,9 @@ import (
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 )
 
+// playerType 是发起者 sender 的 actor 类型名（与 consts.ActorTypePlayer 一致）。
+const playerType = "player"
+
 // memNotifier 是下行通知的内存实现（帧/结束通知记录）。
 type memNotifier struct {
 	mu     sync.Mutex
@@ -95,9 +98,9 @@ func (l localRT) Stop(ctx context.Context, pid types.PID) error {
 	return l.LocalRuntime.Stop(ctx, pid)
 }
 
-// Ask 适配 Runtime.Ask（剥离 SendOption）。
+// Ask 适配 Runtime.Ask（转发 SendOption）。
 func (l localRT) Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error) {
-	return l.LocalRuntime.Ask(ctx, pid, req)
+	return l.LocalRuntime.Ask(ctx, pid, req, opts...)
 }
 
 // battleEnv 是战斗 actor 的进程内本地装配（真 lockstep 会话 + 内存依赖）。
@@ -156,8 +159,19 @@ func newBattleEnv(t *testing.T) *battleEnv {
 }
 
 // ask 以具体消息对象向战斗 actor 请求（同节点直传形态，生成的桩 switch 直接命中）。
+// 适用服务端内部调用（无发起者 sender，如开局/状态查询）。
 func (e *battleEnv) ask(ctx context.Context, req any) (any, error) {
 	return e.rt.Ask(ctx, e.pid, req)
+}
+
+// askAs 以具体消息对象向战斗 actor 请求并注入发起者 sender：
+// 战斗域客户端 op 的发起者身份经投递 sender 注入（消息体无身份字段）。
+func (e *battleEnv) askAs(ctx context.Context, playerID string, req any) (any, error) {
+	sender, err := types.NewPID(playerType, playerID)
+	if err != nil {
+		return nil, err
+	}
+	return e.rt.Ask(ctx, e.pid, req, core.WithSender(sender))
 }
 
 // TestBattleActorFullLoop 验证战斗闭环：开局 → 双人加入 → 帧输入 → 胜负结算
@@ -187,7 +201,7 @@ func seedAndJoin(t *testing.T, env *battleEnv, ctx context.Context) {
 		t.Fatalf("开局回执不符: %T %+v", reply, reply)
 	}
 	for _, p := range []string{"p-a", "p-b"} {
-		reply, err := env.ask(ctx, &battlev1.JoinBattleReq{PlayerId: p})
+		reply, err := env.askAs(ctx, p, &battlev1.JoinBattleReq{BattleId: "b-test01"})
 		if err != nil {
 			t.Fatalf("join %s: %v", p, err)
 		}
@@ -197,22 +211,27 @@ func seedAndJoin(t *testing.T, env *battleEnv, ctx context.Context) {
 		}
 	}
 	// 非参战玩家被拒（错误语义上移到产生点：BATTLE_NOT_FOUND）。
-	_, err = env.ask(ctx, &battlev1.JoinBattleReq{PlayerId: "p-x"})
+	_, err = env.askAs(ctx, "p-x", &battlev1.JoinBattleReq{BattleId: "b-test01"})
 	if atlaserrors.Reason(err) != "BATTLE_NOT_FOUND" {
 		t.Fatalf("非参战玩家应被拒 BATTLE_NOT_FOUND, got %v", err)
 	}
 }
 
 // sendFrameInputs 发送帧输入：a 每帧前进 1（第 5 帧到终点），b 原地不动。
+// 输入是 Tell 单向消息（returns Empty），输入者身份经 sender 注入
+// （消息体只含 battle_id 与输入载荷）。
 func sendFrameInputs(t *testing.T, env *battleEnv, ctx context.Context) {
 	t.Helper()
 	for i := uint64(1); i <= 12; i++ {
 		send := func(p string, step byte) {
-			_, err := env.ask(ctx, &battlev1.FrameInputReq{
-				PlayerId: p,
-				Input:    &locksteppb.LockstepInput{FrameId: i, PlayerId: p, Payload: []byte{step}},
-			})
+			sender, err := types.NewPID(playerType, p)
 			if err != nil {
+				t.Fatalf("sender PID %s: %v", p, err)
+			}
+			if err := env.rt.Tell(ctx, env.pid, &battlev1.FrameInputReq{
+				BattleId: "b-test01",
+				Input:    &locksteppb.LockstepInput{FrameId: i, PlayerId: p, Payload: []byte{step}},
+			}, core.WithSender(sender)); err != nil {
 				t.Fatalf("帧输入 %s@%d: %v", p, i, err)
 			}
 		}
@@ -318,8 +337,9 @@ func waitSettled(t *testing.T, env *battleEnv) {
 	}
 }
 
-// TestBattleActorReconnectRejectsOutsider 验证补帧按参战名单复核：局外人被拒、参战玩家放行。
-func TestBattleActorReconnectRejectsOutsider(t *testing.T) {
+// TestBattleActorSyncFramesRejectsOutsider 验证补帧按参战名单复核：局外人被拒、参战玩家放行
+// （发起者身份经 sender 注入）。
+func TestBattleActorSyncFramesRejectsOutsider(t *testing.T) {
 	env := newBattleEnv(t)
 	ctx := context.Background()
 	_, err := env.ask(ctx, &battlev1.CreateBattleRequest{MatchId: "m-1", PlayerIds: []string{"p-a"}})
@@ -327,13 +347,13 @@ func TestBattleActorReconnectRejectsOutsider(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	// 局外人补帧被拒（INVALID_TOKEN，语义与 gateway 现状对外一致）。
-	_, err = env.ask(ctx, &battlev1.ReconnectReq{PlayerId: "p-x", LastSeenFrame: 0})
+	_, err = env.askAs(ctx, "p-x", &battlev1.SyncFramesReq{BattleId: "b-test01", LastSeenFrame: 0})
 	if atlaserrors.Reason(err) != "INVALID_TOKEN" {
 		t.Fatalf("局外人补帧应被拒 INVALID_TOKEN, got %v", err)
 	}
 	// 参战玩家补帧放行。
-	if _, err = env.ask(ctx, &battlev1.ReconnectReq{PlayerId: "p-a", LastSeenFrame: 0}); err != nil {
-		t.Fatalf("reconnect member: %v", err)
+	if _, err = env.askAs(ctx, "p-a", &battlev1.SyncFramesReq{BattleId: "b-test01", LastSeenFrame: 0}); err != nil {
+		t.Fatalf("sync frames member: %v", err)
 	}
 }
 

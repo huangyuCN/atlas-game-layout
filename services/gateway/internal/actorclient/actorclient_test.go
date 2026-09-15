@@ -15,7 +15,7 @@ type mockRuntime struct {
 	reply any
 }
 
-func (m *mockRuntime) Tell(_ context.Context, pid types.PID, _ any) error {
+func (m *mockRuntime) Tell(_ context.Context, pid types.PID, _ any, _ ...core.SendOption) error {
 	m.tells = append(m.tells, pid)
 	return nil
 }
@@ -91,7 +91,7 @@ func TestAskPlayerRoutesToGame(t *testing.T) {
 }
 
 // TestPlayerInvokerAdaptsRuntime 验证 PlayerInvoker 适配：按玩家 ID 构造 PID
-// 并透传 Ask/Tell（生成的 PlayerActorClient 经此调用集群运行时）。
+// 并透传 Ask/Tell（生成的 PlayerServiceClusterClient 经此调用集群运行时）。
 func TestPlayerInvokerAdaptsRuntime(t *testing.T) {
 	rt := &mockRuntime{reply: "reply-obj"}
 	c := NewClient(rt)

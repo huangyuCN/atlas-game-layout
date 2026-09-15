@@ -12,11 +12,10 @@ import (
 	"go.uber.org/fx"
 )
 
-// newPlayerService 装配玩家业务实现（注册/登录/登出，供 PlayerActor 回调）。
-func newPlayerService(store *repo.PlayerStore, sessions *repo.RedisSessionStore, t Tuning) biz.PlayerService {
-	return handler.NewPlayerHandler(store, sessions, biz.PlayerServiceOptions{
-		SessionTTL: t.SessionTTL,
-	})
+// newPlayerService 装配玩家业务实现（注册/登录，供 PlayerActor 回调）。
+// 会话裁决单点收敛到 Gateway：game 侧不装配会话存储。
+func newPlayerService(store *repo.PlayerStore) biz.PlayerService {
+	return handler.NewPlayerHandler(store, biz.PlayerServiceOptions{})
 }
 
 // newPlayerStateAccess 装配玩家状态访问（经 PlayerActor 转发的聚合根单写者客户端）。

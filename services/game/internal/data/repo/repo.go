@@ -27,13 +27,3 @@ type PlayerRepo interface {
 	// SavePlayer 持久化到 mongo（下线落库）。
 	SavePlayer(ctx context.Context, player *models.Player) error
 }
-
-// SessionStore 是玩家在线会话令牌存储抽象。
-type SessionStore interface {
-	// Get 读取玩家当前会话令牌（不存在返回空串）。
-	Get(ctx context.Context, playerID string) (string, error)
-	// Set 写入玩家会话令牌（TTL 过期自动清理）。
-	Set(ctx context.Context, playerID, token string, ttl time.Duration) error
-	// Del 删除玩家会话令牌（登出/挤下线清理）。
-	Del(ctx context.Context, playerID string) error
-}

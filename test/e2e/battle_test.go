@@ -16,41 +16,39 @@ import (
 	battleassemble "github.com/huangyuCN/atlas-game-layout/services/battle/assemble"
 	gwassemble "github.com/huangyuCN/atlas-game-layout/services/gateway/assemble"
 	matcherassemble "github.com/huangyuCN/atlas-game-layout/services/matcher/assemble"
+	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	wst "github.com/huangyuCN/atlas/transport/websocket"
 	natsgo "github.com/nats-io/nats.go"
 	"go.mongodb.org/mongo-driver/bson"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// battleClient 是一端战斗客户端（ws 单通道：认证 + 战斗共用连接），
+// battleClient 是一端战斗客户端（SDK ws 单通道：业务+战斗共用连接），
 // 记录服务端推送的帧广播与战斗结束通知。
 type battleClient struct {
-	cli      *wst.Client
-	battle   gatewayv1.GatewayBattleWSClient
+	sess     *sdkclient.Session
+	cli      *sdkclient.Client
+	battle   *battlev1.BattleServiceClient
 	playerID string
 	token    string
 
 	mu     sync.Mutex
-	frames []*gatewayv1.FrameBroadcast
-	ends   []*gatewayv1.BattleEndNotify
+	frames []*battlev1.FrameBroadcast
+	ends   []*battlev1.BattleEndNotify
 }
 
 // newBattleClient 注册登录并挂接推送监听。
 func newBattleClient(t *testing.T, ctx context.Context, gw *gwassemble.Gateway) *battleClient {
 	t.Helper()
-	cli, err := wst.NewClient(ctx, gw.WSURL)
-	if err != nil {
-		t.Fatalf("ws client: %v", err)
-	}
-	t.Cleanup(func() { _ = cli.Close() })
-	token, playerID := loginFlow(t, ctx, gatewayv1.NewGatewayPlayerWSClient(cli))
+	sess, cli := dialWSSession(t, gw.WSURL)
+	loginFlow(t, ctx, sess)
 	c := &battleClient{
+		sess:     sess,
 		cli:      cli,
-		battle:   gatewayv1.NewGatewayBattleWSClient(cli),
-		playerID: playerID,
-		token:    token,
+		battle:   battlev1.NewBattleServiceClient(cli),
+		playerID: sess.PlayerID(),
+		token:    sess.Token(),
 	}
 	c.watchNotifies()
 	return c
@@ -58,10 +56,10 @@ func newBattleClient(t *testing.T, ctx context.Context, gw *gwassemble.Gateway) 
 
 // watchNotifies 挂接推送监听（帧广播/战斗结束通知记录）。
 func (c *battleClient) watchNotifies() {
-	c.cli.OnNotify(func(operation string, payload []byte) {
+	h := func(operation string, payload []byte) {
 		switch operation {
 		case consts.PushOpFrameBroadcast:
-			var fb gatewayv1.FrameBroadcast
+			var fb battlev1.FrameBroadcast
 			if err := protojson.Unmarshal(payload, &fb); err != nil {
 				return
 			}
@@ -69,7 +67,7 @@ func (c *battleClient) watchNotifies() {
 			c.frames = append(c.frames, &fb)
 			c.mu.Unlock()
 		case consts.PushOpBattleEnd:
-			var end gatewayv1.BattleEndNotify
+			var end battlev1.BattleEndNotify
 			if err := protojson.Unmarshal(payload, &end); err != nil {
 				return
 			}
@@ -77,7 +75,9 @@ func (c *battleClient) watchNotifies() {
 			c.ends = append(c.ends, &end)
 			c.mu.Unlock()
 		}
-	})
+	}
+	c.cli.On(consts.PushOpFrameBroadcast, h)
+	c.cli.On(consts.PushOpBattleEnd, h)
 }
 
 // joinBattle 加入战斗（战斗 actor 懒激活期间重试）。
@@ -87,9 +87,7 @@ func (c *battleClient) joinBattle(t *testing.T, ctx context.Context, battleID st
 	var lastJoin *battlev1.JoinBattleReply
 	var lastErr error
 	for time.Now().Before(deadline) {
-		join, err := c.battle.JoinBattle(ctx, &gatewayv1.JoinBattleRequest{
-			Token: c.token, PlayerId: c.playerID, BattleId: battleID,
-		})
+		join, err := c.battle.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: battleID})
 		if err == nil {
 			return join
 		}
@@ -104,7 +102,7 @@ func (c *battleClient) joinBattle(t *testing.T, ctx context.Context, battleID st
 func (c *battleClient) sendFrames(t *testing.T, ctx context.Context, battleID string, from, to uint64, step byte) {
 	t.Helper()
 	for i := from; i <= to; i++ {
-		_, err := c.battle.SendFrameInput(ctx, &gatewayv1.SendFrameInputRequest{
+		err := c.battle.SendFrameInput(ctx, &battlev1.FrameInputReq{
 			BattleId: battleID,
 			Input:    &locksteppb.LockstepInput{FrameId: i, PlayerId: c.playerID, Payload: []byte{step}},
 		})
@@ -155,7 +153,7 @@ func (c *battleClient) waitEnd(t *testing.T) string {
 }
 
 // lastFrame 返回最新一帧广播。
-func (c *battleClient) lastFrame() *gatewayv1.FrameBroadcast {
+func (c *battleClient) lastFrame() *battlev1.FrameBroadcast {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.frames) == 0 {
@@ -373,35 +371,30 @@ func dropAndReconnect(t *testing.T, ctx context.Context, gw *gwassemble.Gateway,
 		t.Fatalf("重连加入回执缺快照: %+v", join)
 	}
 	// 补帧：从 0 拉取缺失帧（断点之前的全部帧）。
-	sync, err := a2.battle.SyncFrames(ctx, &locksteppb.SyncFrameRequest{
-		SessionId: battleID, FromFrameId: 0, Limit: 100,
-	})
+	sync, err := a2.battle.SyncFrames(ctx, &battlev1.SyncFramesReq{BattleId: battleID, LastSeenFrame: 0})
 	if err != nil {
 		t.Fatalf("SyncFrames: %v", err)
 	}
-	if len(sync.GetFrames()) == 0 || sync.GetConfirmedFrameId() < join.GetCurrentFrame() {
-		t.Fatalf("补帧回执不符: frames=%d confirmed=%d current=%d",
-			len(sync.GetFrames()), sync.GetConfirmedFrameId(), join.GetCurrentFrame())
+	if len(sync.GetMissed()) == 0 || sync.GetCurrentFrame() < join.GetCurrentFrame() {
+		t.Fatalf("补帧回执不符: frames=%d current=%d joinCurrent=%d",
+			len(sync.GetMissed()), sync.GetCurrentFrame(), join.GetCurrentFrame())
 	}
 	return a2
 }
 
-// newBattleClientWithToken 以既有令牌重建 ws 连接（断线重连场景）。
+// newBattleClientWithToken 以既有令牌重建 ws 连接（断线重连场景：Resume 免密恢复绑定）。
 func newBattleClientWithToken(t *testing.T, ctx context.Context, gw *gwassemble.Gateway, prev *battleClient) *battleClient {
 	t.Helper()
-	cli, err := wst.NewClient(ctx, gw.WSURL)
-	if err != nil {
-		t.Fatalf("重连 ws client: %v", err)
-	}
-	t.Cleanup(func() { _ = cli.Close() })
-	auth := gatewayv1.NewGatewayPlayerWSClient(cli)
-	_, err = auth.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: prev.playerID, Token: prev.token, Ts: 1})
-	if err != nil {
-		t.Fatalf("重连心跳: %v", err)
+	sess, cli := dialWSSession(t, gw.WSURL)
+	var rep gatewayv1.ResumeReply
+	if err := cli.Invoke(ctx, sdkclient.OpSessionResume,
+		&gatewayv1.ResumeRequest{Token: prev.token, PlayerId: prev.playerID}, &rep); err != nil {
+		t.Fatalf("重连 Resume: %v", err)
 	}
 	c := &battleClient{
+		sess:     sess,
 		cli:      cli,
-		battle:   gatewayv1.NewGatewayBattleWSClient(cli),
+		battle:   battlev1.NewBattleServiceClient(cli),
 		playerID: prev.playerID,
 		token:    prev.token,
 	}

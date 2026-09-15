@@ -13,16 +13,16 @@ import (
 )
 
 // PlayerClient 是 biz.PlayerStateAccess 的实现：
-// 经生成的 client stub 调用 PlayerActor（写收敛到聚合根单写者，cow 前提）。
+// 经生成的集群 client stub 调用 PlayerActor（写收敛到聚合根单写者，cow 前提）。
 // 业务错误直接以 Go error 返回（code/reason 经集群 error 通道往返保留），
 // 调用方按 atlas errors.Reason 判定还原语义。
 type PlayerClient struct {
-	cli *gamev1.PlayerActorClient
+	cli *gamev1.PlayerServiceClusterClient
 }
 
 // NewPlayerClient 构造玩家状态访问客户端。
 func NewPlayerClient(rt *pkgactor.Runtime) *PlayerClient {
-	return &PlayerClient{cli: gamev1.NewPlayerActorClient(rt)}
+	return &PlayerClient{cli: gamev1.NewPlayerServiceClusterClient(rt)}
 }
 
 // GrantItem 实现 biz.PlayerStateAccess（聚合根 undo 写）。
@@ -31,7 +31,7 @@ func (c *PlayerClient) GrantItem(ctx context.Context, playerID string, itemID, c
 	if err != nil {
 		return err
 	}
-	req := &gamev1.GrantItemActorReq{ItemId: itemID, Count: count, Reason: reason}
+	req := &gamev1.GrantItemReq{ItemId: itemID, Count: count, Reason: reason}
 	if _, err := c.cli.GrantItem(ctx, pid, req); err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func (c *PlayerClient) GetBackpack(ctx context.Context, playerID string) ([]*gam
 	if err != nil {
 		return nil, err
 	}
-	reply, err := c.cli.GetBackpack(ctx, pid, &gamev1.GetBackpackActorReq{})
+	reply, err := c.cli.GetBackpack(ctx, pid, &gamev1.GetBackpackReq{})
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (c *PlayerClient) GetPlayer(ctx context.Context, playerID string) (*commonv
 	if err != nil {
 		return nil, err
 	}
-	reply, err := c.cli.GetPlayer(ctx, pid, &gamev1.GetPlayerActorReq{})
+	reply, err := c.cli.GetPlayer(ctx, pid, &gamev1.GetPlayerReq{})
 	if err != nil {
 		return nil, err
 	}

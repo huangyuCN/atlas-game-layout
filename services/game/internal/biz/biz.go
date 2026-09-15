@@ -4,24 +4,19 @@ package biz
 
 import (
 	"context"
-	"time"
 
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 )
 
-// PlayerService 是玩家注册/登录/登出业务接口（PlayerActor 经此接入业务逻辑）。
+// PlayerService 是玩家注册/登录业务接口（PlayerActor 经此接入业务逻辑）。
+// 会话裁决已单点收敛到 Gateway（会话管理器）：game 侧只管玩家数据，不持 token 副本。
 type PlayerService interface {
 	// Register 注册：账号不存在则创建玩家（两段式：只建数据不建会话）。
-	Register(ctx context.Context, req *gamev1.RegisterActorReq) (*gamev1.RegisterActorReply, error)
-	// Login 登录：校验玩家数据与口令，会话令牌裁决后建立新会话。
-	Login(ctx context.Context, req *gamev1.LoginActorReq) (*gamev1.LoginActorReply, error)
-	// Logout 登出：令牌匹配才清理会话。
-	Logout(ctx context.Context, playerID, token string) error
-	// SessionToken 返回玩家当前游戏侧会话令牌（空表示无会话）；
-	// 异常下线联动（SESSION_EXPIRED）的接管裁决用：存在「不同令牌」的会话 = 新登录接管。
-	SessionToken(ctx context.Context, playerID string) (string, error)
+	Register(ctx context.Context, req *gamev1.RegisterReq) (*gamev1.RegisterReply, error)
+	// Login 登录：校验玩家数据与口令并回执摘要；会话建立与令牌裁决在 Gateway。
+	Login(ctx context.Context, req *gamev1.LoginReq) (*gamev1.LoginReply, error)
 }
 
 // GameService 是玩家查询与背包业务接口（grpc/http 服务实现）。
@@ -44,8 +39,6 @@ type PlayerStateAccess interface {
 
 // PlayerServiceOptions 是玩家业务服务的装配参数（handler 构造用）。
 type PlayerServiceOptions struct {
-	// SessionTTL 是在线会话租期。
-	SessionTTL time.Duration
 	// NewPlayerID 是玩家 ID 生成器（nil 用 idgen 默认实现）。
 	NewPlayerID func() string
 }

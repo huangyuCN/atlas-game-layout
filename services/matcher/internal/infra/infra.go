@@ -200,7 +200,7 @@ func (s *BattleActorStarter) Start(ctx context.Context, battleID, matchID string
 	if err != nil {
 		return fmt.Errorf("infra: 非法战斗 ID %q: %w", battleID, err)
 	}
-	cli := battlev1.NewBattleActorClient(s.rt)
+	cli := battlev1.NewBattleServiceClusterClient(s.rt)
 	if _, err := cli.Create(ctx, pid, &battlev1.CreateBattleRequest{
 		MatchId:   matchID,
 		PlayerIds: playerIDs,

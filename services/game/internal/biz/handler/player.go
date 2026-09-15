@@ -15,23 +15,24 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
 )
 
-// PlayerHandler 是 biz.PlayerService 的实现（注册/登录/登出）。
+// PlayerHandler 是 biz.PlayerService 的实现（注册/登录）。
+// 会话裁决已单点收敛到 Gateway：game 侧只校验玩家数据，不持久化 token 副本
+// （LoginReq.Token 仅供 Gateway 预签发链路使用，此处不落库）。
 type PlayerHandler struct {
-	store    repo.PlayerRepo
-	sessions repo.SessionStore
-	opts     biz.PlayerServiceOptions
+	store repo.PlayerRepo
+	opts  biz.PlayerServiceOptions
 }
 
 // NewPlayerHandler 构造玩家业务实现。
-func NewPlayerHandler(store repo.PlayerRepo, sessions repo.SessionStore, opts biz.PlayerServiceOptions) *PlayerHandler {
+func NewPlayerHandler(store repo.PlayerRepo, opts biz.PlayerServiceOptions) *PlayerHandler {
 	if opts.NewPlayerID == nil {
 		opts.NewPlayerID = idgen.Player
 	}
-	return &PlayerHandler{store: store, sessions: sessions, opts: opts}
+	return &PlayerHandler{store: store, opts: opts}
 }
 
 // Register 实现 biz.PlayerService（两段式：建号回执，不建会话）。
-func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterActorReq) (*gamev1.RegisterActorReply, error) {
+func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterReq) (*gamev1.RegisterReply, error) {
 	if req.GetAccount() == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("账号与口令不能为空")
 	}
@@ -55,16 +56,17 @@ func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterActorR
 	if err := h.store.CreatePlayer(ctx, player); err != nil {
 		return nil, errorv1.ErrInternal("创建玩家失败")
 	}
-	return &gamev1.RegisterActorReply{
+	return &gamev1.RegisterReply{
 		PlayerId: player.PlayerID,
 		Player:   usecase.PlayerSummary(player),
 	}, nil
 }
 
-// Login 实现 biz.PlayerService（redis→mongo 三级加载 + 会话令牌裁决）。
-func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginActorReq) (*gamev1.LoginActorReply, error) {
-	if req.GetPlayerId() == "" || req.GetPassword() == "" || req.GetToken() == "" {
-		return nil, errorv1.ErrInvalidParams("玩家/口令/令牌不能为空")
+// Login 实现 biz.PlayerService（redis→mongo 三级加载 + 口令校验）。
+// 会话建立与令牌裁决由 Gateway 单点承担：本方法不再写会话表、不做新旧令牌比对。
+func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginReq) (*gamev1.LoginReply, error) {
+	if req.GetPlayerId() == "" || req.GetPassword() == "" {
+		return nil, errorv1.ErrInvalidParams("玩家与口令不能为空")
 	}
 	player, err := h.store.LoadPlayer(ctx, req.GetPlayerId())
 	if errors.Is(err, repo.ErrPlayerNotFound) {
@@ -76,37 +78,9 @@ func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginActorReq) (*
 	if !data.VerifyPassword(req.GetPassword(), player.Salt, player.Password) {
 		return nil, errorv1.ErrPasswordWrong("口令错误")
 	}
-	// 会话令牌裁决：覆盖旧令牌（旧连接在 gateway 侧被挤下线处理）。
-	if err := h.sessions.Set(ctx, player.PlayerID, req.GetToken(), h.opts.SessionTTL); err != nil {
-		return nil, errorv1.ErrInternal("写入会话失败")
-	}
-	return &gamev1.LoginActorReply{
+	return &gamev1.LoginReply{
 		Player: usecase.PlayerSummary(player),
 	}, nil
-}
-
-// Logout 实现 biz.PlayerService（令牌匹配才清理，裁决竞态兜底）。
-func (h *PlayerHandler) Logout(ctx context.Context, playerID, token string) error {
-	if playerID == "" || token == "" {
-		return errorv1.ErrInvalidParams("玩家与令牌不能为空")
-	}
-	current, err := h.sessions.Get(ctx, playerID)
-	if err != nil {
-		return errorv1.ErrInternal("读取会话失败")
-	}
-	if current != token {
-		return nil // 会话已归属新登录，静默跳过
-	}
-	if err := h.sessions.Del(ctx, playerID); err != nil {
-		return errorv1.ErrInternal("清理会话失败")
-	}
-	return nil
-}
-
-// SessionToken 实现 biz.PlayerService：读取玩家当前会话令牌（空表示无会话）。
-// 异常下线联动（SESSION_EXPIRED）的接管裁决用：存在「不同令牌」的会话 = 新登录接管。
-func (h *PlayerHandler) SessionToken(ctx context.Context, playerID string) (string, error) {
-	return h.sessions.Get(ctx, playerID)
 }
 
 // 静态保证 PlayerHandler 实现 biz.PlayerService。

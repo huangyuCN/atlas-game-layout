@@ -122,8 +122,8 @@ func (r *Runtime) Stop(ctx context.Context, pid types.PID) error {
 
 // Tell 向任意 actor 发送消息（目录路由自动寻址，支持跨节点与懒激活）。
 // 满足 core.ActorInvoker（protoc-gen-atlas-actor 生成 client stub 的发送端依赖）。
-func (r *Runtime) Tell(ctx context.Context, pid types.PID, msg any) error {
-	return r.inner.Local().Tell(ctx, pid, msg)
+func (r *Runtime) Tell(ctx context.Context, pid types.PID, msg any, opts ...core.SendOption) error {
+	return r.inner.Local().Tell(ctx, pid, msg, opts...)
 }
 
 // Ask 向任意 actor 请求响应（目录路由自动寻址）。

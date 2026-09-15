@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
-	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
@@ -40,9 +39,9 @@ func NewNatsBattleNotifier(nc *natsgo.Conn) *NatsBattleNotifier {
 }
 
 // PublishFrame 实现 biz.BattleNotifier：
-// 以 atlas.push.<playerID> 信封（type=FrameBroadcast）下发一帧。
+// 以 atlas.push.<playerID> 信封（type=FrameBroadcast，op 为消息完整名）下发一帧。
 func (f *NatsBattleNotifier) PublishFrame(ctx context.Context, playerID, battleID string, frame *locksteppb.LockstepFrame) error {
-	payload, err := protojson.Marshal(&gatewayv1.FrameBroadcast{BattleId: battleID, Frame: frame})
+	payload, err := protojson.Marshal(&battlev1.FrameBroadcast{BattleId: battleID, Frame: frame})
 	if err != nil {
 		return fmt.Errorf("infra: 帧广播编码失败: %w", err)
 	}
@@ -50,9 +49,9 @@ func (f *NatsBattleNotifier) PublishFrame(ctx context.Context, playerID, battleI
 }
 
 // PublishEnd 实现 biz.BattleNotifier：
-// 以 atlas.push.<playerID> 信封（type=BattleEndNotify）下发战斗结束通知。
+// 以 atlas.push.<playerID> 信封（type=BattleEndNotify，op 为消息完整名）下发战斗结束通知。
 func (f *NatsBattleNotifier) PublishEnd(ctx context.Context, playerID, battleID, winner string) error {
-	payload, err := protojson.Marshal(&gatewayv1.BattleEndNotify{BattleId: battleID, WinnerPlayerId: winner})
+	payload, err := protojson.Marshal(&battlev1.BattleEndNotify{BattleId: battleID, WinnerPlayerId: winner})
 	if err != nil {
 		return fmt.Errorf("infra: 结束通知编码失败: %w", err)
 	}

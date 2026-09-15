@@ -1,10 +1,14 @@
 // Package actor 提供 battle 服务的 actor 装配：BattleActor（集群懒激活）承载
-// 一局战斗：内嵌 lockstep 会话（帧引擎）+ 帧广播下发 + 结算落库与事件（M7）。
+// 一局战斗：内嵌 lockstep 会话（帧引擎）+ 帧广播下发 + 结算落库与事件。
+//
+// 分发由 protoc-gen-atlas-actor 生成的桩接管（battlev1.NewBattleServiceServer），
+// 客户端 op 与集群内部调用共用同一份 service 契约。发起者玩家身份不来自消息体，
+// 统一经投递 sender 注入（ActorContext.Sender，Gateway 侧组装）。
 //
 // BattleActor 按业务域分文件：
 //   - battle.go         装配/配置/生命周期（本文件）
-//   - battle_session.go 会话域（Create/Join/Reconnect/GetState）
-//   - battle_frame.go   帧同步/结算域（FrameInput/onFrameResult/checkSettle）
+//   - battle_session.go 会话域（Create/JoinBattle/SyncFrames/GetState）
+//   - battle_frame.go   帧同步/结算域（SendFrameInput/onFrameResult/checkSettle）
 package actor
 
 import (
@@ -58,7 +62,7 @@ type Runtime interface {
 	Register(props core.Props) error
 	Spawn(ctx context.Context, pid types.PID) (core.Ref, error)
 	Stop(ctx context.Context, pid types.PID) error
-	Tell(ctx context.Context, pid types.PID, msg any) error
+	Tell(ctx context.Context, pid types.PID, msg any, opts ...core.SendOption) error
 	Ask(ctx context.Context, pid types.PID, req any, opts ...core.SendOption) (any, error)
 }
 
@@ -112,12 +116,12 @@ func NewProps(p Props) core.Props {
 				cfg:        p.Cfg,
 				players:    make(map[string]struct{}),
 			}
-			return battlev1.NewBattleActorServer(b, core.WithLocalTell(b.onFrameResult))
+			return battlev1.NewBattleServiceServer(b, core.WithLocalTell(b.onFrameResult))
 		},
 		SpawnMode:     core.SpawnAuto,
 		Tell:          pkgactor.DefaultTellChain(),
 		Ask:           pkgactor.DefaultAskChain(),
-		DecodeInbound: battlev1.NewBattleActorDecodeInbound(),
+		DecodeInbound: battlev1.NewBattleServiceDecodeInbound(),
 	}
 }
 

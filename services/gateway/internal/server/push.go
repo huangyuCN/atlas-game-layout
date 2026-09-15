@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
@@ -76,7 +76,7 @@ func (g *Gateway) onMatchStarted(_ string, data []byte) {
 		if err := protojson.Unmarshal(data, &ev); err != nil {
 			return nil, nil, false
 		}
-		payload, err := protojson.Marshal(&gatewayv1.MatchStartedNotify{
+		payload, err := protojson.Marshal(&gamev1.MatchStartedNotify{
 			MatchId:   ev.GetMatchId(),
 			BattleId:  ev.GetBattleId(),
 			PlayerIds: ev.GetPlayerIds(),
@@ -96,7 +96,7 @@ func (g *Gateway) onMatchFailed(_ string, data []byte) {
 		if err := protojson.Unmarshal(data, &ev); err != nil {
 			return nil, nil, false
 		}
-		payload, err := protojson.Marshal(&gatewayv1.MatchFailedNotify{
+		payload, err := protojson.Marshal(&gamev1.MatchFailedNotify{
 			TicketId: ev.GetTicketId(),
 			Reason:   ev.GetReason(),
 		})
@@ -115,7 +115,7 @@ func (g *Gateway) onPartyRoster(_ string, data []byte) {
 			atlaslog.Error("gateway: 名册事件解码失败", "err", err, "raw", string(data))
 			return nil, nil, false
 		}
-		payload, err := protojson.Marshal(&gatewayv1.PartyRosterNotify{
+		payload, err := protojson.Marshal(&gamev1.PartyRosterNotify{
 			PartyId:   ev.GetPartyId(),
 			LeaderId:  ev.GetLeaderId(),
 			PlayerIds: ev.GetPlayerIds(),

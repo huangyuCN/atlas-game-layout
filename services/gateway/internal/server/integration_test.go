@@ -9,6 +9,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	"github.com/huangyuCN/atlas/transport"
 	natss "github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -48,76 +49,49 @@ func newProbeNats() (*natss.Conn, error) {
 	return nats.Connect(nats.Options{URL: integrationNatsURL, Name: "probe"})
 }
 
-// TestIntegrationKickCrossInstance 真 redis/nats 跨实例挤下线专项（M4 验收）。
+// TestIntegrationKickCrossInstance 真 redis/nats 跨实例挤下线专项（M4 验收）：
+// 实例 A 登录 → 实例 B 登录 → 经控制通道 A 的旧连接收到被挤下线通知。
 func TestIntegrationKickCrossInstance(t *testing.T) {
 	if reason := probeBackends(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
 	}
 	envA := newGWEnvWithRedis(t, "gw-a", integrationRedisAddr, integrationNatsURL)
 	envB := newGWEnvWithRedis(t, "gw-b", integrationRedisAddr, integrationNatsURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
-	cliA, authA := envA.newTCPAuthClient(t)
-	loginA, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-1", Password: "x"})
-	if err != nil {
-		t.Fatalf("A 登录: %v", err)
-	}
-	kicked := make(chan struct{}, 1)
-	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation != consts.PushOpKickedOffline {
-			return
-		}
-		var kn gatewayv1.KickedNotify
-		if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE {
-			kicked <- struct{}{}
-		}
-	})
+	envA.login(t, 1, "it-p-1")
+	envB.login(t, 1, "it-p-1")
 
-	_, authB := envB.newTCPAuthClient(t)
-	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-1", Password: "x"}); err != nil {
-		t.Fatalf("B 登录: %v", err)
+	if !waitFor(3*time.Second, func() bool {
+		return hasPush(envA.push.snapshot(), 1, consts.PushOpKickedOffline)
+	}) {
+		t.Fatalf("A 旧连接未收到被挤下线通知: %+v", envA.push.snapshot())
 	}
-	select {
-	case <-kicked:
-	case <-time.After(3 * time.Second):
-		t.Fatal("A 旧连接未收到被挤下线通知")
+	// 挤下线通知原因枚举校验。
+	pushes := envA.push.snapshot()
+	var kn gatewayv1.KickedNotify
+	if err := protojson.Unmarshal(pushes[len(pushes)-1].payload, &kn); err != nil {
+		t.Fatalf("挤下线通知解码: %v", err)
 	}
-	if _, err := authA.Heartbeat(ctx, &gatewayv1.HeartbeatRequest{PlayerId: "it-p-1", Token: loginA.GetToken(), Ts: 1}); err == nil {
-		t.Fatal("A 旧令牌心跳应失败")
+	if kn.GetReason() != gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE {
+		t.Fatalf("挤下线原因不符: %+v", &kn)
+	}
+	// A 旧连接心跳被拒。
+	if _, err := envA.g.Heartbeat(connCtx(transport.KindTCP, gatewayv1.OperationSessionHeartbeatTCP, 1, ""), &gatewayv1.HeartbeatRequest{Ts: 1}); err == nil {
+		t.Fatal("A 旧连接心跳应失败")
 	}
 }
 
-// TestIntegrationPushOnlyOwnerDelivers 真 redis/nats 双实例推送专项（M4 验收）。
+// TestIntegrationPushOnlyOwnerDelivers 真 redis/nats 双实例推送专项（M4 验收）：
+// 推送事件仅由持有连接的实例下发。
 func TestIntegrationPushOnlyOwnerDelivers(t *testing.T) {
 	if reason := probeBackends(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
 	}
 	envA := newGWEnvWithRedis(t, "gw-a", integrationRedisAddr, integrationNatsURL)
 	envB := newGWEnvWithRedis(t, "gw-b", integrationRedisAddr, integrationNatsURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
-	cliA, authA := envA.newTCPAuthClient(t)
-	if _, err := authA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-1", Password: "x"}); err != nil {
-		t.Fatalf("A 登录: %v", err)
-	}
-	cliB, authB := envB.newTCPAuthClient(t)
-	if _, err := authB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: "it-p-2", Password: "x"}); err != nil {
-		t.Fatalf("B 登录: %v", err)
-	}
-	gotA := make(chan struct{}, 1)
-	gotB := make(chan struct{}, 1)
-	cliA.OnNotify(func(operation string, payload []byte) {
-		if operation == consts.PushOpMatchStarted {
-			gotA <- struct{}{}
-		}
-	})
-	cliB.OnNotify(func(operation string, payload []byte) {
-		if operation == consts.PushOpMatchStarted {
-			gotB <- struct{}{}
-		}
-	})
+	envA.login(t, 1, "it-p-1")
+	envB.login(t, 1, "it-p-2")
 
 	nc, err := newProbeNats()
 	if err != nil {
@@ -125,17 +99,16 @@ func TestIntegrationPushOnlyOwnerDelivers(t *testing.T) {
 	}
 	defer nc.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	if err := PublishPush(ctx, nc, "it-p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
 		t.Fatalf("PublishPush: %v", err)
 	}
-	select {
-	case <-gotA:
-	case <-time.After(3 * time.Second):
-		t.Fatal("A 未收到 p-1 推送")
+	if !waitFor(3*time.Second, func() bool { return hasPush(envA.push.snapshot(), 1, consts.PushOpMatchStarted) }) {
+		t.Fatalf("A 未收到 p-1 推送: %+v", envA.push.snapshot())
 	}
-	select {
-	case <-gotB:
+	time.Sleep(300 * time.Millisecond)
+	if hasPush(envB.push.snapshot(), 1, consts.PushOpMatchStarted) {
 		t.Fatal("B 不应收到 p-1 推送")
-	case <-time.After(300 * time.Millisecond):
 	}
 }

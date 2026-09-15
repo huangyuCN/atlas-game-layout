@@ -1,6 +1,6 @@
-// Package actor 认证域业务方法：Register/Login/Logout（实现 PlayerActorServer 接口的认证部分）。
+// Package actor 认证域业务方法：Register/Login/Logout（实现 PlayerServiceServer 接口的认证部分）。
 // 业务逻辑经 svc（PlayerHandler）承接；本文件只保留 actor 壳：
-// 错误上抛（不再包 Ok:false 回执——错误经集群 error 通道往返，code/reason 保留）。
+// 错误上抛（错误经集群 error 通道往返，code/reason 保留）。
 package actor
 
 import (
@@ -11,9 +11,9 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
 
-// Register 实现 gamev1.PlayerActorServer（两段式注册，D8）：
+// Register 实现 gamev1.PlayerServiceServer（两段式注册）：
 // 玩家数据不存在则创建并回执，客户端仍需 Login 建立会话；回执后自停。
-func (p *PlayerActor) Register(ctx core.ActorContext, req *gamev1.RegisterActorReq) (*gamev1.RegisterActorReply, error) {
+func (p *PlayerActor) Register(ctx core.ActorContext, req *gamev1.RegisterReq) (*gamev1.RegisterReply, error) {
 	reply, berr := p.svc.Register(ctx.Context(), req)
 	if berr != nil {
 		return nil, berr // 错误上抛：集群 error 通道往返（code/reason 保留）
@@ -23,12 +23,11 @@ func (p *PlayerActor) Register(ctx core.ActorContext, req *gamev1.RegisterActorR
 	return reply, nil
 }
 
-// Login 实现 gamev1.PlayerActorServer（D10 会话令牌裁决）：首登加载聚合根
-// 到内存（redis→mongo 三级链路）。
-// 重复登录（本 actor 已持聚合根）时复用内存权威态、不重载：在线期间内存比存储
-// 新（定时快照 + 下线落库），重载会用陈旧快照覆盖快照间隙的内存写
-// （如顶号重登丢失刚发放的道具）。
-func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginActorReq) (*gamev1.LoginActorReply, error) {
+// Login 实现 gamev1.PlayerServiceServer：首登加载聚合根到内存（redis→mongo 三级链路）。
+// 会话建立与令牌裁决由 Gateway 单点承担（game 侧不落 token）；重复登录（本 actor
+// 已持聚合根）时复用内存权威态、不重载：在线期间内存比存储新（定时快照 + 下线
+// 落库），重载会用陈旧快照覆盖快照间隙的内存写（如顶号重登丢失刚发放的道具）。
+func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginReq) (*gamev1.LoginReply, error) {
 	reply, berr := p.svc.Login(ctx.Context(), req)
 	if berr != nil {
 		return nil, berr
@@ -45,19 +44,11 @@ func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginActorReq) (*
 	return reply, nil
 }
 
-// Logout 实现 gamev1.PlayerActorServer（Tell，单向）：令牌校验后停止自身
+// Logout 实现 gamev1.PlayerServiceServer（Tell，单向）：收到即保存并停止自身
 // （Locator 移除，集群目录归属释放，OnStop 联动撮合域 + 落库）。
-// 异常下线（SESSION_EXPIRED / LOGGED_IN_ELSEWHERE）先做接管裁决：
-// 存在「不同令牌」的游戏侧会话 = 新登录接管本 actor，跳过停止以保护新会话；
-// 无会话（令牌过期）或仍为旧令牌则安全停止。
-func (p *PlayerActor) Logout(ctx core.ActorContext, msg *gamev1.LogoutActorMsg) error {
-	_ = p.svc.Logout(ctx.Context(), p.pid.UID(), msg.GetToken())
-	if msg.GetReason() != gamev1.LogoutReason_LOGOUT_REASON_LOGOUT {
-		cur, err := p.svc.SessionToken(ctx.Context(), p.pid.UID())
-		if err == nil && cur != "" && cur != msg.GetToken() {
-			return nil // 新登录接管：不停止
-		}
-	}
+// 旧「token 匹配才停」的裁决已移除：会话裁决单点收敛到 Gateway（会话管理器），
+// game 侧不持 token 副本，LogoutMsg 也不再有 token 字段（reason 仅事件语义）。
+func (p *PlayerActor) Logout(ctx core.ActorContext, _ *gamev1.LogoutMsg) error {
 	ctx.Stop(types.ExitNormal())
 	return nil
 }

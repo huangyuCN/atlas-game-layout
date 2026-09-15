@@ -9,9 +9,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TestSendFrameInputRoundtrip 校验帧输入上行消息与 lockstep 帧数据复用后的编解码往返。
+// TestSendFrameInputRoundtrip 校验帧输入上行消息（battle.v1.FrameInputReq，
+// 与 lockstep 帧数据复用）的编解码往返。
 func TestSendFrameInputRoundtrip(t *testing.T) {
-	in := &SendFrameInputRequest{
+	in := &battlev1.FrameInputReq{
 		BattleId: "b-0001",
 		Input: &locksteppb.LockstepInput{
 			FrameId:   7,
@@ -24,7 +25,7 @@ func TestSendFrameInputRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("protojson.Marshal 失败: %v", err)
 	}
-	var out SendFrameInputRequest
+	var out battlev1.FrameInputReq
 	if err := protojson.Unmarshal(b, &out); err != nil {
 		t.Fatalf("protojson.Unmarshal 失败: %v", err)
 	}
@@ -53,14 +54,13 @@ func TestJoinBattleReplyCarriesSnapshot(t *testing.T) {
 	}
 }
 
-// TestSyncFramesReusesLockstep 校验补帧 RPC 直接复用 lockstep.SyncFrameRequest。
+// TestSyncFramesReusesLockstep 校验补帧请求（battle.v1.SyncFramesReq）携带客体字段与断点帧号。
 func TestSyncFramesReusesLockstep(t *testing.T) {
-	req := &locksteppb.SyncFrameRequest{
-		SessionId:   "b-0001",
-		FromFrameId: 5,
-		Limit:       10,
+	req := &battlev1.SyncFramesReq{
+		BattleId:      "b-0001",
+		LastSeenFrame: 5,
 	}
-	if req.GetSessionId() != "b-0001" || req.GetFromFrameId() != 5 || req.GetLimit() != 10 {
-		t.Fatalf("SyncFrameRequest 字段不符: %v", req)
+	if req.GetBattleId() != "b-0001" || req.GetLastSeenFrame() != 5 {
+		t.Fatalf("SyncFramesReq 字段不符: %v", req)
 	}
 }
