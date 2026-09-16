@@ -1,7 +1,7 @@
 // Package actor 提供 game 服务的 actor 装配：PlayerActor（集群懒激活）承载
-// 玩家在线态：内存聚合根（cow 写）+ 定时 redis 快照 + 下线 mongo 落库。
-// 会话裁决单点收敛到 Gateway（会话管理器）：game 侧不持 token 副本，
-// 收到 LogoutMsg 即保存并停机。
+// 玩家在线态：内存聚合根（cow 写）+ 统一落盘（Redis 主路径 / Mongo 降级）+
+// 下线流程反转（落库成功才停止，双库失败进入在线冻结）。
+// 会话裁决单点收敛到 Gateway（会话管理器）：game 侧不持 token 副本。
 //
 // 分发由 protoc-gen-atlas-actor 生成的桩接管（gamev1.NewPlayerServiceServer）：
 // 业务 actor 只实现 PlayerServiceServer 业务接口与可选生命周期（OnStart/OnStop）；
@@ -9,11 +9,11 @@
 package actor
 
 import (
-	"fmt"
 	"time"
 
 	atlaslog "github.com/huangyuCN/atlas/log"
 
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
@@ -24,18 +24,29 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
 
-// tickSnapshot 是定时快照自消息（OnStart 注册 Repeat，经本地类型路由分发）。
+// tickSnapshot 是定时落盘自消息（OnStart 注册 Repeat，经本地类型路由分发）。
 type tickSnapshot struct{}
 
+// retryFlush 是冻结 / 下线重试自消息（AfterPersistent：进程崩溃重启后仍存活）。
+type retryFlush struct{}
+
+// 停止前落库的短重试参数（同步执行；无论成败都退出，丢已冻结窗口数据）。
+const (
+	stopRetryTimes = 3
+	stopRetryDelay = 500 * time.Millisecond
+	// frozenRetryInterval 是在线冻结期间的重试周期（每分钟）。
+	frozenRetryInterval = time.Minute
+)
+
 // NewProps 构造 PlayerActor 注册规格（SpawnAuto 懒激活 + 默认中间件链）。
-// snapTTL 是快照缓存租期；snapTick 是定时快照周期（≤0 关闭）；
-// match 是匹配队列客户端（nil 降级：匹配方法返回内部错误，单测可注入 fake）。
-func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.MatchmakerClient, snapTTL, snapTick time.Duration) core.Props {
+// snapTick 是统一落盘周期（≤0 关闭定时落盘）；match 是匹配队列客户端
+// （nil 降级：匹配方法返回内部错误，单测可注入 fake）。
+func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.MatchmakerClient, snapTick time.Duration) core.Props {
 	return core.Props{
 		Type: consts.ActorTypePlayer,
 		NewHandler: func(pid types.PID) core.Handler {
 			p := &PlayerActor{
-				pid: pid, svc: svc, store: store, match: match, snapTTL: snapTTL, snapTick: snapTick,
+				pid: pid, svc: svc, store: store, match: match, snapTick: snapTick,
 			}
 			return gamev1.NewPlayerServiceServer(p, core.WithLocalTell(p.onTickSnapshot))
 		},
@@ -49,20 +60,29 @@ func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.Matchmaker
 // PlayerActor 是玩家在线态 actor：同一玩家全局唯一实例（Locator 注册 player:<id>）。
 // 实现 gamev1.PlayerServiceServer 业务接口；OnStart/OnStop 为可选生命周期接口
 // （生成桩断言转发）；OnAsk/OnTell 分发由生成桩全权接管。
+//
+// 耐久性编排（对齐第一期设计）：
+//   - 定时落盘走统一 FlushPlayer（Redis 主路径 / Mongo 降级）；
+//   - 双库失败进入在线冻结（拒绝改档、保连接、每分钟重试，不 Kick 不 Terminate）；
+//   - 下线流程反转：先落库（短重试）成功才 ctx.Stop，失败转 Redis PERSIST 兜底；
+//   - OnStop 退化为零失败收尾（清定时器、断聚合根引用）。
 type PlayerActor struct {
 	gamev1.UnimplementedPlayerServiceServer // 兜底：service 加新 rpc 未实现也能编译
 	pid                                     types.PID
 	svc                                     biz.PlayerService
 	store                                   repo.PlayerRepo
 	match                                   biz.MatchmakerClient
-	partyID                                 string // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
-	snapTTL                                 time.Duration
-	snapTick                                time.Duration
 
-	player *models.Player // 内存聚合根（在线缓存；登录后持有）
+	player            *models.Player    // 内存聚合根（在线缓存；登录后持有）
+	partyID           string            // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
+	snapTick          time.Duration     // 统一落盘周期（≤0 关闭定时落盘）
+	lastCRC           uint32            // 上次成功落盘的数据指纹（CRC 跳过用）
+	frozen            bool              // 在线冻结标记：双库失败后拒绝改档（数据不再堆积）
+	freezeRetryCancel core.CancelFunc   // 冻结期重试定时器的取消句柄
+	stopReq           *types.ExitReason // 下线流程请求：非 nil 表示已进入「落库后退出」流程
 }
 
-// OnStart 实现 core.Handler 生命周期：注册定时快照 Repeat。
+// OnStart 实现 core.Handler 生命周期：注册定时落盘 Repeat（3 分钟节奏）。
 func (p *PlayerActor) OnStart(ctx core.ActorContext) error {
 	p.pid = ctx.Self()
 	if p.snapTick > 0 {
@@ -71,55 +91,135 @@ func (p *PlayerActor) OnStart(ctx core.ActorContext) error {
 	return nil
 }
 
-// OnStop 实现 core.Handler 生命周期：联动撮合域（幂等、失败仅忽略，不阻断下线）
-// ——先取消单人在队匹配，再离开队伍（整队在匹配中则联动取消整队票），最后做
-// 下线 mongo 落库（若持有聚合根）。
+// OnStop 实现 core.Handler 生命周期：零失败收尾（幂等、错误仅记录不阻断）。
+// 落库已在停止前的下线流程完成（流程反转：落库成功才发起 Stop）；
+// 这里不再有可失败的写路径。
 func (p *PlayerActor) OnStop(ctx core.ActorContext, reason types.ExitReason) error {
-	_ = reason
 	if p.match != nil {
 		_, _ = p.match.Cancel(ctx.Context(), p.pid.UID())
 		if p.partyID != "" {
 			_ = p.match.Leave(ctx.Context(), p.partyID, p.pid.UID())
 		}
 	}
-	if p.player != nil {
-		if err := p.store.SavePlayer(ctx.Context(), p.player); err != nil {
-			return fmt.Errorf("actor: 下线落库失败: %w", err)
+	p.player = nil
+	return nil
+}
+
+// beginStopFlow 发起下线流程（流程反转的统一入口）：撮合域联动先行（幂等），
+// 再进入「落库短重试 → 成功才真正 Stop；双失败 PERSIST 兜底后强制退出」。
+func (p *PlayerActor) beginStopFlow(ctx core.ActorContext, reason types.ExitReason) {
+	if p.player == nil {
+		ctx.Stop(reason)
+		return
+	}
+	// 撮合域联动先行（幂等；失败仅忽略——下线落库才是数据屏障）。
+	if p.match != nil {
+		_, _ = p.match.Cancel(ctx.Context(), p.pid.UID())
+		if p.partyID != "" {
+			_ = p.match.Leave(ctx.Context(), p.partyID, p.pid.UID())
+			p.partyID = ""
 		}
+	}
+	p.stopReq = &reason
+	if p.stopFlush(ctx) {
+		// 落库成功：数据安全，真正退出（OnStop 仅零失败收尾）。
 		p.player = nil
+		ctx.Stop(reason)
+		return
+	}
+	// 双失败短重试后仍失败：redis PERSIST 兜底——最新态转未落库权威副本（零丢失），
+	// 强制退出（接受 mongo 缺档；Mongo 恢复后登录选源以 Redis 为准）。
+	if perr := p.store.PersistSnapshot(ctx.Context(), p.player.PlayerID); perr != nil {
+		atlaslog.Errorf("player actor 下线 PERSIST 兜底失败: uid=%s err=%v", p.pid.UID(), perr)
+	}
+	atlaslog.Errorf("player actor 下线双库落盘失败: uid=%s（已 PERSIST 兜底，退出）", p.pid.UID())
+	p.player = nil
+	ctx.Stop(reason)
+}
+
+// stopFlush 同步短重试落盘（下线路径）：3 次 × 500ms，返回是否最终成功。
+// 成功或失败都返回（调用方按结果处理），不挂起不无限重试（第一期取舍）。
+func (p *PlayerActor) stopFlush(ctx core.ActorContext) bool {
+	for i := 0; i < stopRetryTimes; i++ {
+		result, crc, err := p.store.FlushPlayer(ctx.Context(), p.player, p.lastCRC)
+		switch {
+		case err == nil && result != repo.FlushBothFailed:
+			p.lastCRC = crc
+			return true
+		case err == nil && result == repo.FlushBothFailed:
+			// FlushPlayer 内部双失败：继续短重试
+		default:
+			// err 非空：FlushPlayer 内部已按双失败处理
+		}
+		time.Sleep(stopRetryDelay)
+	}
+	return false
+}
+
+// flushOrRetry 执行一次统一落盘并按结果编排：
+//   - Redis 成功 / Skip：数据已安全 → 若有挂起的下线请求则真正退出；
+//   - Mongo 降级成功：数据已安全（Mongo 为准）→ 同上；
+//   - 双失败 → 进入在线冻结（拒绝改档 + 每分钟重试），不 Kick 不 Terminate。
+func (p *PlayerActor) flushOrRetry(ctx core.ActorContext) {
+	if p.player == nil {
+		return
+	}
+	result, crc, err := p.store.FlushPlayer(ctx.Context(), p.player, p.lastCRC)
+	if err != nil {
+		result = repo.FlushBothFailed // FlushPlayer 返回 err 时按双失败编排
+	}
+	switch result {
+	case repo.FlushRedisOK, repo.FlushMongoOK, repo.FlushSkipped:
+		p.lastCRC = crc
+		p.unfreeze()
+		if p.stopReq != nil {
+			r := *p.stopReq
+			p.stopReq = nil
+			ctx.Stop(r) // 落库屏障达成：真正退出（OnStop 仅收尾）
+		}
+	case repo.FlushBothFailed:
+		p.freeze(ctx)
+	}
+}
+
+// freeze 进入在线冻结：拒绝改档（玩法冻结），数据不再堆积。
+// 不 Kick、不 Terminate——网关踢人会触发下线落盘链路，冻结态会丢。
+// 注册每分钟重试定时器（ctx.Repeat，解冻时取消）。
+func (p *PlayerActor) freeze(ctx core.ActorContext) {
+	p.frozen = true
+	atlaslog.Errorf("player actor 冻结改档: uid=%s（双库落盘失败，每分钟重试）", p.pid.UID())
+	if p.freezeRetryCancel != nil {
+		p.freezeRetryCancel() // 幂等：先取消旧的重试（防重复注册）
+	}
+	p.freezeRetryCancel = ctx.After(frozenRetryInterval, tickSnapshot{})
+}
+
+// unfreeze 解除在线冻结（取消冻结期重试定时器）。
+func (p *PlayerActor) unfreeze() {
+	if p.freezeRetryCancel != nil {
+		p.freezeRetryCancel()
+		p.freezeRetryCancel = nil
+	}
+	if p.frozen {
+		atlaslog.Infof("player actor 解冻: uid=%s", p.pid.UID())
+	}
+	p.frozen = false
+}
+
+// guardFrozen 冻结期改档守卫：改档类操作统一拒绝（SERVER_FROZEN，
+// HTTP 503 语义——客户端应退避重试）；查询类方法不守卫（只读）。
+func (p *PlayerActor) guardFrozen() error {
+	if p.frozen {
+		return errorv1.ErrServerFrozen("服务暂时不可写，请稍后重试")
 	}
 	return nil
 }
 
-// ---- 消息前置钩子（示例，可整体删除）----
-//
-// OnBeforeTell/OnBeforeAsk 实现 core.BeforeTellHook/BeforeAskHook 可选接口：
-// proto 消息与本地消息在分发到具体业务方法之前都会经过这里，适合打印、埋点、
-// 鉴权、限流等前置操作。返回 nil 继续正常分发；返回非 nil error 中断本次处理
-// （该错误即本次投递/Ask 的结果，业务错误经集群 error 通道回传调用方）。
-// 不实现这两个方法时生成桩自动跳过，零成本。
-
-// OnBeforeTell Tell 消息分发前置钩子（示例）：打印消息类型。
-func (p *PlayerActor) OnBeforeTell(ctx core.ActorContext, msg any) error {
-	atlaslog.Debugf("player actor tell 前置: uid=%s msg=%T", ctx.Self().UID(), msg)
-	return nil
-}
-
-// OnBeforeAsk Ask 请求分发前置钩子（示例）：打印请求类型。
-func (p *PlayerActor) OnBeforeAsk(ctx core.ActorContext, req any) error {
-	atlaslog.Debugf("player actor ask 前置: uid=%s req=%T", ctx.Self().UID(), req)
-	return nil
-}
-
-// onTickSnapshot 定时 redis 快照（在线缓存刷盘，本地路由注册项）。
+// onTickSnapshot 定时统一落盘（在线缓存刷盘，本地路由注册项）。
 func (p *PlayerActor) onTickSnapshot(ctx core.ActorContext, _ tickSnapshot) error {
-	return p.saveSnapshot(ctx)
-}
-
-// saveSnapshot 定时 redis 快照（在线缓存刷盘）。
-func (p *PlayerActor) saveSnapshot(ctx core.ActorContext) error {
-	if p.player == nil || p.snapTTL <= 0 {
+	if p.player == nil {
 		return nil
 	}
-	return p.store.SaveSnapshot(ctx.Context(), p.player, p.snapTTL)
+	p.flushOrRetry(ctx)
+	return nil
 }

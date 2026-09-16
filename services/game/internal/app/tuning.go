@@ -8,17 +8,15 @@ import "time"
 
 // Tuning 是 game 服务时间类调优参数的单点定义
 // （原 server/deps.go 与 assemble 各声明一份，收敛至此杜绝漂移）。
+// 快照租期（72h）由 redis 仓储层常量统一管理（耐久性语义，不外露调优）。
 type Tuning struct {
-	// SnapshotTTL 是玩家快照缓存租期。
-	SnapshotTTL time.Duration
-	// SnapshotTick 是定时快照周期（<=0 关闭定时快照）。
+	// SnapshotTick 是统一落盘周期（3 分钟；丢失窗口上限；<=0 关闭定时落盘）。
 	SnapshotTick time.Duration
 }
 
 // DefaultTuning 提供默认调优参数。
 func DefaultTuning() Tuning {
 	return Tuning{
-		SnapshotTTL:  5 * time.Minute,
-		SnapshotTick: 10 * time.Second,
+		SnapshotTick: 3 * time.Minute,
 	}
 }

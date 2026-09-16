@@ -68,7 +68,7 @@ func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginReq) (*gamev
 	if req.GetPlayerId() == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("玩家与口令不能为空")
 	}
-	player, err := h.store.LoadPlayer(ctx, req.GetPlayerId())
+	player, err := h.store.LoadCredential(ctx, req.GetPlayerId())
 	if errors.Is(err, repo.ErrPlayerNotFound) {
 		return nil, errorv1.ErrPlayerNotFound("玩家不存在，请先注册")
 	}
@@ -78,8 +78,13 @@ func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginReq) (*gamev
 	if !data.VerifyPassword(req.GetPassword(), player.Salt, player.Password) {
 		return nil, errorv1.ErrPasswordWrong("口令错误")
 	}
+	// 回执摘要用选源后的最新数据（redis 快照可能比 mongo 新）。
+	latest, err := h.store.LoadPlayer(ctx, req.GetPlayerId())
+	if err != nil {
+		latest = player // 选源失败：退回 mongo 校验数据（登录不因数据面阻塞）
+	}
 	return &gamev1.LoginReply{
-		Player: usecase.PlayerSummary(player),
+		Player: usecase.PlayerSummary(latest),
 	}, nil
 }
 

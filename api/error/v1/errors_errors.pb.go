@@ -443,6 +443,54 @@ func WrapPasswordWrong(cause error, format string, args ...interface{}) *errors.
 	return ErrPasswordWrong(format, args...).WithCause(cause)
 }
 
+// 服务冻结（双库落盘失败，数据保护态）
+func IsServerFrozen(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "SERVER_FROZEN" || e.Code != 503 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1010"
+}
+
+// 服务冻结（双库落盘失败，数据保护态）
+func ErrServerFrozen(format string, args ...interface{}) *errors.Error {
+	return errors.New(503, "SERVER_FROZEN", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1010",
+		"biz_reason": "ServerFrozen",
+	})
+}
+
+// ReasonServerFrozen 返回当前错误的 reason 常量值。
+func ReasonServerFrozen() string {
+	return "SERVER_FROZEN"
+}
+
+// CodeServerFrozen 返回当前错误对应的 HTTP 状态码。
+func CodeServerFrozen() int {
+	return 503
+}
+
+// BizCodeServerFrozen 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeServerFrozen() int32 {
+	return 1010
+}
+
+// NewServerFrozen 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewServerFrozen(message string) *errors.Error {
+	return errors.New(503, "SERVER_FROZEN", message).WithMetadata(map[string]string{
+		"biz_code":   "1010",
+		"biz_reason": "ServerFrozen",
+	})
+}
+
+// WrapServerFrozen 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapServerFrozen(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrServerFrozen(format, args...).WithCause(cause)
+}
+
 // 匹配
 func IsAlreadyInMatch(err error) bool {
 	if err == nil {
@@ -1027,6 +1075,9 @@ func matchKnown(e *errors.Error) (*errors.Error, bool) {
 		return e, true
 	}
 	if IsPasswordWrong(e) {
+		return e, true
+	}
+	if IsServerFrozen(e) {
 		return e, true
 	}
 	if IsAlreadyInMatch(e) {

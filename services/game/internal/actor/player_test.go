@@ -62,13 +62,47 @@ func (r *memRepo) CreatePlayer(_ context.Context, p *models.Player) error {
 	return nil
 }
 
-func (r *memRepo) SaveSnapshot(_ context.Context, p *models.Player, _ time.Duration) error {
+// LoadCredential mongo 专用读（含认证字段；登录口令校验用）。
+func (r *memRepo) LoadCredential(_ context.Context, playerID string) (*models.Player, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if p, ok := r.players[playerID]; ok {
+		return clonePlayer(p), nil
+	}
+	return nil, repo.ErrPlayerNotFound
+}
+
+// FlushPlayer 统一落盘（测试桩：快照 + 持久都成功）。
+func (r *memRepo) FlushPlayer(_ context.Context, p *models.Player, lastCRC uint32) (repo.FlushResult, uint32, error) {
+	r.mu.Lock()
 	r.snapshots[p.PlayerID] = clonePlayer(p)
+	r.players[p.PlayerID] = clonePlayer(p)
+	r.saves++
+	r.mu.Unlock()
+	return repo.FlushRedisOK, lastCRC + 1, nil
+}
+
+// PersistSnapshot 玩家快照 PERSIST（测试桩：no-op）。
+func (r *memRepo) PersistSnapshot(_ context.Context, playerID string) error {
 	return nil
 }
 
+// TTLOfSnapshot 快照 TTL 查询（测试桩：有档固定 72h）。
+func (r *memRepo) TTLOfSnapshot(_ context.Context, playerID string) (time.Duration, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.snapshots[playerID]; !ok {
+		return 0, repo.ErrPlayerNotFound
+	}
+	return 72 * time.Hour, nil
+}
+
+// ExpireSnapshot 恢复快照 TTL（测试桩：no-op）。
+func (r *memRepo) ExpireSnapshot(_ context.Context, playerID string, ttl time.Duration) error {
+	return nil
+}
+
+// SavePlayer mongo 落库（测试桩：无条件 Upsert）。
 func (r *memRepo) SavePlayer(_ context.Context, p *models.Player) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -199,7 +233,7 @@ func newActorEnv(t *testing.T, snapTTL, snapTick time.Duration) (*core.LocalRunt
 	svc := handler.NewPlayerHandler(store, biz.PlayerServiceOptions{
 		NewPlayerID: func() string { return "p-test" },
 	})
-	if err := rt.Register(NewProps(svc, store, match, snapTTL, snapTick)); err != nil {
+	if err := rt.Register(NewProps(svc, store, match, snapTick)); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	regPID, err := types.NewPID("player", "alice")

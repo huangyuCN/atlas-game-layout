@@ -47,11 +47,40 @@ func (r *memRepo) CreatePlayer(_ context.Context, p *models.Player) error {
 	return nil
 }
 
-func (r *memRepo) SaveSnapshot(_ context.Context, p *models.Player, _ time.Duration) error {
+// LoadCredential mongo 专用读（含认证字段；登录口令校验用）。
+func (r *memRepo) LoadCredential(_ context.Context, playerID string) (*models.Player, error) {
+	if p, ok := r.players[playerID]; ok {
+		return clonePlayer(p), nil
+	}
+	return nil, repo.ErrPlayerNotFound
+}
+
+// FlushPlayer 统一落盘（测试桩：快照 + 持久都成功）。
+func (r *memRepo) FlushPlayer(_ context.Context, p *models.Player, lastCRC uint32) (repo.FlushResult, uint32, error) {
 	r.snapshots[p.PlayerID] = clonePlayer(p)
+	r.players[p.PlayerID] = clonePlayer(p)
+	return repo.FlushRedisOK, lastCRC + 1, nil
+}
+
+// PersistSnapshot 玩家快照 PERSIST（测试桩：no-op）。
+func (r *memRepo) PersistSnapshot(_ context.Context, playerID string) error {
 	return nil
 }
 
+// TTLOfSnapshot 快照 TTL 查询（测试桩：有档固定 72h）。
+func (r *memRepo) TTLOfSnapshot(_ context.Context, playerID string) (time.Duration, error) {
+	if _, ok := r.snapshots[playerID]; !ok {
+		return 0, repo.ErrPlayerNotFound
+	}
+	return 72 * time.Hour, nil
+}
+
+// ExpireSnapshot 恢复快照 TTL（测试桩：no-op）。
+func (r *memRepo) ExpireSnapshot(_ context.Context, playerID string, ttl time.Duration) error {
+	return nil
+}
+
+// SavePlayer mongo 落库（测试桩：无条件 Upsert）。
 func (r *memRepo) SavePlayer(_ context.Context, p *models.Player) error {
 	r.players[p.PlayerID] = clonePlayer(p)
 	return nil
@@ -135,12 +164,10 @@ func TestLoginLoadsFromCache(t *testing.T) {
 	if _, err := h.Register(ctx, &gamev1.RegisterReq{Account: "alice", Password: "pw"}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	// 写入快照缓存，并让持久化层内容不一致（模拟缓存优先）。
+	// 写入快照缓存，并让持久化层内容不一致（模拟缓存优先：同版本用 Redis）。
 	p, _ := store.LoadPlayer(ctx, "p-test")
 	p.Nickname = "缓存昵称"
-	if err := store.SaveSnapshot(ctx, p, time.Minute); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
-	}
+	store.snapshots[p.PlayerID] = clonePlayer(p)
 	reply, err := h.Login(ctx, &gamev1.LoginReq{PlayerId: "p-test", Password: "pw", Token: "t1"})
 	if err != nil {
 		t.Fatalf("Login: %v", err)

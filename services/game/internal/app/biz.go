@@ -29,7 +29,7 @@ func matchmakerClientOf(m *repo.MatchQueueGRPC) biz.MatchmakerClient { return m 
 // registerActor 注册 PlayerActor 并把集群运行时接入 fx 生命周期
 // （OnStart 启动懒激活监听、OnStop 触发在持聚合根下线落库）。
 func registerActor(lc fx.Lifecycle, rt *pkgactor.Runtime, svc biz.PlayerService, store *repo.PlayerStore, match biz.MatchmakerClient, t Tuning) error {
-	if err := rt.Register(gameactor.NewProps(svc, store, match, t.SnapshotTTL, t.SnapshotTick)); err != nil {
+	if err := rt.Register(gameactor.NewProps(svc, store, match, t.SnapshotTick)); err != nil {
 		return fmt.Errorf("app: 注册 PlayerActor 失败: %w", err)
 	}
 	lc.Append(fx.Hook{

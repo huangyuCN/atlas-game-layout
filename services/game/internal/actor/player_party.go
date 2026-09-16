@@ -34,6 +34,9 @@ func (p *PlayerActor) partySnapshot(info *matcherv1.PartyInfo) *gamev1.PartyRepl
 // CreateParty 实现 gamev1.PlayerServiceServer：建队（本玩家为队长，Ask）。
 func (p *PlayerActor) CreateParty(ctx core.ActorContext, _ *gamev1.CreatePartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
+		if err := p.guardFrozen(); err != nil {
+			return nil, err
+		}
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
 	if p.player == nil {
@@ -58,6 +61,9 @@ func (p *PlayerActor) CreateParty(ctx core.ActorContext, _ *gamev1.CreatePartyRe
 // JoinParty 实现 gamev1.PlayerServiceServer：按 party_id 加入（Ask，容量原子校验）。
 func (p *PlayerActor) JoinParty(ctx core.ActorContext, req *gamev1.JoinPartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
+		if err := p.guardFrozen(); err != nil {
+			return nil, err
+		}
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
 	if p.player == nil {
@@ -81,6 +87,9 @@ func (p *PlayerActor) JoinParty(ctx core.ActorContext, req *gamev1.JoinPartyReq)
 // 不在队直接回执空快照；队长离开顺延、空队解散由撮合域保证。
 func (p *PlayerActor) LeaveParty(ctx core.ActorContext, _ *gamev1.LeavePartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
+		if err := p.guardFrozen(); err != nil {
+			return nil, err
+		}
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
 	if p.partyID == "" {
@@ -112,6 +121,9 @@ func (p *PlayerActor) GetParty(ctx core.ActorContext, _ *gamev1.GetPartyReq) (*g
 // 1..N 人都可入队（不要求满员），等对面凑齐等量人数。
 func (p *PlayerActor) QueueParty(ctx core.ActorContext, req *gamev1.QueuePartyReq) (*gamev1.PartyQueueReply, error) {
 	if p.partyUnavailable() {
+		if err := p.guardFrozen(); err != nil {
+			return nil, err
+		}
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
 	if p.player == nil {

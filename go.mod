@@ -33,7 +33,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/huangyuCN/atlas-sdk-go v0.0.0
-	github.com/klauspost/compress v1.19.2 // indirect
+	github.com/klauspost/compress v1.19.2
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/klauspost/reedsolomon v1.14.2 // indirect
 	github.com/minio/highwayhash v1.0.4 // indirect

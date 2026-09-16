@@ -21,6 +21,7 @@ const (
 	undoKindPlayerItemsSliceSetAt
 	undoKindPlayerItemsSliceRestore
 	undoKindPlayerCreatedAtScalarSet
+	undoKindPlayerPersistVersionScalarSet
 )
 
 type undoOp struct {
@@ -32,6 +33,7 @@ type undoOp struct {
 	oldI64    int64
 	oldString string
 	oldU32    uint32
+	oldU64    uint64
 
 	snapItem []*Item
 	had      bool
@@ -94,6 +96,8 @@ func (ctx *TxContext) Rollback() {
 			op.player.Items = append([]*Item(nil), op.snapItem...)
 		case undoKindPlayerCreatedAtScalarSet:
 			op.player.CreatedAt = op.oldI64
+		case undoKindPlayerPersistVersionScalarSet:
+			op.player.PersistVersion = op.oldU64
 		}
 	}
 }
@@ -127,14 +131,15 @@ func (p *Player) CloneForWrite() *Player {
 		return nil
 	}
 	return &Player{
-		PlayerID:  p.PlayerID,
-		Account:   p.Account,
-		Salt:      p.Salt,
-		Password:  p.Password,
-		Nickname:  p.Nickname,
-		Level:     p.Level,
-		Items:     p.Items,
-		CreatedAt: p.CreatedAt,
+		PlayerID:       p.PlayerID,
+		Account:        p.Account,
+		Salt:           p.Salt,
+		Password:       p.Password,
+		Nickname:       p.Nickname,
+		Level:          p.Level,
+		Items:          p.Items,
+		CreatedAt:      p.CreatedAt,
+		PersistVersion: p.PersistVersion,
 	}
 }
 
@@ -208,4 +213,10 @@ func (p *Player) PutCreatedAt(ctx *TxContext, val int64) {
 	old := p.CreatedAt
 	ctx.push(undoOp{kind: undoKindPlayerCreatedAtScalarSet, player: p, oldI64: old})
 	p.CreatedAt = val
+}
+
+func (p *Player) PutPersistVersion(ctx *TxContext, val uint64) {
+	old := p.PersistVersion
+	ctx.push(undoOp{kind: undoKindPlayerPersistVersionScalarSet, player: p, oldU64: old})
+	p.PersistVersion = val
 }

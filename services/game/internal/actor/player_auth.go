@@ -48,7 +48,9 @@ func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginReq) (*gamev
 // （Locator 移除，集群目录归属释放，OnStop 联动撮合域 + 落库）。
 // 旧「token 匹配才停」的裁决已移除：会话裁决单点收敛到 Gateway（会话管理器），
 // game 侧不持 token 副本，LogoutMsg 也不再有 token 字段（reason 仅事件语义）。
-func (p *PlayerActor) Logout(ctx core.ActorContext, _ *gamev1.LogoutMsg) error {
-	ctx.Stop(types.ExitNormal())
+func (p *PlayerActor) Logout(ctx core.ActorContext, msg *gamev1.LogoutMsg) error {
+	// 下线流程反转：进入下线编排（冻结玩法 → 落库短重试 → 成功才真正 Stop），
+	// 不再「先停再在 OnStop 里赌落库成功」。
+	p.beginStopFlow(ctx, types.ExitNormal())
 	return nil
 }
