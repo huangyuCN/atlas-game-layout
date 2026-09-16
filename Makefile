@@ -111,6 +111,11 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 		--atlas-udp_out=. --atlas-udp_opt=paths=source_relative \
 		--atlas-kcp_out=. --atlas-kcp_opt=paths=source_relative \
 		$(API_SESSION_PROTOS)
+	@mkdir -p api/client/ts api/client/csharp
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
+		--atlas-client_opt=lang=ts,paths=source_relative --atlas-client_out=api/client/ts \
+		--atlas-client_opt=lang=csharp,paths=source_relative --atlas-client_out=api/client/csharp \
+		$(API_DOMAIN_PROTOS)
 
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-errors_out=. --atlas-errors_opt=paths=source_relative,biz_code_key=biz_code,biz_reason_key=biz_reason \
