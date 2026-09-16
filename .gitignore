@@ -34,5 +34,6 @@ go.work.sum
 # 构建产物与 protoc 插件
 /bin/
 .idea
-e2e
-check-dup
+/e2e
+/e2e*/
+/check-dup
