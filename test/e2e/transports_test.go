@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -190,11 +191,11 @@ func loginFlow(t *testing.T, ctx context.Context, sess *sdkclient.Session) {
 	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.PlayerID, Password: "pw"}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	var hb gatewayv1.HeartbeatReply
-	if err := sess.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &hb); err != nil {
+	hb, err := sess.Heartbeat(ctx)
+	if err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
-	if hb.GetServerTimeUnixMs() == 0 {
+	if st, perr := strconv.ParseInt(hb.ServerTimeUnixMs, 10, 64); perr != nil || st == 0 {
 		t.Fatal("心跳回执缺 server_time")
 	}
 }

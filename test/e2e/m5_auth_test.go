@@ -11,7 +11,6 @@ import (
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
-	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -59,9 +58,8 @@ func TestE2ERegisterLogin(t *testing.T) {
 	if sess.Token() == "" || sess.PlayerID() != reg.PlayerID {
 		t.Fatalf("登录凭据不符: token=%q player=%q", sess.Token(), sess.PlayerID())
 	}
-	// 心跳（显式 Invoke 验证会话续租往返）。
-	var hb gatewayv1.HeartbeatReply
-	if err := sess.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &hb); err != nil {
+	// 心跳（Session 手动单次心跳：会话续租往返）。
+	if _, err := sess.Heartbeat(ctx); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 
@@ -110,6 +108,7 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	if _, err := sessA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.PlayerID, Password: "pw"}); err != nil {
 		t.Fatalf("A 登录: %v", err)
 	}
+	sessTokenBeforeKick := sessA.Token() // 快照：顶号后验证旧凭据被服务端拒绝
 	kicked := make(chan struct{}, 1)
 	cliA.On(consts.PushOpKickedOffline, func(operation string, payload []byte) {
 		var kn gatewayv1.KickedNotify
@@ -119,7 +118,7 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	})
 
 	// B 登录同一账号：A 旧连接被挤下线，PlayerActor 由新会话接管（不停止）。
-	sessB, cliB := dialBizSession(t, gwB.TCPURL)
+	sessB, _ := dialBizSession(t, gwB.TCPURL)
 	if _, err := sessB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.PlayerID, Password: "pw"}); err != nil {
 		t.Fatalf("B 登录: %v", err)
 	}
@@ -128,14 +127,12 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("A 旧连接未收到被挤下线通知")
 	}
-	// A 旧令牌心跳失败（显式携带旧凭据验证服务端拒绝语义）。
-	err = cliA.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &gatewayv1.HeartbeatReply{})
-	if err == nil {
-		t.Fatal("A 旧令牌心跳应失败")
+	// A 旧凭据被服务端拒绝（Kicked 后 SDK 已自动清凭据，Restore 显式携带旧凭据）。
+	if _, err := sessA.Restore(ctx, sessTokenBeforeKick, regA.PlayerID); err == nil {
+		t.Fatal("A 旧凭据恢复应被服务端拒绝")
 	}
-	// B 会话与 actor 均存活。
-	var hb gatewayv1.HeartbeatReply
-	if err := cliB.Invoke(ctx, sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: 1}, &hb); err != nil {
+	// B 会话与 actor 均存活（会话续租往返）。
+	if _, err := sessB.Heartbeat(ctx); err != nil {
 		t.Fatalf("B 心跳失败: %v", err)
 	}
 	if _, ok := game.Runtime.Raw().Local().Stats(playerPID(sessB.PlayerID())); !ok {

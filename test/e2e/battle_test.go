@@ -8,7 +8,6 @@ import (
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
-	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
@@ -386,9 +385,7 @@ func dropAndReconnect(t *testing.T, ctx context.Context, gw *gwassemble.Gateway,
 func newBattleClientWithToken(t *testing.T, ctx context.Context, gw *gwassemble.Gateway, prev *battleClient) *battleClient {
 	t.Helper()
 	sess, cli := dialWSSession(t, gw.WSURL)
-	var rep gatewayv1.ResumeReply
-	if err := cli.Invoke(ctx, sdkclient.OpSessionResume,
-		&gatewayv1.ResumeRequest{Token: prev.token, PlayerId: prev.playerID}, &rep); err != nil {
+	if _, err := sess.Restore(ctx, prev.token, prev.playerID); err != nil {
 		t.Fatalf("重连 Resume: %v", err)
 	}
 	c := &battleClient{
