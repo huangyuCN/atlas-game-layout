@@ -12,12 +12,12 @@ import (
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
-	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	libsession "github.com/huangyuCN/atlas-game-layout/lib/session"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
+	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	"github.com/huangyuCN/atlas/transport"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
@@ -32,8 +32,10 @@ func playerPID(playerID string) types.PID {
 }
 
 // connRef 是连接 ID 的身份键（与 session 反向索引约定一致）。
-func connRef(connID uint64) string {
-	return "conn:" + strconv.FormatUint(connID, 10)
+// 带传输种类前缀：各传输 Server 的 connID 独立计数，裸 ID 会在
+// TCP/WS 等多条连接间撞键（会话反向索引错绑到别的连接）。
+func connRef(kind transport.Kind, connID uint64) string {
+	return string(kind) + ":conn:" + strconv.FormatUint(connID, 10)
 }
 
 // connFrom 从请求上下文提取连接寻址信息（connID + 传输种类 + 回写函数）。
@@ -67,7 +69,7 @@ func connFrom(ctx context.Context, pushers map[transport.Kind]pushServer, udpSrv
 	return &session.Conn{
 		ID:   connID,
 		Kind: string(tr.Kind()),
-		Ref:  connRef(connID),
+		Ref:  connRef(tr.Kind(), connID),
 		Send: func(operation string, payload []byte) error {
 			return pusher.PushRaw(connID, operation, payload)
 		},

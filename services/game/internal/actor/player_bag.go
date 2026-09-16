@@ -33,3 +33,15 @@ func (p *PlayerActor) GetPlayer(_ core.ActorContext, _ *gamev1.GetPlayerReq) (*g
 	}
 	return &gamev1.PlayerReply{Player: usecase.PlayerSummary(p.player)}, nil
 }
+
+// GetPlayerData 实现 gamev1.PlayerServiceServer：玩家数据全量快照（摘要 + 背包，
+// 登录后客户端调用一次完成全量对齐；聚合根内存快照，未登录拒绝）。
+func (p *PlayerActor) GetPlayerData(_ core.ActorContext, _ *gamev1.GetPlayerDataReq) (*gamev1.PlayerDataReply, error) {
+	if p.player == nil {
+		return nil, errorv1.ErrPlayerNotOnline("数据同步失败：玩家不在线")
+	}
+	return &gamev1.PlayerDataReply{
+		Player: usecase.PlayerSummary(p.player),
+		Items:  usecase.BackpackItems(p.player),
+	}, nil
+}

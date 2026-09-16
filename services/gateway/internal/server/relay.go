@@ -88,9 +88,9 @@ func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 	if err != nil {
 		return nil, err // 业务错误透传（产生点即语义）
 	}
-	resp, ok := rep.(proto.Message)
-	if !ok {
-		return nil, errorv1.ErrInternal("透传回执类型异常: %T", rep)
+	resp, err := entry.ReplyOf(rep)
+	if err != nil {
+		return nil, errorv1.ErrInternal("透传回执处理失败: %v", err)
 	}
 	r.bindChannel(ctx, entry.Operation, playerID)
 	return resp, nil

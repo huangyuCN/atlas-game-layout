@@ -22,6 +22,7 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:  relay.UidField,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(JoinBattleReq) },
+		NewReply:   func() proto.Message { return new(JoinBattleReply) },
 		UidOf: func(req any) (string, bool) {
 			r, ok := req.(*JoinBattleReq)
 			if !ok {
@@ -39,6 +40,7 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:  relay.UidField,
 		IsTell:     true,
 		NewRequest: func() proto.Message { return new(FrameInputReq) },
+		NewReply:   nil, // returns Empty 即 Tell，无回执
 		UidOf: func(req any) (string, bool) {
 			r, ok := req.(*FrameInputReq)
 			if !ok {
@@ -56,6 +58,7 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:  relay.UidField,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(SyncFramesReq) },
+		NewReply:   func() proto.Message { return new(SyncFramesReply) },
 		UidOf: func(req any) (string, bool) {
 			r, ok := req.(*SyncFramesReq)
 			if !ok {
@@ -73,6 +76,7 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:  relay.UidField,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(CreateBattleRequest) },
+		NewReply:   func() proto.Message { return new(CreateBattleReply) },
 	},
 	"/battle.v1.BattleService/GetState": {
 		Operation:  "/battle.v1.BattleService/GetState",
@@ -83,5 +87,6 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:  relay.UidField,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(GetStateReq) },
+		NewReply:   func() proto.Message { return new(GetStateReply) },
 	},
 }

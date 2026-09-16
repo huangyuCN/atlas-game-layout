@@ -22,6 +22,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(RegisterReq) },
+		NewReply:   func() proto.Message { return new(RegisterReply) },
 	},
 	"/game.v1.PlayerService/GetPlayerData": {
 		Operation:  "/game.v1.PlayerService/GetPlayerData",
@@ -32,6 +33,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(GetPlayerDataReq) },
+		NewReply:   func() proto.Message { return new(PlayerDataReply) },
 	},
 	"/game.v1.PlayerService/GetBackpack": {
 		Operation:  "/game.v1.PlayerService/GetBackpack",
@@ -42,6 +44,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(GetBackpackReq) },
+		NewReply:   func() proto.Message { return new(BackpackReply) },
 	},
 	"/game.v1.PlayerService/EnterMatchQueue": {
 		Operation:  "/game.v1.PlayerService/EnterMatchQueue",
@@ -52,6 +55,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(EnterMatchQueueReq) },
+		NewReply:   func() proto.Message { return new(EnterMatchQueueReply) },
 	},
 	"/game.v1.PlayerService/CancelMatch": {
 		Operation:  "/game.v1.PlayerService/CancelMatch",
@@ -62,6 +66,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(CancelMatchReq) },
+		NewReply:   func() proto.Message { return new(CancelMatchReply) },
 	},
 	"/game.v1.PlayerService/GetMatchStatus": {
 		Operation:  "/game.v1.PlayerService/GetMatchStatus",
@@ -72,6 +77,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(GetMatchStatusReq) },
+		NewReply:   func() proto.Message { return new(MatchStatusReply) },
 	},
 	"/game.v1.PlayerService/CreateParty": {
 		Operation:  "/game.v1.PlayerService/CreateParty",
@@ -82,6 +88,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(CreatePartyReq) },
+		NewReply:   func() proto.Message { return new(PartyReply) },
 	},
 	"/game.v1.PlayerService/JoinParty": {
 		Operation:  "/game.v1.PlayerService/JoinParty",
@@ -92,6 +99,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(JoinPartyReq) },
+		NewReply:   func() proto.Message { return new(PartyReply) },
 	},
 	"/game.v1.PlayerService/LeaveParty": {
 		Operation:  "/game.v1.PlayerService/LeaveParty",
@@ -102,6 +110,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(LeavePartyReq) },
+		NewReply:   func() proto.Message { return new(PartyReply) },
 	},
 	"/game.v1.PlayerService/GetParty": {
 		Operation:  "/game.v1.PlayerService/GetParty",
@@ -112,6 +121,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(GetPartyReq) },
+		NewReply:   func() proto.Message { return new(PartyReply) },
 	},
 	"/game.v1.PlayerService/QueueParty": {
 		Operation:  "/game.v1.PlayerService/QueueParty",
@@ -122,6 +132,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(QueuePartyReq) },
+		NewReply:   func() proto.Message { return new(PartyQueueReply) },
 	},
 	"/game.v1.PlayerService/Login": {
 		Operation:  "/game.v1.PlayerService/Login",
@@ -132,6 +143,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(LoginReq) },
+		NewReply:   func() proto.Message { return new(LoginReply) },
 	},
 	"/game.v1.PlayerService/Logout": {
 		Operation:  "/game.v1.PlayerService/Logout",
@@ -142,6 +154,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     true,
 		NewRequest: func() proto.Message { return new(LogoutMsg) },
+		NewReply:   nil, // returns Empty 即 Tell，无回执
 	},
 	"/game.v1.PlayerService/GrantItem": {
 		Operation:  "/game.v1.PlayerService/GrantItem",
@@ -152,6 +165,7 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(GrantItemReq) },
+		NewReply:   func() proto.Message { return new(GrantItemReply) },
 	},
 	"/game.v1.PlayerService/GetPlayer": {
 		Operation:  "/game.v1.PlayerService/GetPlayer",
@@ -162,5 +176,6 @@ var PlayerServiceRouteTable = relay.Table{
 		UidSource:  relay.UidSession,
 		IsTell:     false,
 		NewRequest: func() proto.Message { return new(GetPlayerReq) },
+		NewReply:   func() proto.Message { return new(PlayerReply) },
 	},
 }
