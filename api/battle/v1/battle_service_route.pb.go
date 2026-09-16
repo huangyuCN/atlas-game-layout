@@ -7,8 +7,8 @@
 package battlev1
 
 import (
-	proto "google.golang.org/protobuf/proto"
 	relay "github.com/huangyuCN/atlas/contrib/actor/relay"
+	proto "google.golang.org/protobuf/proto"
 )
 
 // BattleServiceRouteTable 是 BattleService 的透传路由表（atlas.route.v1 注解生成）。

@@ -98,7 +98,7 @@ func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 
 // bindChannel 在透传成功后按装配声明（WithChannelBinding）把当前连接绑定到
 // 玩家会话的对应槽位（如 JoinBattle → 战斗通道）。绑定凭据优先取帧会话槽
-//（UDP/KCP 每帧验证形态）；无槽帧（TCP/WS 长连接）复用本地会话当前凭据。
+// （UDP/KCP 每帧验证形态）；无槽帧（TCP/WS 长连接）复用本地会话当前凭据。
 // 绑定失败不吞回执（转发已成功，会话可经重绑/心跳收敛）。
 func (r *Relay) bindChannel(ctx context.Context, operation, playerID string) {
 	slot, ok := r.bindings[operation]

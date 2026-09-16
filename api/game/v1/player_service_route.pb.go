@@ -7,8 +7,8 @@
 package gamev1
 
 import (
-	proto "google.golang.org/protobuf/proto"
 	relay "github.com/huangyuCN/atlas/contrib/actor/relay"
+	proto "google.golang.org/protobuf/proto"
 )
 
 // PlayerServiceRouteTable 是 PlayerService 的透传路由表（atlas.route.v1 注解生成）。
