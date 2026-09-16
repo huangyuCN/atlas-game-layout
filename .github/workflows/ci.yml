@@ -42,6 +42,17 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
 
+      - name: Checkout atlas-sdk-go（replace ../atlas-sdk-go）
+        id: checkout-sdk-go
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          repository: huangyuCN/atlas-sdk-go
+          ref: main
+          path: .ci-deps/atlas-sdk-go
+          persist-credentials: false
+          token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+
       - name: Checkout cow（replace ../cow）
         id: checkout-cow
         continue-on-error: true
@@ -67,15 +78,20 @@ jobs:
             echo "::error::无法检出 huangyuCN/cow"
             exit 1
           fi
+          if [ ! -f "$GITHUB_WORKSPACE/.ci-deps/atlas-sdk-go/go.mod" ]; then
+            echo "::error::无法检出 huangyuCN/atlas-sdk-go（域 stub 依赖，replace ../atlas-sdk-go）"
+            exit 1
+          fi
 
       - name: 移动 Atlas/cow 到 replace 路径
         run: |
           parent="$(dirname "$GITHUB_WORKSPACE")"
-          rm -rf "$parent/atlas" "$parent/cow"
+          rm -rf "$parent/atlas" "$parent/cow" "$parent/atlas-sdk-go"
           mv "$GITHUB_WORKSPACE/.ci-deps/atlas" "$parent/atlas"
           mv "$GITHUB_WORKSPACE/.ci-deps/cow" "$parent/cow"
+          mv "$GITHUB_WORKSPACE/.ci-deps/atlas-sdk-go" "$parent/atlas-sdk-go"
           rmdir "$GITHUB_WORKSPACE/.ci-deps" 2>/dev/null || true
-          ls -l "$parent/atlas/go.mod" "$parent/cow/go.mod"
+          ls -l "$parent/atlas/go.mod" "$parent/cow/go.mod" "$parent/atlas-sdk-go/go.mod"
 
       - name: gofmt 检查
         run: |
