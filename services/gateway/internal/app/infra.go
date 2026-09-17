@@ -79,6 +79,7 @@ func NewActorClient(cfg *conf.Bootstrap, ec *clientv3.Client) (*actorclient.Clie
 		ServiceName:   consts.ServiceGame, // 懒激活在 game 节点执行（PlayerActor 宿主）
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),
+		Tracer:        pkgactor.DefaultTracer(),
 		Discovery:     discovery,
 	})
 	if err != nil {

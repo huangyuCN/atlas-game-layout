@@ -46,12 +46,31 @@ func AskRecoveryMiddleware(next core.AskHandler) core.AskHandler {
 	}
 }
 
+// AskLoggingMiddleware 是默认 Ask 日志中间件：按 actor 类型/PID/请求类型打点
+// （Debug 级，与 Tell 的 LoggingMiddleware 对称；错误请求升 Warn 记录原因）。
+func AskLoggingMiddleware(next core.AskHandler) core.AskHandler {
+	return func(ctx core.ActorContext, req any) (any, error) {
+		if ctx == nil {
+			return next(ctx, req)
+		}
+		atlaslog.Debugf("actor ask: type=%s uid=%s req=%T",
+			ctx.Self().Type(), ctx.Self().UID(), req)
+		resp, err := next(ctx, req)
+		if err != nil {
+			atlaslog.Warnf("actor ask failed: type=%s uid=%s req=%T err=%v",
+				ctx.Self().Type(), ctx.Self().UID(), req, err)
+		}
+		return resp, err
+	}
+}
+
 // DefaultTellChain 返回默认 Tell 中间件链（m[0] 最外层：logging → recovery）。
 func DefaultTellChain() []core.TellMiddleware {
 	return []core.TellMiddleware{LoggingMiddleware, RecoveryMiddleware}
 }
 
-// DefaultAskChain 返回默认 Ask 中间件链（m[0] 最外层：recovery）。
+// DefaultAskChain 返回默认 Ask 中间件链（m[0] 最外层：logging → recovery）。
+// Ask 与 Tell 对称：日志打点进链路（Debug 级），panic 保护兜底。
 func DefaultAskChain() []core.AskMiddleware {
-	return []core.AskMiddleware{AskRecoveryMiddleware}
+	return []core.AskMiddleware{AskLoggingMiddleware, AskRecoveryMiddleware}
 }

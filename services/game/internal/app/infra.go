@@ -81,6 +81,7 @@ func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtim
 		ServiceName:   consts.ServiceGame,
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),
+		Tracer:        pkgactor.DefaultTracer(),
 		Discovery:     discovery,
 	})
 	if err != nil {

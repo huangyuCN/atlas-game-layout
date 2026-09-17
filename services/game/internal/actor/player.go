@@ -126,9 +126,9 @@ func (p *PlayerActor) beginStopFlow(ctx core.ActorContext, reason types.ExitReas
 	// 双失败短重试后仍失败：redis PERSIST 兜底——最新态转未落库权威副本（零丢失），
 	// 强制退出（接受 mongo 缺档；Mongo 恢复后登录选源以 Redis 为准）。
 	if perr := p.store.PersistSnapshot(ctx.Context(), p.player.PlayerID); perr != nil {
-		atlaslog.Errorf("player actor 下线 PERSIST 兜底失败: uid=%s err=%v", p.pid.UID(), perr)
+		atlaslog.Ctx(ctx.Context()).Error("player actor 下线 PERSIST 兜底失败", "uid", p.pid.UID(), "err", perr)
 	}
-	atlaslog.Errorf("player actor 下线双库落盘失败: uid=%s（已 PERSIST 兜底，退出）", p.pid.UID())
+	atlaslog.Ctx(ctx.Context()).Error("player actor 下线双库落盘失败（已 PERSIST 兜底，退出）", "uid", p.pid.UID())
 	p.player = nil
 	ctx.Stop(reason)
 }
@@ -171,10 +171,10 @@ func (p *PlayerActor) flushOrRetry(ctx core.ActorContext) {
 	switch result {
 	case repo.FlushRedisOK, repo.FlushSkipped:
 		p.lastCRC = crc
-		p.unfreeze()
+		p.unfreeze(ctx)
 	case repo.FlushMongoOK:
 		p.lastCRC = crc
-		atlaslog.Errorf("player actor 仅 Mongo 落盘成功（Redis 不可用），强制下线: uid=%s", p.pid.UID())
+		atlaslog.Ctx(ctx.Context()).Error("player actor 仅 Mongo 落盘成功（Redis 不可用），强制下线", "uid", p.pid.UID())
 		p.beginStopFlow(ctx, types.ExitKilled("redis 不可用，仅 mongo 落盘成功，强制下线"))
 	case repo.FlushBothFailed:
 		p.freeze(ctx)
@@ -186,7 +186,7 @@ func (p *PlayerActor) flushOrRetry(ctx core.ActorContext) {
 // 注册每分钟重试定时器（ctx.Repeat，解冻时取消）。
 func (p *PlayerActor) freeze(ctx core.ActorContext) {
 	p.frozen = true
-	atlaslog.Errorf("player actor 冻结改档: uid=%s（双库落盘失败，每分钟重试）", p.pid.UID())
+	atlaslog.Ctx(ctx.Context()).Error("player actor 冻结改档（双库落盘失败，每分钟重试）", "uid", p.pid.UID())
 	if p.freezeRetryCancel != nil {
 		p.freezeRetryCancel() // 幂等：先取消旧的重试（防重复注册）
 	}
@@ -194,13 +194,13 @@ func (p *PlayerActor) freeze(ctx core.ActorContext) {
 }
 
 // unfreeze 解除在线冻结（取消冻结期重试定时器）。
-func (p *PlayerActor) unfreeze() {
+func (p *PlayerActor) unfreeze(ctx core.ActorContext) {
 	if p.freezeRetryCancel != nil {
 		p.freezeRetryCancel()
 		p.freezeRetryCancel = nil
 	}
 	if p.frozen {
-		atlaslog.Infof("player actor 解冻: uid=%s", p.pid.UID())
+		atlaslog.Ctx(ctx.Context()).Info("player actor 解冻", "uid", p.pid.UID())
 	}
 	p.frozen = false
 }

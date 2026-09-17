@@ -57,7 +57,7 @@ func TestDefaultChainsLength(t *testing.T) {
 	if got := len(DefaultTellChain()); got != 2 {
 		t.Fatalf("DefaultTellChain 长度 = %d, 期望 2（logging/recovery）", got)
 	}
-	if got := len(DefaultAskChain()); got != 1 {
-		t.Fatalf("DefaultAskChain 长度 = %d, 期望 1（recovery）", got)
+	if got := len(DefaultAskChain()); got != 2 {
+		t.Fatalf("DefaultAskChain 长度 = %d, 期望 2（logging/recovery）", got)
 	}
 }

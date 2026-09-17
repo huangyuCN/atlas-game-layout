@@ -33,6 +33,11 @@ type Options struct {
 	NatsURL string
 	// Discovery 是可选的服务发现（懒激活选节点；nil 时懒激活退化到本机）。
 	Discovery registry.Discovery
+	// Tracer 是可选的链路追踪器（core.Tracer 适配，如 contrib/actor/observe/otel
+	// 的 otel 实现；nil 时 Ask/Tell 不产生 span，noop 热路径零开销）。
+	// 模板装配传入 otel.New(otel.GetTracerProvider().Tracer("atlas-actor"))，
+	// 开发者配置 OTel SDK（如 otlp/jaeger exporter）后自动生效。
+	Tracer core.Tracer
 }
 
 // Runtime 是 actor 集群运行时封装。
@@ -84,6 +89,9 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	}
 	if opts.Discovery != nil && opts.ServiceName != "" {
 		rtOpts = append(rtOpts, cluster.WithDiscovery(opts.Discovery, opts.ServiceName))
+	}
+	if opts.Tracer != nil {
+		rtOpts = append(rtOpts, cluster.WithTracer(opts.Tracer))
 	}
 	rt, err := cluster.NewRuntime(cfg, rtOpts...)
 	if err != nil {
