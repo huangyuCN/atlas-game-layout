@@ -194,7 +194,7 @@ func probeMiddlewares(mw middlewareAddrs) error {
 }
 
 // run 按形态执行闭环；返回错误则脚本非零退出。
-func run(ctx context.Context, mode string, a addrs, frames uint64) error {
+func run(ctx context.Context, mode string, a addrs, mw middlewareAddrs, frames uint64) error {
 	switch mode {
 	case "dual", "single":
 		return runClassic(ctx, mode, a, frames)
@@ -202,10 +202,12 @@ func run(ctx context.Context, mode string, a addrs, frames uint64) error {
 		return runParty(ctx, a, frames)
 	case "fault":
 		return runFault(ctx, a)
+	case "freeze":
+		return runDurability(ctx, a, mw, frames)
 	case "kick":
 		return runKick(ctx, a)
 	default:
-		return fmt.Errorf("未知形态 %q（dual|single|party|fault|kick）", mode)
+		return fmt.Errorf("未知形态 %q（dual|single|party|fault|kick|freeze）", mode)
 	}
 }
 
@@ -321,7 +323,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if err := run(ctx, *mode, st.addrs(), *frames); err != nil {
+	if err := run(ctx, *mode, st.addrs(), mw, *frames); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e 失败: %v\n", err)
 		os.Exit(1)
 	}

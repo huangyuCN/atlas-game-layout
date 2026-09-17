@@ -137,19 +137,21 @@ func (p *PlayerActor) beginStopFlow(ctx core.ActorContext, reason types.ExitReas
 	ctx.Stop(reason)
 }
 
-// stopFlush 同步短重试落盘（下线路径）：3 次 × 500ms，返回是否最终成功。
-// 成功或失败都返回（调用方按结果处理），不挂起不无限重试（第一期取舍）。
+// stopFlush 同步短重试落盘（下线路径专用）：3 次 × 500ms。
+// 下线必须双写尝试：FlushPlayer 只保证 Redis（成功即止），因此无论 Redis
+// 成败都**无条件补写 Mongo**——下线后玩家不再在线，mongo 是唯一长期存储
+// （与在线 tick 的「Redis 成功即止」语义不同，设计 §7.1 四组合表）。
+// 返回：数据是否已在某一层持久化（决定是否 PERSIST 兜底）。
 func (p *PlayerActor) stopFlush(ctx core.ActorContext) bool {
 	for i := 0; i < stopRetryTimes; i++ {
+		// Redis 写（首选；失败不影响 Mongo 尝试）。
 		result, crc, err := p.store.FlushPlayer(ctx.Context(), p.player, p.lastCRC)
-		switch {
-		case err == nil && result != repo.FlushBothFailed:
+		if err == nil && result != repo.FlushBothFailed {
 			p.lastCRC = crc
+		}
+		// Mongo 写（无条件尝试：下线是最后一次落库机会）。
+		if err := p.store.SavePlayer(ctx.Context(), p.player); err == nil {
 			return true
-		case err == nil && result == repo.FlushBothFailed:
-			// FlushPlayer 内部双失败：继续短重试
-		default:
-			// err 非空：FlushPlayer 内部已按双失败处理
 		}
 		time.Sleep(stopRetryDelay)
 	}
