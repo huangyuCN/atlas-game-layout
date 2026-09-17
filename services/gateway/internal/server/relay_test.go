@@ -12,8 +12,8 @@ import (
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
-	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/transport"
 	"google.golang.org/protobuf/proto"
 )
