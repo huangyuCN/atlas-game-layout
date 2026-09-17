@@ -15,6 +15,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	"github.com/huangyuCN/atlas/transport"
+	"github.com/huangyuCN/atlas/transport/frame"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -64,6 +65,9 @@ func (r *Relay) Each(fn func(entry relay.RouteEntry) error) error {
 
 // Forward 处理一次透传请求：身份识别 → target PID → sender 注入 → Ask/Tell。
 // 业务错误原样透传（code/reason 经集群 error 通道往返保留，产生点即语义）。
+// 幂等：entry 注解声明 IDEMPOTENT 且客户端帧携带请求幂等键（Atlas-Frame-Request-Id）
+// 时，把 ID 注入投递去重键——Ask 同 (pid, request_id) 窗口内只执行一次并复用结果，
+// Tell 窗口内重复投递直接丢弃；客户端未携带或注解未声明走原路径零开销。
 func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.Message) (proto.Message, error) {
 	playerID, err := r.identify(ctx)
 	if err != nil {
@@ -77,14 +81,18 @@ func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 	if err != nil {
 		return nil, errorv1.ErrInternal("透传组装发起者身份失败")
 	}
+	sendOpts := []core.SendOption{core.WithSender(sender)}
+	if id := idempotencyID(entry, r.requestIDOf(ctx)); id != "" {
+		sendOpts = append(sendOpts, core.WithRequestID(id))
+	}
 	if entry.IsTell {
-		if err := r.rt.Tell(ctx, pid, req, core.WithSender(sender)); err != nil {
+		if err := r.rt.Tell(ctx, pid, req, sendOpts...); err != nil {
 			return nil, err
 		}
 		r.bindChannel(ctx, entry.Operation, playerID)
 		return nil, nil
 	}
-	rep, err := r.rt.Ask(ctx, pid, req, core.WithSender(sender))
+	rep, err := r.rt.Ask(ctx, pid, req, sendOpts...)
 	if err != nil {
 		return nil, err // 业务错误透传（产生点即语义）
 	}
@@ -94,6 +102,29 @@ func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 	}
 	r.bindChannel(ctx, entry.Operation, playerID)
 	return resp, nil
+}
+
+// idempotencyID 计算本次透传的投递去重键（注入决策的纯函数，便于单测）：
+// 路由条目注解声明 IDEMPOTENT 且客户端帧携带请求幂等键时返回该键，否则空串
+//（未声明注解或客户端未携带走原路径零开销，不做静默兜底）。
+func idempotencyID(entry relay.RouteEntry, requestID string) string {
+	if entry.Idempotency != relay.Idempotent || requestID == "" {
+		return ""
+	}
+	return requestID
+}
+
+// requestIDOf 从请求头取帧请求幂等键（FlagRequestID 置位时引擎已解析写入）。
+func (r *Relay) requestIDOf(ctx context.Context) string {
+	tr, ok := transport.FromServerContext(ctx)
+	if !ok {
+		return ""
+	}
+	hdr := tr.RequestHeader()
+	if hdr == nil {
+		return ""
+	}
+	return hdr.Get(frame.RequestHeaderKeyRequestID)
 }
 
 // bindChannel 在透传成功后按装配声明（WithChannelBinding）把当前连接绑定到

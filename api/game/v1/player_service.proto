@@ -191,18 +191,26 @@ service PlayerService {
     access: ACCESS_CLIENT
     uid: UID_SOURCE_SESSION
   };
-  // 客户端可达（SESSION 寻址）。
+  // 客户端可达（SESSION 寻址）。幂等示范：EnterMatchQueue/QueueParty 是有副作用的
+  // 写操作（重复入队/重复排队不应重复计费或叠加），声明 idempotency: IDEMPOTENT——
+  // 客户端重试/重发在去重窗口内不重复执行；查询类与天然幂等类不声明（零开销）。
   rpc Register (RegisterReq) returns (RegisterReply);
   rpc GetPlayerData (GetPlayerDataReq) returns (PlayerDataReply);
   rpc GetBackpack (GetBackpackReq) returns (BackpackReply);
-  rpc EnterMatchQueue (EnterMatchQueueReq) returns (EnterMatchQueueReply);
+  rpc EnterMatchQueue (EnterMatchQueueReq) returns (EnterMatchQueueReply) {
+    option (atlas.route.v1.rpc_route) = { idempotency: IDEMPOTENT };
+  }
   rpc CancelMatch (CancelMatchReq) returns (CancelMatchReply);
   rpc GetMatchStatus (GetMatchStatusReq) returns (MatchStatusReply);
   rpc CreateParty (CreatePartyReq) returns (PartyReply);
-  rpc JoinParty (JoinPartyReq) returns (PartyReply);
+  rpc JoinParty (JoinPartyReq) returns (PartyReply) {
+    option (atlas.route.v1.rpc_route) = { idempotency: IDEMPOTENT };
+  }
   rpc LeaveParty (LeavePartyReq) returns (PartyReply);
   rpc GetParty (GetPartyReq) returns (PartyReply);
-  rpc QueueParty (QueuePartyReq) returns (PartyQueueReply);
+  rpc QueueParty (QueuePartyReq) returns (PartyQueueReply) {
+    option (atlas.route.v1.rpc_route) = { idempotency: IDEMPOTENT };
+  }
   // 服务端内部（Gateway 登录链路与管理面 grpc 转发；客户端 op 不存在）。
   rpc Login (LoginReq) returns (LoginReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };

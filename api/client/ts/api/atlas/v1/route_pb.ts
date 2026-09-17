@@ -9,15 +9,19 @@ export interface RouteRule {
   access?: Access; // atlas.route.v1.RouteRule.access
   uid?: UidSource; // atlas.route.v1.RouteRule.uid
   uidField?: string; // atlas.route.v1.RouteRule.uid_field
+  idempotency?: Idempotency; // atlas.route.v1.RouteRule.idempotency
 }
 
 export interface RouteOverride {
   access?: Access; // atlas.route.v1.RouteOverride.access
   uid?: UidSource; // atlas.route.v1.RouteOverride.uid
   uidField?: string; // atlas.route.v1.RouteOverride.uid_field
+  idempotency?: Idempotency; // atlas.route.v1.RouteOverride.idempotency
 }
 
 export type Access = "ACCESS_UNSPECIFIED" | "ACCESS_CLIENT" | "ACCESS_INTERNAL";
 
 export type UidSource = "UID_SOURCE_UNSPECIFIED" | "UID_SOURCE_SESSION" | "UID_SOURCE_FIELD";
+
+export type Idempotency = "IDEMPOTENCY_UNSPECIFIED" | "IDEMPOTENT";
 

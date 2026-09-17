@@ -29,6 +29,13 @@ public static class UidSourceConst
     public const string UIDSOURCEFIELD = "UID_SOURCE_FIELD";
 }
 
+/// <summary>Idempotency 的枚举名常量（protojson 以枚举名下发；未知值前向兼容）。</summary>
+public static class IdempotencyConst
+{
+    public const string IDEMPOTENCYUNSPECIFIED = "IDEMPOTENCY_UNSPECIFIED";
+    public const string IDEMPOTENT = "IDEMPOTENT";
+}
+
 /// <summary>RouteRule DTO（protojson JSON 语义）。</summary>
 public sealed class RouteRule
 {
@@ -44,6 +51,9 @@ public sealed class RouteRule
     [JsonPropertyName("uidField")]
     public string? UidField { get; set; }
 
+    [JsonPropertyName("idempotency")]
+    public string? Idempotency { get; set; }
+
 }
 
 /// <summary>RouteOverride DTO（protojson JSON 语义）。</summary>
@@ -57,6 +67,9 @@ public sealed class RouteOverride
 
     [JsonPropertyName("uidField")]
     public string? UidField { get; set; }
+
+    [JsonPropertyName("idempotency")]
+    public string? Idempotency { get; set; }
 
 }
 

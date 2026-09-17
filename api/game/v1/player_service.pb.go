@@ -1526,21 +1526,21 @@ const file_api_game_v1_player_service_proto_rawDesc = "" +
 	"\x19LOGOUT_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14LOGOUT_REASON_LOGOUT\x10\x01\x12%\n" +
 	"!LOGOUT_REASON_LOGGED_IN_ELSEWHERE\x10\x02\x12!\n" +
-	"\x1dLOGOUT_REASON_SESSION_EXPIRED\x10\x032\xe2\a\n" +
+	"\x1dLOGOUT_REASON_SESSION_EXPIRED\x10\x032\xfa\a\n" +
 	"\rPlayerService\x128\n" +
 	"\bRegister\x12\x14.game.v1.RegisterReq\x1a\x16.game.v1.RegisterReply\x12D\n" +
 	"\rGetPlayerData\x12\x19.game.v1.GetPlayerDataReq\x1a\x18.game.v1.PlayerDataReply\x12>\n" +
-	"\vGetBackpack\x12\x17.game.v1.GetBackpackReq\x1a\x16.game.v1.BackpackReply\x12M\n" +
-	"\x0fEnterMatchQueue\x12\x1b.game.v1.EnterMatchQueueReq\x1a\x1d.game.v1.EnterMatchQueueReply\x12A\n" +
+	"\vGetBackpack\x12\x17.game.v1.GetBackpackReq\x1a\x16.game.v1.BackpackReply\x12U\n" +
+	"\x0fEnterMatchQueue\x12\x1b.game.v1.EnterMatchQueueReq\x1a\x1d.game.v1.EnterMatchQueueReply\"\x06\xd2\xd5\"\x02 \x01\x12A\n" +
 	"\vCancelMatch\x12\x17.game.v1.CancelMatchReq\x1a\x19.game.v1.CancelMatchReply\x12G\n" +
 	"\x0eGetMatchStatus\x12\x1a.game.v1.GetMatchStatusReq\x1a\x19.game.v1.MatchStatusReply\x12;\n" +
-	"\vCreateParty\x12\x17.game.v1.CreatePartyReq\x1a\x13.game.v1.PartyReply\x127\n" +
-	"\tJoinParty\x12\x15.game.v1.JoinPartyReq\x1a\x13.game.v1.PartyReply\x129\n" +
+	"\vCreateParty\x12\x17.game.v1.CreatePartyReq\x1a\x13.game.v1.PartyReply\x12?\n" +
+	"\tJoinParty\x12\x15.game.v1.JoinPartyReq\x1a\x13.game.v1.PartyReply\"\x06\xd2\xd5\"\x02 \x01\x129\n" +
 	"\n" +
 	"LeaveParty\x12\x16.game.v1.LeavePartyReq\x1a\x13.game.v1.PartyReply\x125\n" +
-	"\bGetParty\x12\x14.game.v1.GetPartyReq\x1a\x13.game.v1.PartyReply\x12>\n" +
+	"\bGetParty\x12\x14.game.v1.GetPartyReq\x1a\x13.game.v1.PartyReply\x12F\n" +
 	"\n" +
-	"QueueParty\x12\x16.game.v1.QueuePartyReq\x1a\x18.game.v1.PartyQueueReply\x127\n" +
+	"QueueParty\x12\x16.game.v1.QueuePartyReq\x1a\x18.game.v1.PartyQueueReply\"\x06\xd2\xd5\"\x02 \x01\x127\n" +
 	"\x05Login\x12\x11.game.v1.LoginReq\x1a\x13.game.v1.LoginReply\"\x06\xd2\xd5\"\x02\b\x02\x12<\n" +
 	"\x06Logout\x12\x12.game.v1.LogoutMsg\x1a\x16.google.protobuf.Empty\"\x06\xd2\xd5\"\x02\b\x02\x12C\n" +
 	"\tGrantItem\x12\x15.game.v1.GrantItemReq\x1a\x17.game.v1.GrantItemReply\"\x06\xd2\xd5\"\x02\b\x02\x12@\n" +

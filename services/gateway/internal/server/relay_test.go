@@ -13,6 +13,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
+	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/transport"
 	"google.golang.org/protobuf/proto"
 )
@@ -271,5 +272,22 @@ func TestRelayTCPWireForward(t *testing.T) {
 	var q2 gamev1.EnterMatchQueueReply
 	if err := other.Invoke(ctx, opEnterMatch, &gamev1.EnterMatchQueueReq{Ruleset: "casual"}, &q2); !errorv1.IsInvalidToken(err) {
 		t.Fatalf("未登录应 INVALID_TOKEN, got %v", err)
+	}
+}
+
+// TestIdempotencyID 验证投递去重键的注入决策：
+// 注解声明 IDEMPOTENT 且客户端携带 ID → 注入；缺注解或缺 ID → 不注入（零开销原路径）。
+func TestIdempotencyID(t *testing.T) {
+	idempotent := relay.RouteEntry{Idempotency: relay.Idempotent}
+	none := relay.RouteEntry{Idempotency: relay.IdempotencyNone}
+
+	if got := idempotencyID(idempotent, "req-1"); got != "req-1" {
+		t.Fatalf("声明幂等且携带 ID 应注入, got %q", got)
+	}
+	if got := idempotencyID(idempotent, ""); got != "" {
+		t.Fatalf("客户端未携带 ID 不应注入, got %q", got)
+	}
+	if got := idempotencyID(none, "req-1"); got != "" {
+		t.Fatalf("注解未声明不应注入, got %q", got)
 	}
 }
