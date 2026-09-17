@@ -208,10 +208,21 @@ func (p *PlayerActor) unfreeze() {
 	p.frozen = false
 }
 
-// guardFrozen 冻结期改档守卫：改档类操作统一拒绝（SERVER_FROZEN，
-// HTTP 503 语义——客户端应退避重试）；查询类方法不守卫（只读）。
-func (p *PlayerActor) guardFrozen() error {
-	if p.frozen {
+// readOnlyTypes 是冻结期放行的只读请求类型（查询类，不改存档）；
+// 白名单是 fail-safe 方向：新增改档 rpc 忘记登记 → 冻结期被拒（安全），
+// 新增只读 rpc 忘记登记 → 冻结期也被拒（体验损失，登记即恢复）。
+var readOnlyRequests = map[any]bool{
+	&gamev1.GetPlayerDataReq{}:  true,
+	&gamev1.GetBackpackReq{}:    true,
+	&gamev1.GetPlayerReq{}:      true,
+	&gamev1.GetMatchStatusReq{}: true,
+	&gamev1.GetPartyReq{}:       true,
+}
+
+// OnBeforeAsk 实现 core.BeforeAskHook：冻结期统一拒绝改档请求（SERVER_FROZEN，
+// HTTP 503 语义——客户端退避重试）；只读白名单放行。
+func (p *PlayerActor) OnBeforeAsk(ctx core.ActorContext, req any) error {
+	if p.frozen && !readOnlyRequests[req] {
 		return errorv1.ErrServerFrozen("服务暂时不可写，请稍后重试")
 	}
 	return nil

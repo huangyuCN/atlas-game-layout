@@ -21,9 +21,9 @@ import (
 
 // PlayerCache 是落盘依赖的最小 redis 面（RedisPlayerCache 实现；测试可注入 fake）。
 type PlayerCache interface {
-	Get(ctx context.Context, playerID string) (*models.PlayerSnapshot, error)
+	Get(ctx context.Context, playerID string) (*models.Player, error)
 	SetEncoded(ctx context.Context, playerID string, b []byte, ttl time.Duration) error
-	Set(ctx context.Context, snap *models.PlayerSnapshot, ttl time.Duration) error
+	Set(ctx context.Context, p *models.Player, ttl time.Duration) error
 	Persist(ctx context.Context, playerID string) error
 	TTLOf(ctx context.Context, playerID string) (time.Duration, error)
 	Expire(ctx context.Context, playerID string, ttl time.Duration) error
@@ -56,7 +56,7 @@ func NewPlayerStore(cache PlayerCache, persist PlayerPersist) *PlayerStore {
 //  4. 选源后双向对齐补写：选中 Redis → 补写 Mongo（成功且原为 noexpire →
 //     EXPIRE 恢复 72h；失败保持 PERSIST）；选中 Mongo → 覆盖 Redis（TTL 72h）。
 func (s *PlayerStore) LoadPlayer(ctx context.Context, playerID string) (*models.Player, error) {
-	snap, err := s.cache.Get(ctx, playerID)
+	rp, err := s.cache.Get(ctx, playerID)
 	if err != nil && !errors.Is(err, ErrPlayerNotFound) {
 		return nil, err // Redis 故障：拒绝登录，不回源 Mongo（防旧缓存回档）
 	}
@@ -71,10 +71,10 @@ func (s *PlayerStore) LoadPlayer(ctx context.Context, playerID string) (*models.
 	}
 	if mErr != nil {
 		// Mongo 读失败但 Redis 有档：用 Redis（不做对齐——Mongo 不可用）。
-		return snapshotToPlayer(snap), nil
+		return rp, nil
 	}
 	// 两边都有：persistVersion 大者胜，相同用 Redis。
-	if mp.PersistVersion > snap.PersistVersion {
+	if mp.PersistVersion > rp.PersistVersion {
 		if err := s.overwriteRedis(ctx, mp); err != nil {
 			return nil, err
 		}
@@ -82,13 +82,13 @@ func (s *PlayerStore) LoadPlayer(ctx context.Context, playerID string) (*models.
 	}
 	// Redis 选中：补写 Mongo（选中档比 Mongo 新或相等——相等也补写幂等）；
 	// Mongo 补写成功且原 key 为 PERSIST 过（TTL -1）→ EXPIRE 恢复 72h。
-	if err := s.persist.Upsert(ctx, snapshotToPlayer(snap)); err != nil {
-		return snapshotToPlayer(snap), nil // 补写失败：保持 PERSIST，不 DEL
+	if err := s.persist.Upsert(ctx, rp); err != nil {
+		return rp, nil // 补写失败：保持 PERSIST，不 DEL
 	}
 	if d, terr := s.cache.TTLOf(ctx, playerID); terr == nil && d == -1 {
 		_ = s.cache.Expire(ctx, playerID, defaultSnapshotTTL)
 	}
-	return snapshotToPlayer(snap), nil
+	return rp, nil
 }
 
 // LoadCredential 实现 mongo 专用读（含认证字段）：登录口令校验专用。
@@ -123,8 +123,7 @@ func (s *PlayerStore) FlushPlayer(ctx context.Context, p *models.Player, lastCRC
 		return FlushSkipped, lastCRC, nil
 	}
 	p.PersistVersion++ // 同一次落盘 Redis/Mongo 共用同一版本（只自增一次）
-	snap := models.SnapshotFromPlayer(p)
-	b, err := snapshotEncode(snap)
+	b, _, err := snapshotEncode(p)
 	if err != nil {
 		p.PersistVersion-- // 编码失败：回退版本自增
 		return FlushBothFailed, lastCRC, err
@@ -140,17 +139,17 @@ func (s *PlayerStore) FlushPlayer(ctx context.Context, p *models.Player, lastCRC
 	return FlushMongoOK, sum, nil
 }
 
-// snapshotFingerprint 计算快照的数据指纹（persistVersion 置零后编码，
+// snapshotFingerprint 计算数据指纹（persistVersion 置零的副本编码——
 // 保证「数据没变 + 版本没变」时指纹稳定，CRC 跳过不被版本自增破坏）。
 func snapshotFingerprint(p *models.Player) ([]byte, error) {
-	detached := models.SnapshotFromPlayer(p)
+	detached := *p
 	detached.PersistVersion = 0
-	return bson.Marshal(detached)
+	return bson.Marshal(&detached)
 }
 
 // SaveSnapshot 实现 redis 快照直写（TTL 72h；PERSIST 场景另行调用 PersistSnapshot）。
 func (s *PlayerStore) SaveSnapshot(ctx context.Context, p *models.Player, ttl time.Duration) error {
-	return s.cache.Set(ctx, models.SnapshotFromPlayer(p), ttl)
+	return s.cache.Set(ctx, p, ttl)
 }
 
 // SavePlayer 实现 mongo 落库。
@@ -175,22 +174,5 @@ func (s *PlayerStore) ExpireSnapshot(ctx context.Context, playerID string, ttl t
 
 // overwriteRedis 用 mongo 侧数据覆盖 redis 旧缓存（登录选源 Mongo 时的对齐）。
 func (s *PlayerStore) overwriteRedis(ctx context.Context, mp *models.Player) error {
-	return s.cache.Set(ctx, models.SnapshotFromPlayer(mp), defaultSnapshotTTL)
-}
-
-// snapshotToPlayer 把快照视图回填为 Player（认证字段为零值；口令校验走 LoadCredential）。
-func snapshotToPlayer(snap *models.PlayerSnapshot) *models.Player {
-	p := &models.Player{
-		PlayerID:       snap.PlayerID,
-		Account:        snap.Account,
-		Nickname:       snap.Nickname,
-		Level:          snap.Level,
-		CreatedAt:      snap.CreatedAt,
-		PersistVersion: snap.PersistVersion,
-	}
-	if len(snap.Items) > 0 {
-		p.Items = make([]*models.Item, len(snap.Items))
-		copy(p.Items, snap.Items)
-	}
-	return p
+	return s.cache.Set(ctx, mp, defaultSnapshotTTL)
 }

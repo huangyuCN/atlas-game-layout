@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	atlaslog "github.com/huangyuCN/atlas/log"
+
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/models"
 	"go.mongodb.org/mongo-driver/bson"
@@ -48,8 +50,29 @@ func (r *MongoPlayerRepo) Create(ctx context.Context, p *models.Player) error {
 	return nil
 }
 
+// 存档大小预警阈值：mongo 单文档上限 16MiB，接近上限（15MiB）时告警
+// （背包无限膨胀等业务错误应在预警阶段暴露，而非写入失败后才被知道）。
+const (
+	maxDocBytes  = 16 << 20
+	warnDocBytes = 15 << 20
+)
+
+// warnDocSize 存档大小预警：超过预警阈值打 Error（可告警），不阻断写入
+// （>16MiB 时 mongo 驱动会自行返回写入错误）。
+func warnDocSize(p *models.Player) {
+	raw, err := bson.Marshal(p)
+	if err != nil {
+		return
+	}
+	if len(raw) >= warnDocBytes {
+		atlaslog.Errorf("repo: 玩家存档过大: player=%s size=%d（预警阈值 %d / mongo 上限 %d）",
+			p.PlayerID, len(raw), warnDocBytes, maxDocBytes)
+	}
+}
+
 // Upsert 按玩家 ID 覆盖持久化（下线落库；不存在则插入）。
 func (r *MongoPlayerRepo) Upsert(ctx context.Context, p *models.Player) error {
+	defer warnDocSize(p)
 	if _, err := r.coll.ReplaceOne(ctx, bson.M{"_id": p.PlayerID}, p, optionsReplace()); err != nil {
 		return fmt.Errorf("repo: 保存玩家失败: %w", err)
 	}

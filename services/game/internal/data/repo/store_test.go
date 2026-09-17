@@ -18,25 +18,24 @@ var errorsSnapshotUnavailable = errors.New("fake: redis unavailable")
 // fakeCache 是 redis 依赖的测试桩（记录 noexpire 状态，可注入故障）。
 type fakeCache struct {
 	mu        sync.Mutex
-	snapshots map[string]*models.PlayerSnapshot
+	snapshots map[string]*models.Player
 	persisted map[string]bool // PERSIST 过的 key
 	failGet   bool            // 注入：Get 模拟 Redis 连不上
 	failSet   bool            // 注入：SetEncoded 模拟写失败
 }
 
 func newFakeCache() *fakeCache {
-	return &fakeCache{snapshots: map[string]*models.PlayerSnapshot{}, persisted: map[string]bool{}}
+	return &fakeCache{snapshots: map[string]*models.Player{}, persisted: map[string]bool{}}
 }
 
-func (c *fakeCache) Get(_ context.Context, playerID string) (*models.PlayerSnapshot, error) {
+func (c *fakeCache) Get(_ context.Context, playerID string) (*models.Player, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.failGet {
 		return nil, errorsSnapshotUnavailable
 	}
-	if snap, ok := c.snapshots[playerID]; ok {
-		cp := *snap
-		return &cp, nil
+	if p, ok := c.snapshots[playerID]; ok {
+		return clonePlayer(p), nil
 	}
 	return nil, ErrPlayerNotFound
 }
@@ -47,14 +46,14 @@ func (c *fakeCache) SetEncoded(_ context.Context, playerID string, _ []byte, _ t
 	if c.failSet {
 		return errorsSnapshotUnavailable
 	}
-	c.snapshots[playerID] = &models.PlayerSnapshot{PlayerID: playerID}
+	c.snapshots[playerID] = &models.Player{PlayerID: playerID}
 	return nil
 }
 
-func (c *fakeCache) Set(_ context.Context, snap *models.PlayerSnapshot, _ time.Duration) error {
+func (c *fakeCache) Set(_ context.Context, p *models.Player, _ time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.snapshots[snap.PlayerID] = snap
+	c.snapshots[p.PlayerID] = clonePlayer(p)
 	return nil
 }
 
@@ -245,4 +244,15 @@ func TestLoadLegacyZeroVersion(t *testing.T) {
 	if err != nil || got.PersistVersion != 0 {
 		t.Fatalf("老档应视为 0: got=%+v err=%v", got, err)
 	}
+}
+
+// clonePlayer 拷贝聚合根（测试隔离用）。
+func clonePlayer(p *models.Player) *models.Player {
+	cp := *p
+	cp.Items = make([]*models.Item, len(p.Items))
+	for i, it := range p.Items {
+		cpi := *it
+		cp.Items[i] = &cpi
+	}
+	return &cp
 }

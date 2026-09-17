@@ -14,9 +14,6 @@ import (
 // 已在匹配中等业务错误原样透传；match 客户端未装配（降级）时内部错误。
 func (p *PlayerActor) EnterMatchQueue(ctx core.ActorContext, req *gamev1.EnterMatchQueueReq) (*gamev1.EnterMatchQueueReply, error) {
 	if p.match == nil {
-		if err := p.guardFrozen(); err != nil {
-			return nil, err
-		}
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
 	if p.player == nil {
@@ -31,9 +28,6 @@ func (p *PlayerActor) EnterMatchQueue(ctx core.ActorContext, req *gamev1.EnterMa
 // CancelMatch 实现 gamev1.PlayerServiceServer：取消匹配（Ask，幂等）。
 func (p *PlayerActor) CancelMatch(ctx core.ActorContext, _ *gamev1.CancelMatchReq) (*gamev1.CancelMatchReply, error) {
 	if p.match == nil {
-		if err := p.guardFrozen(); err != nil {
-			return nil, err
-		}
 		return nil, errorv1.ErrInternal("匹配服务不可用")
 	}
 	canceled, err := p.match.Cancel(ctx.Context(), p.pid.UID())

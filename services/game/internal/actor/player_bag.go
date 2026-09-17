@@ -12,9 +12,6 @@ import (
 // GrantItem 实现 gamev1.PlayerServiceServer：聚合根 undo 写（未登录拒绝）。
 func (p *PlayerActor) GrantItem(_ core.ActorContext, req *gamev1.GrantItemReq) (*gamev1.GrantItemReply, error) {
 	if p.player == nil {
-		if err := p.guardFrozen(); err != nil {
-			return nil, err
-		}
 		return nil, errorv1.ErrPlayerNotOnline("发放道具失败：玩家不在线")
 	}
 	p.player.GrantItem(req.GetItemId(), req.GetCount())

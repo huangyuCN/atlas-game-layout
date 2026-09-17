@@ -36,17 +36,34 @@ const (
 // ErrSnapshotFormat 表示快照格式版本不认识（升级回退场景，拒绝解析）。
 var ErrSnapshotFormat = errors.New("repo: 未知快照格式版本")
 
-// snapshotEncode 把快照视图编码为压缩二进制（版本头 + s2(BSON)）。
-func snapshotEncode(snap *models.PlayerSnapshot) ([]byte, error) {
-	raw, err := bson.Marshal(snap)
+// excludedSnapshotKeys 是 redis 快照剔除的字段（认证凭据只存 mongo；
+// 剔除基于 bson 文档键——新增字段自动进快照，无需维护转换对）。
+var excludedSnapshotKeys = map[string]bool{"salt": true, "password": true}
+
+// snapshotEncode 把聚合根编码为快照二进制：bson.Marshal 全量 → 文档级剔除
+// excludedSnapshotKeys（schema 无关：新增字段自动进快照，永不漏）→ 压缩 → 版本头。
+// 同时返回全量 BSON（含认证字段，供 mongo 文档大小预警使用）。
+func snapshotEncode(p *models.Player) (b []byte, fullBSON []byte, err error) {
+	full, err := bson.Marshal(p)
 	if err != nil {
-		return nil, fmt.Errorf("repo: 快照 BSON 编码失败: %w", err)
+		return nil, nil, fmt.Errorf("repo: 玩家 BSON 编码失败: %w", err)
 	}
-	return append([]byte{snapFormatVer}, s2.Encode(nil, raw)...), nil
+	var doc bson.M
+	if err := bson.Unmarshal(full, &doc); err != nil {
+		return nil, nil, fmt.Errorf("repo: 玩家文档解码失败: %w", err)
+	}
+	for k := range excludedSnapshotKeys {
+		delete(doc, k)
+	}
+	snap, err := bson.Marshal(doc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("repo: 快照 BSON 重编码失败: %w", err)
+	}
+	return append([]byte{snapFormatVer}, s2.Encode(nil, snap)...), full, nil
 }
 
-// snapshotDecode 解码压缩二进制为快照视图。
-func snapshotDecode(b []byte) (*models.PlayerSnapshot, error) {
+// snapshotDecode 解码快照二进制为 Player（认证字段零值；口令校验走 LoadCredential）。
+func snapshotDecode(b []byte) (*models.Player, error) {
 	if len(b) == 0 {
 		return nil, fmt.Errorf("repo: 快照为空")
 	}
@@ -57,11 +74,11 @@ func snapshotDecode(b []byte) (*models.PlayerSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("repo: 快照解压失败: %w", err)
 	}
-	var snap models.PlayerSnapshot
-	if err := bson.Unmarshal(raw, &snap); err != nil {
+	var p models.Player
+	if err := bson.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("repo: 快照 BSON 解码失败: %w", err)
 	}
-	return &snap, nil
+	return &p, nil
 }
 
 // RedisPlayerCache 是玩家聚合根的 redis 快照存储（耐久性缓冲层）。
@@ -75,7 +92,7 @@ func NewRedisPlayerCache(cli *pkredis.Client) *RedisPlayerCache {
 }
 
 // Get 读取玩家快照；不存在返回 ErrPlayerNotFound。
-func (c *RedisPlayerCache) Get(ctx context.Context, playerID string) (*models.PlayerSnapshot, error) {
+func (c *RedisPlayerCache) Get(ctx context.Context, playerID string) (*models.Player, error) {
 	b, err := c.cli.Raw().Get(ctx, playerCachePrefix+playerID).Bytes()
 	if errors.Is(err, goredis.Nil) {
 		return nil, ErrPlayerNotFound
@@ -87,8 +104,8 @@ func (c *RedisPlayerCache) Get(ctx context.Context, playerID string) (*models.Pl
 }
 
 // Set 写玩家快照（压缩 BSON；ttl <= 0 即永不过期——未落库副本语义）。
-func (c *RedisPlayerCache) Set(ctx context.Context, p *models.PlayerSnapshot, ttl time.Duration) error {
-	b, err := snapshotEncode(p)
+func (c *RedisPlayerCache) Set(ctx context.Context, p *models.Player, ttl time.Duration) error {
+	b, _, err := snapshotEncode(p)
 	if err != nil {
 		return err
 	}
