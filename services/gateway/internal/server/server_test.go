@@ -14,6 +14,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
+	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/transport"
@@ -104,7 +105,13 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 		push, new(fakePusher), kcpPush, udpSrv)
 	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
 	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))
-	if err := RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
+	cfg := &conf.Bootstrap{
+		Tcp:       &conf.Bootstrap_Net{Addr: "127.0.0.1:0"},
+		Websocket: &conf.Bootstrap_Net{Addr: "127.0.0.1:0"},
+		Kcp:       &conf.Bootstrap_Net{Addr: "127.0.0.1:0"},
+		Udp:       &conf.Bootstrap_Net{Addr: "127.0.0.1:0"},
+	}
+	if err := RegisterGatewayHandlers(cfg, tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
 		t.Fatalf("registerHandlers: %v", err)
 	}
 

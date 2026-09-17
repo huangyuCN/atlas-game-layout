@@ -13,30 +13,64 @@ import (
 
 // Options 是 Redis 连接选项。
 type Options struct {
-	// Addr 是 Redis 地址（host:port）。
+	// Addr 是单点 Redis 地址（Mode 为空或 "single" 时使用，host:port）。
 	Addr string
+	// Mode 是部署形态："single"（默认）/ "sentinel"（主从哨兵）/ "cluster"（集群分片）。
+	Mode string
+	// MasterName 是哨兵监控的主库名（Mode=sentinel 时必填）。
+	MasterName string
+	// Addrs 是哨兵或集群节点地址列表（Mode=sentinel/cluster 时必填）。
+	Addrs []string
 	// Password 是可选密码。
 	Password string
-	// DB 是数据库编号。
+	// DB 是数据库编号（仅 single/sentinel 形态；cluster 按 key 哈希分片，不支持 DB 选择）。
 	DB int
 }
 
-// Client 包装 go-redis 客户端。
+// Client 包装 go-redis 客户端（UniversalClient 兼容单点/哨兵/集群三种形态）。
 type Client struct {
-	inner *goredis.Client
+	inner goredis.UniversalClient
 }
 
-// NewClient 构造 Redis 客户端（惰性连接，不验证）。
+// NewClient 按 Mode 构造 Redis 客户端（惰性连接，不验证）：
+//   - 空 / "single"：直连 Addr；
+//   - "sentinel"：经哨兵发现主库（MasterName + Addrs），主从切换自动跟随；
+//   - "cluster"：集群分片客户端（Addrs 为任一节点引导地址）。
 func NewClient(opts Options) (*Client, error) {
-	if opts.Addr == "" {
-		return nil, fmt.Errorf("redis: addr 不能为空")
+	var inner goredis.UniversalClient
+	switch opts.Mode {
+	case "", "single":
+		if opts.Addr == "" {
+			return nil, fmt.Errorf("redis: addr 不能为空")
+		}
+		inner = goredis.NewClient(&goredis.Options{
+			Addr:     opts.Addr,
+			Password: opts.Password,
+			DB:       opts.DB,
+		})
+	case "sentinel":
+		if opts.MasterName == "" || len(opts.Addrs) == 0 {
+			return nil, fmt.Errorf("redis: sentinel 形态需要 master_name 与哨兵地址")
+		}
+		inner = goredis.NewFailoverClient(&goredis.FailoverOptions{
+			MasterName:    opts.MasterName,
+			SentinelAddrs: opts.Addrs,
+			Password:      opts.Password,
+			DB:            opts.DB,
+		})
+	case "cluster":
+		if len(opts.Addrs) == 0 {
+			return nil, fmt.Errorf("redis: cluster 形态需要节点地址")
+		}
+		inner = goredis.NewClusterClient(&goredis.ClusterOptions{
+			Addrs:    opts.Addrs,
+			Password: opts.Password,
+			ReadOnly: true, // 读请求可落副本（写仍走主库）
+		})
+	default:
+		return nil, fmt.Errorf("redis: 未知 mode %q（支持 single/sentinel/cluster）", opts.Mode)
 	}
-	cli := goredis.NewClient(&goredis.Options{
-		Addr:     opts.Addr,
-		Password: opts.Password,
-		DB:       opts.DB,
-	})
-	return &Client{inner: cli}, nil
+	return &Client{inner: inner}, nil
 }
 
 // Close 关闭客户端。
@@ -47,8 +81,8 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.inner.Ping(ctx).Err()
 }
 
-// Raw 返回底层客户端（供 matchmaker 队列等复用）。
-func (c *Client) Raw() *goredis.Client { return c.inner }
+// Raw 返回底层客户端（供 matchmaker 队列等复用；UniversalClient 接口）。
+func (c *Client) Raw() goredis.UniversalClient { return c.inner }
 
 // playerSessionKey 生成玩家会话路由键：atlas:session:<playerID>。
 func playerSessionKey(playerID string) string {

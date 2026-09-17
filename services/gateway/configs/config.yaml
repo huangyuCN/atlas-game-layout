@@ -16,6 +16,8 @@ data:
 log:
   level: info
   format: text
+# 业务四协议按需启用：删除对应节即裁掉该协议（不监听端口、不注册 handler），
+# 模板按部署形态只暴露需要的通道。
 tcp:
   addr: 0.0.0.0:9001
 websocket:

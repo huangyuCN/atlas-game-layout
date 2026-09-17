@@ -80,14 +80,28 @@ type serverSet struct {
 }
 
 // newServerSet 聚合五协议 Server 到 servers 组与嵌入式子组。
+// 业务四协议（TCP/WS/KCP/UDP）按配置可选：conf 协议节 nil 时不进启停组
+// （Server 已构造但不被 Start——不监听端口；handler 注册同样跳过，对外不可用），
+// 模板可按部署形态只暴露需要的协议；HTTP（管理面/健康检查）始终启用。
 func newServerSet(
+	cfg *conf.Bootstrap,
 	httpSrv transport.Server,
 	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
 ) serverSet {
-	return serverSet{
-		HTTP: httpSrv, TCP: tcpSrv, WS: wsSrv, KCP: kcpSrv, UDP: udpSrv,
-		HTTPEmbed: httpSrv, TCPEmbed: tcpSrv, KCPEmbed: kcpSrv, UDPEmbed: udpSrv,
+	set := serverSet{HTTP: httpSrv, HTTPEmbed: httpSrv}
+	if cfg.GetTcp() != nil {
+		set.TCP, set.TCPEmbed = tcpSrv, tcpSrv
 	}
+	if cfg.GetWebsocket() != nil {
+		set.WS = wsSrv
+	}
+	if cfg.GetKcp() != nil {
+		set.KCP, set.KCPEmbed = kcpSrv, kcpSrv
+	}
+	if cfg.GetUdp() != nil {
+		set.UDP, set.UDPEmbed = udpSrv, udpSrv
+	}
+	return set
 }
 
 // newGateway 装配统一 handler 并注册到各协议 Server。
@@ -112,7 +126,7 @@ func newGateway(
 	// 通道绑定副作用（Gateway 会话模型的领域知识，装配声明——不进注解协议）：
 	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道（battle 帧推送寻址）。
 	g.Relay().WithChannelBinding("/battle.v1.BattleService/JoinBattle", relay.Slot(session.ChannelBattle))
-	if err := server.RegisterGatewayHandlers(tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
+	if err := server.RegisterGatewayHandlers(cfg, tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
 		return nil, err
 	}
 	return g, nil
