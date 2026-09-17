@@ -38,6 +38,7 @@ const (
 	ErrorReason_PlayerNotOnline     ErrorReason = 1007 // 玩家不在线
 	ErrorReason_InvalidParams       ErrorReason = 1008 // 参数非法
 	ErrorReason_PasswordWrong       ErrorReason = 1009 // 口令错误
+	ErrorReason_ServerFrozen        ErrorReason = 1010 // 服务冻结（双库落盘失败，数据保护态）
 	// 匹配
 	ErrorReason_AlreadyInMatch ErrorReason = 2001 // 已在匹配中
 	ErrorReason_MatchNotFound  ErrorReason = 2002 // 匹配不存在
@@ -67,6 +68,7 @@ var (
 		1007: "PlayerNotOnline",
 		1008: "InvalidParams",
 		1009: "PasswordWrong",
+		1010: "ServerFrozen",
 		2001: "AlreadyInMatch",
 		2002: "MatchNotFound",
 		2003: "PartyNotFound",
@@ -90,6 +92,7 @@ var (
 		"PlayerNotOnline":     1007,
 		"InvalidParams":       1008,
 		"PasswordWrong":       1009,
+		"ServerFrozen":        1010,
 		"AlreadyInMatch":      2001,
 		"MatchNotFound":       2002,
 		"PartyNotFound":       2003,
@@ -135,7 +138,7 @@ var File_api_error_v1_errors_proto protoreflect.FileDescriptor
 
 const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\xa1\x04\n" +
+	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\xba\x04\n" +
 	"\vErrorReason\x12\b\n" +
 	"\x04None\x10\x00\x12\x19\n" +
 	"\x0ePlayerNotFound\x10\xe9\a\x1a\x04\xa8E\x94\x03\x12\x1e\n" +
@@ -146,7 +149,8 @@ const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\x0fSessionNotFound\x10\xee\a\x1a\x04\xa8E\x94\x03\x12\x1a\n" +
 	"\x0fPlayerNotOnline\x10\xef\a\x1a\x04\xa8E\x94\x03\x12\x18\n" +
 	"\rInvalidParams\x10\xf0\a\x1a\x04\xa8E\x90\x03\x12\x18\n" +
-	"\rPasswordWrong\x10\xf1\a\x1a\x04\xa8E\x91\x03\x12\x19\n" +
+	"\rPasswordWrong\x10\xf1\a\x1a\x04\xa8E\x91\x03\x12\x17\n" +
+	"\fServerFrozen\x10\xf2\a\x1a\x04\xa8E\xf7\x03\x12\x19\n" +
 	"\x0eAlreadyInMatch\x10\xd1\x0f\x1a\x04\xa8E\x99\x03\x12\x18\n" +
 	"\rMatchNotFound\x10\xd2\x0f\x1a\x04\xa8E\x94\x03\x12\x18\n" +
 	"\rPartyNotFound\x10\xd3\x0f\x1a\x04\xa8E\x94\x03\x12\x14\n" +

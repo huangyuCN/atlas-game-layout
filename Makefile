@@ -54,13 +54,14 @@ compose: ## 起中间件（etcd/redis/nats/mongo）
 clean:
 	rm -rf $(BIN_DIR)
 
-# proto 生成：Atlas 插件来自 ATLAS_BIN（本地开发=../atlas/bin，用户项目=atlas upgrade 安装目录）。
 # proto 生成：Atlas 插件来自 ATLAS_BIN（本地开发=../atlas/bin，用户项目=atlas upgrade
 # 安装目录，如 `make proto ATLAS_BIN="$(go env GOBIN)"`）。proto-tools 优先收集现成
 # 插件，缺插件且存在 Atlas 源码时回退到源码构建——用户项目不依赖 Atlas 源码仓库。
-PROTO_INC := -I. -Ithird_party -I$(abspath $(ATLAS_DIR))
+# ATLAS_BIN/ATLAS_DIR 必须先于 PROTO_INC 定义：PROTO_INC 用 := 即时展开，
+# 引用后置变量会展开成空、留下悬空 -I（protoc 报 Missing value for flag）。
 ATLAS_BIN ?= ../atlas/bin
 ATLAS_DIR ?= $(dir $(ATLAS_BIN))
+PROTO_INC := -I. -Ithird_party -I$(abspath $(ATLAS_DIR))
 # 信任边界三层：管理面（google.api.http REST，atlas-http/go-grpc 生成）、
 # 域统一契约（客户端 op + actor 分发共用一份 service：atlas-actor 生成桩 +
 # atlas-client 生成 SDK stub；透传引擎按注解路由表运行时注册，不再生成传输桩）、
@@ -112,8 +113,14 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 		--atlas-kcp_out=. --atlas-kcp_opt=paths=source_relative \
 		$(API_SESSION_PROTOS)
 	@mkdir -p api/client/ts api/client/csharp
+# 多语言 stub 必须分两次独立 protoc 调用：同一次调用里重复 --atlas-client_opt
+# 会被 protoc 逗号拼接（lang 键重复，flag 解析后到者赢=csharp 覆盖 ts）、
+# 重复 --atlas-client_out 会让 protoc 对每次 out 各调用一次插件——结果两个
+# 目录都产出 csharp 代码，ts 产物静默缺失。
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-client_opt=lang=ts,paths=source_relative --atlas-client_out=api/client/ts \
+		$(API_DOMAIN_PROTOS)
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-client_opt=lang=csharp,paths=source_relative --atlas-client_out=api/client/csharp \
 		$(API_DOMAIN_PROTOS)
 
