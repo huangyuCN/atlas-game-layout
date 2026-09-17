@@ -106,7 +106,7 @@ func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 
 // idempotencyID 计算本次透传的投递去重键（注入决策的纯函数，便于单测）：
 // 路由条目注解声明 IDEMPOTENT 且客户端帧携带请求幂等键时返回该键，否则空串
-//（未声明注解或客户端未携带走原路径零开销，不做静默兜底）。
+// （未声明注解或客户端未携带走原路径零开销，不做静默兜底）。
 func idempotencyID(entry relay.RouteEntry, requestID string) string {
 	if entry.Idempotency != relay.Idempotent || requestID == "" {
 		return ""
