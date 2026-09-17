@@ -228,6 +228,22 @@ func (p *PlayerActor) OnBeforeAsk(ctx core.ActorContext, req any) error {
 	return nil
 }
 
+// OnBeforeTell 实现 core.BeforeTellHook：冻结期拒绝 Tell 类玩法消息；
+// 白名单放行下线流程与落盘自消息（编排机制本身必须可用）。
+func (p *PlayerActor) OnBeforeTell(ctx core.ActorContext, msg any) error {
+	if !p.frozen {
+		return nil
+	}
+	switch msg.(type) {
+	case *gamev1.LogoutMsg: // 下线流程：必须通（PERSIST 兜底后退出）
+		return nil
+	case tickSnapshot, retryFlush: // 落盘重试编排：必须通
+		return nil
+	default:
+		return errorv1.ErrServerFrozen("服务暂时不可写，请稍后重试")
+	}
+}
+
 // onTickSnapshot 定时统一落盘（在线缓存刷盘，本地路由注册项）。
 func (p *PlayerActor) onTickSnapshot(ctx core.ActorContext, _ tickSnapshot) error {
 	if p.player == nil {

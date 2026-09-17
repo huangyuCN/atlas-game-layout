@@ -70,8 +70,11 @@ func (s *PlayerStore) LoadPlayer(ctx context.Context, playerID string) (*models.
 		return mp, nil
 	}
 	if mErr != nil {
-		// Mongo 读失败但 Redis 有档：用 Redis（不做对齐——Mongo 不可用）。
-		return rp, nil
+		// Mongo 读失败：拒绝登录。Redis 档可能是低版本残留（如上次下线 Mongo
+		// 成功 / Redis 失败的组合后 Mongo 故障），基于低版本上线会让后续落库
+		// 覆盖 Mongo 里的更高版本——保守拒绝（设计决策：与 shimmer 文档相反，
+		// 本仓取数据安全优先）。
+		return nil, mErr
 	}
 	// 两边都有：persistVersion 大者胜，相同用 Redis。
 	if mp.PersistVersion > rp.PersistVersion {
