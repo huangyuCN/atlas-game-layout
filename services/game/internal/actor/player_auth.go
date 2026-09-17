@@ -23,10 +23,12 @@ func (p *PlayerActor) Register(ctx core.ActorContext, req *gamev1.RegisterReq) (
 	return reply, nil
 }
 
-// Login 实现 gamev1.PlayerServiceServer：首登加载聚合根到内存（redis→mongo 三级链路）。
-// 会话建立与令牌裁决由 Gateway 单点承担（game 侧不落 token）；重复登录（本 actor
-// 已持聚合根）时复用内存权威态、不重载：在线期间内存比存储新（定时快照 + 下线
-// 落库），重载会用陈旧快照覆盖快照间隙的内存写（如顶号重登丢失刚发放的道具）。
+// Login 实现 gamev1.PlayerServiceServer：首登加载聚合根到内存（redis→mongo
+// 选源链路，含双向对齐补写）。会话建立与令牌裁决由 Gateway 单点承担（game
+// 侧不落 token）；重复登录（本 actor 已持聚合根）时复用内存权威态、不重载：
+// 在线期间内存比存储新（定时快照 + 下线落库），重载会用陈旧快照覆盖快照
+// 间隙的内存写（如顶号重登丢失刚发放的道具）。
+// 回执摘要一律由本方法从选源后的聚合根组装（biz 只做口令校验，不做选源）。
 func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginReq) (*gamev1.LoginReply, error) {
 	reply, berr := p.svc.Login(ctx.Context(), req)
 	if berr != nil {
@@ -41,6 +43,7 @@ func (p *PlayerActor) Login(ctx core.ActorContext, req *gamev1.LoginReq) (*gamev
 		return nil, errorv1.ErrInternal("加载玩家失败")
 	}
 	p.player = player
+	reply.Player = usecase.PlayerSummary(player)
 	return reply, nil
 }
 

@@ -33,7 +33,7 @@
 
 ## 3. 序列化
 
-redis 存档 = **压缩后的 BSON**：`bson.Marshal`（PlayerSnapshot 视图，与 mongo 文档同构）→ **s2 压缩**（klauspost/compress）→ 1 字节格式版本头（演进留位）。认证字段（Salt/Password）**不进快照**（凭据只存 mongo，登录口令校验走 `LoadCredential` mongo 专用读）。
+redis 存档 = **压缩后的 BSON**：`bson.Marshal`（聚合根视图，与 mongo 文档同构）→ **s2 压缩**（klauspost/compress）→ 1 字节格式版本头（演进留位）。认证字段（Salt/Password）**不进快照**（凭据只存 mongo，登录口令校验走 `LoadCredential` mongo 专用读）。同理，聚合根→mongo 的更新写（下线落库/降级直写/登录补写）一律 `$set` 且**剔除认证字段**——mongo 凭据只由注册建档（Create）写入，防止无认证字段的内存副本（来自 redis 快照）把凭据覆盖为空；换密码走显式专用路径。
 
 ## 4. persistVersion
 
@@ -61,7 +61,7 @@ redis 存档 = **压缩后的 BSON**：`bson.Marshal`（PlayerSnapshot 视图，
 - 冻结标记后全部改档 handler 守卫拒绝（`SERVER_FROZEN`，HTTP 503 语义）；查询类放行。
 - **不 Kick、不 Terminate**——踢人会触发下线落盘链路，冻结态会丢。
 - 定时器改每分钟重试（仍先 Redis 后 Mongo）：Redis 恢复 → 解冻；仅 Mongo 成功 → 强制下线；一直失败 → 保持冻结（进度不再堆积）。
-- 冻结期收到完整 Login（仍已登录）→ 按现状落盘+退出，等同第一期下线语义。
+- 冻结期收到完整 Login（仍已登录）→ 放行并**复用内存权威态**（不重载、不退出）：重登是只读路径（口令校验走 mongo 专用读；选源与补写不发生——聚合根已在内存），冻结标记保留到下次落盘成功再解冻。
 
 ### 6.3 下线（Logout / 停止）
 

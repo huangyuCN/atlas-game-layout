@@ -62,8 +62,12 @@ func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterReq) (
 	}, nil
 }
 
-// Login 实现 biz.PlayerService（redis→mongo 三级加载 + 口令校验）。
-// 会话建立与令牌裁决由 Gateway 单点承担：本方法不再写会话表、不做新旧令牌比对。
+// Login 实现 biz.PlayerService（口令校验）。
+// 会话建立与令牌裁决由 Gateway 单点承担：本方法不写会话表、不做新旧令牌比对。
+// 数据选源（redis/mongo 版本比较、双向对齐补写）与回执摘要由 actor 单点完成
+// （actor 持聚合根，登录时 LoadPlayer 一次）：biz 只校验凭据，不做选源——
+// 避免一次登录双份选源读取与两遍对齐补写，也避免与「redis/mongo 不可用拒登」
+// 的决策相冲突（选源失败必须在调用方显式失败，不能退回 mongo 数据继续登录）。
 func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginReq) (*gamev1.LoginReply, error) {
 	if req.GetPlayerId() == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("玩家与口令不能为空")
@@ -78,14 +82,7 @@ func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginReq) (*gamev
 	if !data.VerifyPassword(req.GetPassword(), player.Salt, player.Password) {
 		return nil, errorv1.ErrPasswordWrong("口令错误")
 	}
-	// 回执摘要用选源后的最新数据（redis 快照可能比 mongo 新）。
-	latest, err := h.store.LoadPlayer(ctx, req.GetPlayerId())
-	if err != nil {
-		latest = player // 选源失败：退回 mongo 校验数据（登录不因数据面阻塞）
-	}
-	return &gamev1.LoginReply{
-		Player: usecase.PlayerSummary(latest),
-	}, nil
+	return &gamev1.LoginReply{}, nil
 }
 
 // 静态保证 PlayerHandler 实现 biz.PlayerService。

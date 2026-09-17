@@ -1,8 +1,8 @@
 package repo
 
 // 本文件是玩家聚合根的 redis 快照存储（压缩 BSON）：耐久性缓冲层。
-// 编码 = 1 字节格式版本头 + s2 压缩的 BSON（PlayerSnapshot：剥离认证字段，
-// 与 mongo 文档同构）。TTL 语义：
+// 编码 = 1 字节格式版本头 + s2 压缩的 BSON（剥离认证字段，与 mongo 文档同构）。
+// TTL 语义：
 //   - 正常态 TTL 72h（mongo 已有权威数据，过期无妨）；
 //   - 下线/在线 Mongo 失败 → Persist 转永不过期（该存档成为未落库权威副本）；
 //   - 登录补写 Mongo 成功后 EXPIRE 恢复 72h；禁止 DEL 玩家存档 key。

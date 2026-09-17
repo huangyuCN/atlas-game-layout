@@ -134,7 +134,8 @@ func TestRegister(t *testing.T) {
 }
 
 // TestLogin 验证登录成功/未注册/口令错误；game 侧不持久化会话令牌
-// （会话裁决单点收敛到 Gateway，登录回执仅玩家摘要）。
+// （会话裁决单点收敛到 Gateway）。biz.Login 只做口令校验：数据选源
+// （redis/mongo 版本比较）与回执摘要由 actor 单点完成。
 func TestLogin(t *testing.T) {
 	ctx := context.Background()
 	h, _ := newTestHandler()
@@ -148,31 +149,37 @@ func TestLogin(t *testing.T) {
 	if _, err := h.Login(ctx, &gamev1.LoginReq{PlayerId: "p-test", Password: "bad", Token: "t1"}); reasonOf(t, err) != errorv1.ReasonPasswordWrong() {
 		t.Fatalf("口令错误 = %v", err)
 	}
+	// 成功登录：回执摘要为空（biz 不做选源，摘要由 actor 从选源后的聚合根组装）。
 	reply, err := h.Login(ctx, &gamev1.LoginReq{PlayerId: "p-test", Password: "pw", Token: "t1"})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if reply.GetPlayer().GetPlayerId() != "p-test" || reply.GetPlayer().GetNickname() != "爱丽丝" {
-		t.Fatalf("登录回执不符: %+v", reply)
+	if reply.GetPlayer() != nil {
+		t.Fatalf("biz 登录回执不应携带摘要（actor 单点组装）: %+v", reply.GetPlayer())
 	}
 }
 
-// TestLoginLoadsFromCache 验证登录优先读快照缓存（三级链路）。
-func TestLoginLoadsFromCache(t *testing.T) {
+// TestLoginDoesNotSourceData 验证口令校验不触发数据选源（LoadCredential 专用）：
+// 登录成功不读快照缓存、不发生对齐补写——选源单点归 actor（一次登录一份读取与补写）。
+func TestLoginDoesNotSourceData(t *testing.T) {
 	ctx := context.Background()
 	h, store := newTestHandler()
 	if _, err := h.Register(ctx, &gamev1.RegisterReq{Account: "alice", Password: "pw"}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	// 写入快照缓存，并让持久化层内容不一致（模拟缓存优先：同版本用 Redis）。
+	// 缓存中是另一个昵称（若 biz 做选源会读到它并触发对齐补写）。
 	p, _ := store.LoadPlayer(ctx, "p-test")
 	p.Nickname = "缓存昵称"
 	store.snapshots[p.PlayerID] = clonePlayer(p)
-	reply, err := h.Login(ctx, &gamev1.LoginReq{PlayerId: "p-test", Password: "pw", Token: "t1"})
-	if err != nil {
+	if _, err := h.Login(ctx, &gamev1.LoginReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if reply.GetPlayer().GetNickname() != "缓存昵称" {
-		t.Fatalf("应命中缓存昵称: %+v", reply.GetPlayer())
+	// 对齐补写未发生：mongo 内容保持注册基线（Nickname 仍是账号）。
+	mp, err := store.LoadCredential(ctx, "p-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mp.Nickname == "缓存昵称" {
+		t.Fatal("口令校验不应触发对齐补写（选源单点归 actor）")
 	}
 }

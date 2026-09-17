@@ -24,11 +24,9 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
 
-// tickSnapshot 是定时落盘自消息（OnStart 注册 Repeat，经本地类型路由分发）。
+// tickSnapshot 是定时落盘自消息（OnStart 注册 Repeat，经本地类型路由分发；
+// 冻结期重试也复用它，见 freeze）。
 type tickSnapshot struct{}
-
-// retryFlush 是冻结 / 下线重试自消息（AfterPersistent：进程崩溃重启后仍存活）。
-type retryFlush struct{}
 
 // 停止前落库的短重试参数（同步执行；无论成败都退出，丢已冻结窗口数据）。
 const (
@@ -73,13 +71,12 @@ type PlayerActor struct {
 	store                                   repo.PlayerRepo
 	match                                   biz.MatchmakerClient
 
-	player            *models.Player    // 内存聚合根（在线缓存；登录后持有）
-	partyID           string            // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
-	snapTick          time.Duration     // 统一落盘周期（≤0 关闭定时落盘）
-	lastCRC           uint32            // 上次成功落盘的数据指纹（CRC 跳过用）
-	frozen            bool              // 在线冻结标记：双库失败后拒绝改档（数据不再堆积）
-	freezeRetryCancel core.CancelFunc   // 冻结期重试定时器的取消句柄
-	stopReq           *types.ExitReason // 下线流程请求：非 nil 表示已进入「落库后退出」流程
+	player            *models.Player  // 内存聚合根（在线缓存；登录后持有）
+	partyID           string          // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
+	snapTick          time.Duration   // 统一落盘周期（≤0 关闭定时落盘）
+	lastCRC           uint32          // 上次成功落盘的数据指纹（CRC 跳过用）
+	frozen            bool            // 在线冻结标记：双库失败后拒绝改档（数据不再堆积）
+	freezeRetryCancel core.CancelFunc // 冻结期重试定时器的取消句柄
 }
 
 // OnStart 实现 core.Handler 生命周期：注册定时落盘 Repeat（3 分钟节奏）。
@@ -120,7 +117,6 @@ func (p *PlayerActor) beginStopFlow(ctx core.ActorContext, reason types.ExitReas
 			p.partyID = ""
 		}
 	}
-	p.stopReq = &reason
 	if p.stopFlush(ctx) {
 		// 落库成功：数据安全，真正退出（OnStop 仅零失败收尾）。
 		p.player = nil
@@ -159,8 +155,10 @@ func (p *PlayerActor) stopFlush(ctx core.ActorContext) bool {
 }
 
 // flushOrRetry 执行一次统一落盘并按结果编排：
-//   - Redis 成功 / Skip：数据已安全 → 若有挂起的下线请求则真正退出；
-//   - Mongo 降级成功：数据已安全（Mongo 为准）→ 同上；
+//   - Redis 成功 / Skip：数据已安全 → 解冻（如有）；
+//   - 仅 Mongo 成功：数据已落 mongo（零丢失），但在线热路径依赖 Redis
+//     （设计 §6.2）→ 强制下线（与「redis 不可用拒登」的降级姿态一致，
+//     避免 mongo 变成全局在线热路径）；
 //   - 双失败 → 进入在线冻结（拒绝改档 + 每分钟重试），不 Kick 不 Terminate。
 func (p *PlayerActor) flushOrRetry(ctx core.ActorContext) {
 	if p.player == nil {
@@ -171,14 +169,13 @@ func (p *PlayerActor) flushOrRetry(ctx core.ActorContext) {
 		result = repo.FlushBothFailed // FlushPlayer 返回 err 时按双失败编排
 	}
 	switch result {
-	case repo.FlushRedisOK, repo.FlushMongoOK, repo.FlushSkipped:
+	case repo.FlushRedisOK, repo.FlushSkipped:
 		p.lastCRC = crc
 		p.unfreeze()
-		if p.stopReq != nil {
-			r := *p.stopReq
-			p.stopReq = nil
-			ctx.Stop(r) // 落库屏障达成：真正退出（OnStop 仅收尾）
-		}
+	case repo.FlushMongoOK:
+		p.lastCRC = crc
+		atlaslog.Errorf("player actor 仅 Mongo 落盘成功（Redis 不可用），强制下线: uid=%s", p.pid.UID())
+		p.beginStopFlow(ctx, types.ExitKilled("redis 不可用，仅 mongo 落盘成功，强制下线"))
 	case repo.FlushBothFailed:
 		p.freeze(ctx)
 	}
@@ -208,36 +205,38 @@ func (p *PlayerActor) unfreeze() {
 	p.frozen = false
 }
 
-// readOnlyTypes 是冻结期放行的只读请求类型（查询类，不改存档）；
-// 白名单是 fail-safe 方向：新增改档 rpc 忘记登记 → 冻结期被拒（安全），
-// 新增只读 rpc 忘记登记 → 冻结期也被拒（体验损失，登记即恢复）。
-var readOnlyRequests = map[any]bool{
-	&gamev1.GetPlayerDataReq{}:  true,
-	&gamev1.GetBackpackReq{}:    true,
-	&gamev1.GetPlayerReq{}:      true,
-	&gamev1.GetMatchStatusReq{}: true,
-	&gamev1.GetPartyReq{}:       true,
-}
-
 // OnBeforeAsk 实现 core.BeforeAskHook：冻结期统一拒绝改档请求（SERVER_FROZEN，
-// HTTP 503 语义——客户端退避重试）；只读白名单放行。
-func (p *PlayerActor) OnBeforeAsk(ctx core.ActorContext, req any) error {
-	if p.frozen && !readOnlyRequests[req] {
+// HTTP 503 语义——客户端退避重试）；只读查询与重新登录放行（重登复用内存
+// 权威态，不触存储写）。白名单是 fail-safe 方向：新增改档 rpc 忘记登记 →
+// 冻结期被拒（安全）；新增只读 rpc 忘记登记 → 冻结期也被拒（体验损失，登记即恢复）。
+func (p *PlayerActor) OnBeforeAsk(_ core.ActorContext, req any) error {
+	if !p.frozen {
+		return nil
+	}
+	switch req.(type) {
+	case *gamev1.GetPlayerDataReq,
+		*gamev1.GetBackpackReq,
+		*gamev1.GetPlayerReq,
+		*gamev1.GetMatchStatusReq,
+		*gamev1.GetPartyReq,
+		*gamev1.LoginReq: // 冻结期重登：复用内存权威态
+		return nil
+	default:
 		return errorv1.ErrServerFrozen("服务暂时不可写，请稍后重试")
 	}
-	return nil
 }
 
-// OnBeforeTell 实现 core.BeforeTellHook：冻结期拒绝 Tell 类玩法消息；
-// 白名单放行下线流程与落盘自消息（编排机制本身必须可用）。
-func (p *PlayerActor) OnBeforeTell(ctx core.ActorContext, msg any) error {
+// OnBeforeTell 实现 core.BeforeTellHook：冻结期拒绝 Tell 类玩法消息（玩法冻结
+// 语义）；白名单放行下线流程与落盘重试自消息（编排机制本身必须可用）。
+// 系统消息（停止控制、生命周期）走邮箱系统通道，不经本钩子。
+func (p *PlayerActor) OnBeforeTell(_ core.ActorContext, msg any) error {
 	if !p.frozen {
 		return nil
 	}
 	switch msg.(type) {
 	case *gamev1.LogoutMsg: // 下线流程：必须通（PERSIST 兜底后退出）
 		return nil
-	case tickSnapshot, retryFlush: // 落盘重试编排：必须通
+	case tickSnapshot: // 落盘重试编排：必须通
 		return nil
 	default:
 		return errorv1.ErrServerFrozen("服务暂时不可写，请稍后重试")

@@ -15,17 +15,18 @@ import (
 // errorsSnapshotUnavailable 模拟 Redis 连不上（非 key miss）。
 var errorsSnapshotUnavailable = errors.New("fake: redis unavailable")
 
-// fakeCache 是 redis 依赖的测试桩（记录 noexpire 状态，可注入故障）。
+// fakeCache 是 redis 依赖的测试桩：存取走真实编解码（snapshotEncode/snapshotDecode
+// round-trip 全程参与，字段剔除行为被所有场景隐式回归）；记录 noexpire 状态，可注入故障。
 type fakeCache struct {
 	mu        sync.Mutex
-	snapshots map[string]*models.Player
-	persisted map[string]bool // PERSIST 过的 key
-	failGet   bool            // 注入：Get 模拟 Redis 连不上
-	failSet   bool            // 注入：SetEncoded 模拟写失败
+	encoded   map[string][]byte // 已编码的快照字节（Get 时按真实解码路径还原）
+	persisted map[string]bool   // PERSIST 过的 key
+	failGet   bool              // 注入：Get 模拟 Redis 连不上
+	failSet   bool              // 注入：SetEncoded 模拟写失败
 }
 
 func newFakeCache() *fakeCache {
-	return &fakeCache{snapshots: map[string]*models.Player{}, persisted: map[string]bool{}}
+	return &fakeCache{encoded: map[string][]byte{}, persisted: map[string]bool{}}
 }
 
 func (c *fakeCache) Get(_ context.Context, playerID string) (*models.Player, error) {
@@ -34,26 +35,33 @@ func (c *fakeCache) Get(_ context.Context, playerID string) (*models.Player, err
 	if c.failGet {
 		return nil, errorsSnapshotUnavailable
 	}
-	if p, ok := c.snapshots[playerID]; ok {
-		return clonePlayer(p), nil
+	if b, ok := c.encoded[playerID]; ok {
+		return snapshotDecode(b)
 	}
 	return nil, ErrPlayerNotFound
 }
 
-func (c *fakeCache) SetEncoded(_ context.Context, playerID string, _ []byte, _ time.Duration) error {
+func (c *fakeCache) SetEncoded(_ context.Context, playerID string, b []byte, _ time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.failSet {
 		return errorsSnapshotUnavailable
 	}
-	c.snapshots[playerID] = &models.Player{PlayerID: playerID}
+	c.encoded[playerID] = b
 	return nil
 }
 
 func (c *fakeCache) Set(_ context.Context, p *models.Player, _ time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.snapshots[p.PlayerID] = clonePlayer(p)
+	if c.failSet {
+		return errorsSnapshotUnavailable
+	}
+	b, _, err := snapshotEncode(p)
+	if err != nil {
+		return err
+	}
+	c.encoded[p.PlayerID] = b
 	return nil
 }
 
@@ -67,7 +75,7 @@ func (c *fakeCache) Persist(_ context.Context, playerID string) error {
 func (c *fakeCache) TTLOf(_ context.Context, playerID string) (time.Duration, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.snapshots[playerID]; !ok {
+	if _, ok := c.encoded[playerID]; !ok {
 		return 0, ErrPlayerNotFound
 	}
 	if c.persisted[playerID] {
@@ -83,10 +91,12 @@ func (c *fakeCache) Expire(_ context.Context, playerID string, _ time.Duration) 
 	return nil
 }
 
-// fakeMongo 是 mongo 权威库的测试桩。
+// fakeMongo 是 mongo 权威库的测试桩（可注入读/写故障）。
 type fakeMongo struct {
-	mu      sync.Mutex
-	players map[string]*models.Player
+	mu         sync.Mutex
+	players    map[string]*models.Player
+	failGet    bool // 注入：FindByID 模拟 mongo 读失败（非 key miss）
+	failUpsert bool // 注入：Upsert 模拟写失败
 }
 
 func newFakeMongo() *fakeMongo { return &fakeMongo{players: map[string]*models.Player{}} }
@@ -94,6 +104,9 @@ func newFakeMongo() *fakeMongo { return &fakeMongo{players: map[string]*models.P
 func (m *fakeMongo) FindByID(_ context.Context, playerID string) (*models.Player, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failGet {
+		return nil, errorsSnapshotUnavailable
+	}
 	if p, ok := m.players[playerID]; ok {
 		cp := *p
 		return &cp, nil
@@ -104,6 +117,9 @@ func (m *fakeMongo) FindByID(_ context.Context, playerID string) (*models.Player
 func (m *fakeMongo) Upsert(_ context.Context, p *models.Player) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failUpsert {
+		return errorsSnapshotUnavailable
+	}
 	m.players[p.PlayerID] = p
 	return nil
 }
@@ -243,6 +259,101 @@ func TestLoadLegacyZeroVersion(t *testing.T) {
 	got, err := s.LoadPlayer(context.Background(), "p1")
 	if err != nil || got.PersistVersion != 0 {
 		t.Fatalf("老档应视为 0: got=%+v err=%v", got, err)
+	}
+}
+
+// TestLoadFailsWhenMongoReadFails 数据安全决策回归：Redis 有档但 Mongo 读失败
+// （非 key miss）→ 拒绝登录（Redis 档可能是低版本残留，保守拒绝）。
+func TestLoadFailsWhenMongoReadFails(t *testing.T) {
+	c, m := newFakeCache(), newFakeMongo()
+	m.failGet = true
+	s := newStore(c, m)
+	_ = s.SaveSnapshot(context.Background(), testPlayer("p1", 5, 1), 72*1000)
+	if _, err := s.LoadPlayer(context.Background(), "p1"); err == nil {
+		t.Fatal("Mongo 读失败应拒绝登录（Redis 档可能是低版本残留）")
+	}
+}
+
+// TestFlushBothFailedRollsBackVersion 版本一致性：双库失败 → persistVersion
+// 回退（不产生「内存版本已涨但两库都没有」的悬空版本）。
+func TestFlushBothFailedRollsBackVersion(t *testing.T) {
+	c, m := newFakeCache(), newFakeMongo()
+	c.failSet = true
+	m.failUpsert = true
+	s := newStore(c, m)
+	p := testPlayer("p1", 5, 0)
+	result, _, err := s.FlushPlayer(context.Background(), p, 0)
+	if err == nil || result != FlushBothFailed {
+		t.Fatalf("双失败应返回 FlushBothFailed: result=%v err=%v", result, err)
+	}
+	if p.PersistVersion != 0 {
+		t.Fatalf("双失败后版本应回退: got=%d", p.PersistVersion)
+	}
+}
+
+// TestFlushVersionSingleIncrement 版本语义：一次判脏落盘只自增一次
+// （Redis/Mongo 共用同一版本，登录按它选源）。
+func TestFlushVersionSingleIncrement(t *testing.T) {
+	c, m := newFakeCache(), newFakeMongo()
+	s := newStore(c, m)
+	p := testPlayer("p1", 5, 0)
+	if _, _, err := s.FlushPlayer(context.Background(), p, 0); err != nil {
+		t.Fatal(err)
+	}
+	if p.PersistVersion != 1 {
+		t.Fatalf("一次落盘版本应自增一次: got=%d", p.PersistVersion)
+	}
+}
+
+// TestSnapshotRoundTripStripsAuth 快照编解码 round-trip：认证字段被剔除、
+// 数据字段保真、格式版本头可校验（P0 回归：认证字段只存 mongo）。
+func TestSnapshotRoundTripStripsAuth(t *testing.T) {
+	in := &models.Player{
+		PlayerID: "p1", Account: "acc", Salt: "s", Password: "h",
+		Nickname: "n", Level: 7, CreatedAt: 123,
+		Items: []*models.Item{{ItemID: 1001, Count: 3}},
+	}
+	b, _, err := snapshotEncode(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b[0] != snapFormatVer {
+		t.Fatalf("格式版本头不符: got=%d", b[0])
+	}
+	out, err := snapshotDecode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Salt != "" || out.Password != "" {
+		t.Fatalf("认证字段不得进快照: salt=%q password=%q", out.Salt, out.Password)
+	}
+	if out.Nickname != "n" || out.Level != 7 || out.CreatedAt != 123 ||
+		len(out.Items) != 1 || out.Items[0].ItemID != 1001 || out.Items[0].Count != 3 {
+		t.Fatalf("数据字段应保真: %+v", out)
+	}
+}
+
+// TestUpsertSetDocExcludesCredentials mongo 更新写 $set 文档：认证字段与 _id
+// 被剔除（凭据只由 Create 写入，防止无认证字段的内存副本覆盖 mongo 凭据为空）。
+func TestUpsertSetDocExcludesCredentials(t *testing.T) {
+	p := &models.Player{
+		PlayerID: "p1", Account: "acc", Salt: "s", Password: "h",
+		Nickname: "n", Level: 7,
+	}
+	set, full, err := upsertSetDoc(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"_id", "salt", "password"} {
+		if _, ok := set[k]; ok {
+			t.Fatalf("$set 文档不得包含 %q", k)
+		}
+	}
+	if set["nickname"] != "n" || set["level"] != int32(7) {
+		t.Fatalf("$set 应携带数据字段: %v", set)
+	}
+	if len(full) == 0 {
+		t.Fatal("全量 BSON 应返回（文档大小预警复用）")
 	}
 }
 

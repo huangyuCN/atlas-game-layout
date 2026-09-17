@@ -19,6 +19,15 @@ import (
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 )
 
+// flushMode 是 memRepo.FlushPlayer 的注入模式（编排路径故障注入）。
+type flushMode int
+
+const (
+	flushOK        flushMode = iota // Redis 成功（默认）
+	flushFailBoth                   // 双库失败（在线冻结触发）
+	flushMongoOnly                  // Redis 失败、Mongo 成功（强制下线触发）
+)
+
 // memRepo 是玩家仓储的内存实现（快照 + 持久化两级，记录落库次数）。
 // 并发安全：actor 定时快照与测试轮询并发访问。
 type memRepo struct {
@@ -26,10 +35,18 @@ type memRepo struct {
 	players   map[string]*models.Player
 	snapshots map[string]*models.Player
 	saves     int
+	mode      flushMode
 }
 
 func newMemRepo() *memRepo {
 	return &memRepo{players: make(map[string]*models.Player), snapshots: make(map[string]*models.Player)}
+}
+
+// setMode 注入 FlushPlayer 模式（冻结/强制下线场景用）。
+func (r *memRepo) setMode(m flushMode) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mode = m
 }
 
 func (r *memRepo) LoadPlayer(_ context.Context, playerID string) (*models.Player, error) {
@@ -72,14 +89,23 @@ func (r *memRepo) LoadCredential(_ context.Context, playerID string) (*models.Pl
 	return nil, repo.ErrPlayerNotFound
 }
 
-// FlushPlayer 统一落盘（测试桩：快照 + 持久都成功）。
+// FlushPlayer 统一落盘（测试桩：按注入模式返回结果）。
 func (r *memRepo) FlushPlayer(_ context.Context, p *models.Player, lastCRC uint32) (repo.FlushResult, uint32, error) {
 	r.mu.Lock()
-	r.snapshots[p.PlayerID] = clonePlayer(p)
-	r.players[p.PlayerID] = clonePlayer(p)
-	r.saves++
-	r.mu.Unlock()
-	return repo.FlushRedisOK, lastCRC + 1, nil
+	defer r.mu.Unlock()
+	switch r.mode {
+	case flushFailBoth:
+		return repo.FlushBothFailed, lastCRC, errors.New("fake: 双库落盘失败")
+	case flushMongoOnly:
+		r.players[p.PlayerID] = clonePlayer(p)
+		r.saves++
+		return repo.FlushMongoOK, lastCRC + 1, nil
+	default:
+		r.snapshots[p.PlayerID] = clonePlayer(p)
+		r.players[p.PlayerID] = clonePlayer(p)
+		r.saves++
+		return repo.FlushRedisOK, lastCRC + 1, nil
+	}
 }
 
 // PersistSnapshot 玩家快照 PERSIST（测试桩：no-op）。
@@ -349,7 +375,8 @@ func TestPlayerActorSnapshotAndPersist(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	// 登出（Tell 对象直传，本地路由之外的桩 switch 命中）→ 自停 → OnStop 落库。
+	// 登出（Tell 对象直传，本地路由之外的桩 switch 命中）→ 下线流程反转
+	//（先落库短重试，成功才停止自身）→ 自停。
 	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutMsg{
 		Reason: gamev1.LogoutReason_LOGOUT_REASON_LOGOUT,
 	}); err != nil {
@@ -476,6 +503,89 @@ func waitStop(t *testing.T, rt *core.LocalRuntime, pid types.PID, failMsg string
 			t.Fatal(failMsg)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// newLoggedInActor 构造已登录的 actor 环境（注册 + 登录完成，聚合根已加载）。
+func newLoggedInActor(t *testing.T) (*core.LocalRuntime, types.PID, *memRepo) {
+	t.Helper()
+	ctx := context.Background()
+	rt, regPID, loginPID, store, _ := newActorEnv(t, 0, 10*time.Millisecond)
+	if _, err := rt.Spawn(ctx, regPID); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := rt.Ask(ctx, regPID, &gamev1.RegisterReq{Account: "alice", Password: "pw"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.LoginReq{PlayerId: "p-test", Password: "pw", Token: "t1"}); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	return rt, loginPID, store
+}
+
+// TestPlayerActorFreezeGuards 验证在线冻结编排（设计 §6.2）：
+// 双库失败 → 冻结（改档拒绝 SERVER_FROZEN；只读查询与重登放行）；
+// Redis 恢复 → 解冻恢复改档。白名单按类型判定（type switch）。
+func TestPlayerActorFreezeGuards(t *testing.T) {
+	ctx := context.Background()
+	rt, loginPID, store := newLoggedInActor(t)
+
+	// 双库失败：等待冻结生效（GrantItem 从正常转为 SERVER_FROZEN）。
+	store.setMode(flushFailBoth)
+	waitFor(t, 2*time.Second, func() bool {
+		_, err := rt.Ask(ctx, loginPID, &gamev1.GrantItemReq{ItemId: 1, Count: 1})
+		return atlaserrors.Reason(err) == "SERVER_FROZEN"
+	}, "双库失败未进入在线冻结")
+
+	// 冻结期：只读查询放行（内存权威态返回，不触存储）。
+	if _, err := rt.Ask(ctx, loginPID, &gamev1.GetPlayerDataReq{}); err != nil {
+		t.Fatalf("冻结期只读查询应放行: %v", err)
+	}
+	// 冻结期：重新登录放行（复用内存权威态，不重载）。
+	relog, err := rt.Ask(ctx, loginPID, &gamev1.LoginReq{PlayerId: "p-test", Password: "pw", Token: "t2"})
+	if err != nil {
+		t.Fatalf("冻结期重登应放行: %v", err)
+	}
+	if got := relog.(*gamev1.LoginReply); got.GetPlayer().GetPlayerId() != "p-test" {
+		t.Fatalf("冻结期重登回执不符: %+v", got)
+	}
+
+	// Redis 恢复：解冻，改档恢复。
+	store.setMode(flushOK)
+	waitFor(t, 2*time.Second, func() bool {
+		_, err := rt.Ask(ctx, loginPID, &gamev1.GrantItemReq{ItemId: 2, Count: 1})
+		return err == nil
+	}, "Redis 恢复未解冻")
+}
+
+// TestPlayerActorFreezeLogout 验证冻结期下线放行（编排放行白名单）：
+// LogoutMsg 直达下线流程（落库 + 停止），不被冻结拦截。
+func TestPlayerActorFreezeLogout(t *testing.T) {
+	ctx := context.Background()
+	rt, loginPID, store := newLoggedInActor(t)
+	store.setMode(flushFailBoth)
+	waitFor(t, 2*time.Second, func() bool {
+		_, err := rt.Ask(ctx, loginPID, &gamev1.GrantItemReq{ItemId: 1, Count: 1})
+		return atlaserrors.Reason(err) == "SERVER_FROZEN"
+	}, "双库失败未进入在线冻结")
+
+	if err := rt.Tell(ctx, loginPID, &gamev1.LogoutMsg{Reason: gamev1.LogoutReason_LOGOUT_REASON_LOGOUT}); err != nil {
+		t.Fatalf("冻结期下线 Tell 不应被拒: %v", err)
+	}
+	waitStop(t, rt, loginPID, "冻结期下线后 actor 未停止")
+	if store.Saves() == 0 {
+		t.Fatal("冻结期下线应先完成落库")
+	}
+}
+
+// TestPlayerActorForceLogoutOnMongoOnly 验证「仅 Mongo 成功 → 强制下线」
+// （设计 §6.2：在线热路径依赖 Redis，与 redis 不可用拒登的降级姿态一致）。
+func TestPlayerActorForceLogoutOnMongoOnly(t *testing.T) {
+	rt, loginPID, store := newLoggedInActor(t)
+	store.setMode(flushMongoOnly)
+	waitStop(t, rt, loginPID, "仅 Mongo 落盘成功未强制下线")
+	if store.Saves() == 0 {
+		t.Fatal("强制下线应先完成落库")
 	}
 }
 
