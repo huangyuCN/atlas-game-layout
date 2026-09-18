@@ -17,6 +17,7 @@ import (
 	libsession "github.com/huangyuCN/atlas-game-layout/lib/session"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
+	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	"github.com/huangyuCN/atlas/transport"
@@ -142,6 +143,16 @@ func NewGateway(
 // Relay 暴露透传引擎（注册与测试用）。
 func (g *Gateway) Relay() *Relay { return g.relay }
 
+// requestOptions 组装 Gateway 自留会话接口（Register/Login/Resume/Heartbeat）
+// 的投递选项：客户端帧携带的请求幂等键经 WithHeader 注入观测头——与 relay
+// 透传路径同构，全部 op 的 actor 日志都能带 request_id（与客户端 SDK 调试日志对应）。
+func (g *Gateway) requestOptions(ctx context.Context) []core.SendOption {
+	if id := requestIDOf(ctx); id != "" {
+		return []core.SendOption{core.WithHeader(consts.HeaderKeyRequestID, id)}
+	}
+	return nil
+}
+
 // connFrom 从请求上下文提取连接寻址信息（connID + 传输种类 + 回写函数）。
 // UDP 无 connID 语义，按 peer 地址寻址。Ref 为连接身份键（会话反向索引用）。
 func (g *Gateway) connFrom(ctx context.Context) *session.Conn {
@@ -162,7 +173,7 @@ func (g *Gateway) Register(ctx context.Context, req *gatewayv1.RegisterRequest) 
 		Account:  req.GetAccount(),
 		Password: req.GetPassword(),
 		Nickname: req.GetNickname(),
-	})
+	}, g.requestOptions(ctx)...)
 	if err != nil {
 		return nil, err // 业务错误透传：code/reason 经集群 error 通道往返保留
 	}
@@ -194,7 +205,7 @@ func (g *Gateway) Login(ctx context.Context, req *gatewayv1.LoginRequest) (*gate
 		Password:        req.GetPassword(),
 		Token:           token,
 		GatewayInstance: g.instanceID,
-	})
+	}, g.requestOptions(ctx)...)
 	if err != nil {
 		return nil, err // 业务错误透传（PLAYER_NOT_FOUND / PASSWORD_WRONG 等语义不变）
 	}

@@ -136,9 +136,10 @@ func NewBattleServiceClusterClient(inv core.ActorInvoker) *BattleServiceClusterC
 	return &BattleServiceClusterClient{inv: inv}
 }
 
-// JoinBattle 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *BattleServiceClusterClient) JoinBattle(ctx context.Context, pid types.PID, req *JoinBattleReq) (*JoinBattleReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// JoinBattle 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *BattleServiceClusterClient) JoinBattle(ctx context.Context, pid types.PID, req *JoinBattleReq, opts ...core.SendOption) (*JoinBattleReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -156,14 +157,15 @@ func (c *BattleServiceClusterClient) JoinBattle(ctx context.Context, pid types.P
 	}
 }
 
-// SendFrameInput 单向投递 Tell 消息（无回执）。
-func (c *BattleServiceClusterClient) SendFrameInput(ctx context.Context, pid types.PID, msg *FrameInputReq) error {
-	return c.inv.Tell(ctx, pid, msg)
+// SendFrameInput 单向投递 Tell 消息（无回执；变参透传投递选项——sender/观测头等）。
+func (c *BattleServiceClusterClient) SendFrameInput(ctx context.Context, pid types.PID, msg *FrameInputReq, opts ...core.SendOption) error {
+	return c.inv.Tell(ctx, pid, msg, opts...)
 }
 
-// SyncFrames 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *BattleServiceClusterClient) SyncFrames(ctx context.Context, pid types.PID, req *SyncFramesReq) (*SyncFramesReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// SyncFrames 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *BattleServiceClusterClient) SyncFrames(ctx context.Context, pid types.PID, req *SyncFramesReq, opts ...core.SendOption) (*SyncFramesReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -181,9 +183,10 @@ func (c *BattleServiceClusterClient) SyncFrames(ctx context.Context, pid types.P
 	}
 }
 
-// Create 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *BattleServiceClusterClient) Create(ctx context.Context, pid types.PID, req *CreateBattleRequest) (*CreateBattleReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// Create 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *BattleServiceClusterClient) Create(ctx context.Context, pid types.PID, req *CreateBattleRequest, opts ...core.SendOption) (*CreateBattleReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -201,9 +204,10 @@ func (c *BattleServiceClusterClient) Create(ctx context.Context, pid types.PID, 
 	}
 }
 
-// GetState 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *BattleServiceClusterClient) GetState(ctx context.Context, pid types.PID, req *GetStateReq) (*GetStateReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// GetState 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *BattleServiceClusterClient) GetState(ctx context.Context, pid types.PID, req *GetStateReq, opts ...core.SendOption) (*GetStateReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}

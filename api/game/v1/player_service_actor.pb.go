@@ -236,9 +236,10 @@ func NewPlayerServiceClusterClient(inv core.ActorInvoker) *PlayerServiceClusterC
 	return &PlayerServiceClusterClient{inv: inv}
 }
 
-// Register 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) Register(ctx context.Context, pid types.PID, req *RegisterReq) (*RegisterReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// Register 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) Register(ctx context.Context, pid types.PID, req *RegisterReq, opts ...core.SendOption) (*RegisterReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -256,9 +257,10 @@ func (c *PlayerServiceClusterClient) Register(ctx context.Context, pid types.PID
 	}
 }
 
-// GetPlayerData 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) GetPlayerData(ctx context.Context, pid types.PID, req *GetPlayerDataReq) (*PlayerDataReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// GetPlayerData 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) GetPlayerData(ctx context.Context, pid types.PID, req *GetPlayerDataReq, opts ...core.SendOption) (*PlayerDataReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -276,9 +278,10 @@ func (c *PlayerServiceClusterClient) GetPlayerData(ctx context.Context, pid type
 	}
 }
 
-// GetBackpack 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) GetBackpack(ctx context.Context, pid types.PID, req *GetBackpackReq) (*BackpackReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// GetBackpack 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) GetBackpack(ctx context.Context, pid types.PID, req *GetBackpackReq, opts ...core.SendOption) (*BackpackReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -296,9 +299,10 @@ func (c *PlayerServiceClusterClient) GetBackpack(ctx context.Context, pid types.
 	}
 }
 
-// EnterMatchQueue 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) EnterMatchQueue(ctx context.Context, pid types.PID, req *EnterMatchQueueReq) (*EnterMatchQueueReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// EnterMatchQueue 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) EnterMatchQueue(ctx context.Context, pid types.PID, req *EnterMatchQueueReq, opts ...core.SendOption) (*EnterMatchQueueReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -316,9 +320,10 @@ func (c *PlayerServiceClusterClient) EnterMatchQueue(ctx context.Context, pid ty
 	}
 }
 
-// CancelMatch 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) CancelMatch(ctx context.Context, pid types.PID, req *CancelMatchReq) (*CancelMatchReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// CancelMatch 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) CancelMatch(ctx context.Context, pid types.PID, req *CancelMatchReq, opts ...core.SendOption) (*CancelMatchReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -336,9 +341,10 @@ func (c *PlayerServiceClusterClient) CancelMatch(ctx context.Context, pid types.
 	}
 }
 
-// GetMatchStatus 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) GetMatchStatus(ctx context.Context, pid types.PID, req *GetMatchStatusReq) (*MatchStatusReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// GetMatchStatus 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) GetMatchStatus(ctx context.Context, pid types.PID, req *GetMatchStatusReq, opts ...core.SendOption) (*MatchStatusReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -356,9 +362,10 @@ func (c *PlayerServiceClusterClient) GetMatchStatus(ctx context.Context, pid typ
 	}
 }
 
-// CreateParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) CreateParty(ctx context.Context, pid types.PID, req *CreatePartyReq) (*PartyReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// CreateParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) CreateParty(ctx context.Context, pid types.PID, req *CreatePartyReq, opts ...core.SendOption) (*PartyReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -376,9 +383,10 @@ func (c *PlayerServiceClusterClient) CreateParty(ctx context.Context, pid types.
 	}
 }
 
-// JoinParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) JoinParty(ctx context.Context, pid types.PID, req *JoinPartyReq) (*PartyReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// JoinParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) JoinParty(ctx context.Context, pid types.PID, req *JoinPartyReq, opts ...core.SendOption) (*PartyReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -396,9 +404,10 @@ func (c *PlayerServiceClusterClient) JoinParty(ctx context.Context, pid types.PI
 	}
 }
 
-// LeaveParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) LeaveParty(ctx context.Context, pid types.PID, req *LeavePartyReq) (*PartyReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// LeaveParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) LeaveParty(ctx context.Context, pid types.PID, req *LeavePartyReq, opts ...core.SendOption) (*PartyReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -416,9 +425,10 @@ func (c *PlayerServiceClusterClient) LeaveParty(ctx context.Context, pid types.P
 	}
 }
 
-// GetParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) GetParty(ctx context.Context, pid types.PID, req *GetPartyReq) (*PartyReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// GetParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) GetParty(ctx context.Context, pid types.PID, req *GetPartyReq, opts ...core.SendOption) (*PartyReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -436,9 +446,10 @@ func (c *PlayerServiceClusterClient) GetParty(ctx context.Context, pid types.PID
 	}
 }
 
-// QueueParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) QueueParty(ctx context.Context, pid types.PID, req *QueuePartyReq) (*PartyQueueReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// QueueParty 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) QueueParty(ctx context.Context, pid types.PID, req *QueuePartyReq, opts ...core.SendOption) (*PartyQueueReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -456,9 +467,10 @@ func (c *PlayerServiceClusterClient) QueueParty(ctx context.Context, pid types.P
 	}
 }
 
-// Login 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) Login(ctx context.Context, pid types.PID, req *LoginReq) (*LoginReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// Login 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) Login(ctx context.Context, pid types.PID, req *LoginReq, opts ...core.SendOption) (*LoginReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -476,14 +488,15 @@ func (c *PlayerServiceClusterClient) Login(ctx context.Context, pid types.PID, r
 	}
 }
 
-// Logout 单向投递 Tell 消息（无回执）。
-func (c *PlayerServiceClusterClient) Logout(ctx context.Context, pid types.PID, msg *LogoutMsg) error {
-	return c.inv.Tell(ctx, pid, msg)
+// Logout 单向投递 Tell 消息（无回执；变参透传投递选项——sender/观测头等）。
+func (c *PlayerServiceClusterClient) Logout(ctx context.Context, pid types.PID, msg *LogoutMsg, opts ...core.SendOption) error {
+	return c.inv.Tell(ctx, pid, msg, opts...)
 }
 
-// GrantItem 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) GrantItem(ctx context.Context, pid types.PID, req *GrantItemReq) (*GrantItemReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// GrantItem 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) GrantItem(ctx context.Context, pid types.PID, req *GrantItemReq, opts ...core.SendOption) (*GrantItemReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -501,9 +514,10 @@ func (c *PlayerServiceClusterClient) GrantItem(ctx context.Context, pid types.PI
 	}
 }
 
-// GetPlayer 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留）。
-func (c *PlayerServiceClusterClient) GetPlayer(ctx context.Context, pid types.PID, req *GetPlayerReq) (*PlayerReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req)
+// GetPlayer 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) GetPlayer(ctx context.Context, pid types.PID, req *GetPlayerReq, opts ...core.SendOption) (*PlayerReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
 	if err != nil {
 		return nil, err
 	}

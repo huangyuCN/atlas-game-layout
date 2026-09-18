@@ -83,7 +83,7 @@ func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 		return nil, errorv1.ErrInternal("透传组装发起者身份失败")
 	}
 	sendOpts := []core.SendOption{core.WithSender(sender)}
-	if id := r.requestIDOf(ctx); id != "" {
+	if id := requestIDOf(ctx); id != "" {
 		// 观测标记随消息头往返（所有 op）：actor 日志经 ctx.Header 记录 request_id，
 		// 与客户端 SDK 调试日志一一对应；去重行为仍由注解 + WithRequestID 显式触发。
 		sendOpts = append(sendOpts, core.WithHeader(consts.HeaderKeyRequestID, id))
@@ -121,7 +121,9 @@ func idempotencyID(entry relay.RouteEntry, requestID string) string {
 }
 
 // requestIDOf 从请求头取帧请求幂等键（FlagRequestID 置位时引擎已解析写入）。
-func (r *Relay) requestIDOf(ctx context.Context) string {
+// 包级函数：relay 透传与 Gateway 自留会话接口（Register/Login/Heartbeat）共用，
+// 保证全部 op 的 actor 日志都能带上 request_id。
+func requestIDOf(ctx context.Context) string {
 	tr, ok := transport.FromServerContext(ctx)
 	if !ok {
 		return ""
