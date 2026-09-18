@@ -1,10 +1,14 @@
-# 可观测性栈（服务器测试环境）：Loki（日志）+ Promtail（日志采集）+ Tempo（链路）
-# + Grafana（统一面板）。用法（服务器）：
-#   docker compose -f deploy/observability/docker-compose.yaml up -d
-# 然后浏览器访问 http://10.10.9.36:3000（admin/admin），Explore 选 Loki 查日志、
+# 基础环境（可观测栈）：Loki（日志）+ Promtail（日志采集）+ Tempo（链路）
+# + Grafana（统一面板）。这是主机级基础环境，建议独立于业务项目目录部署
+# （服务器实际部署于 ~/docker/observability，与项目目录解耦；本文件为部署源）：
+#   cp -r deploy/observability/. ~/docker/observability/ && cd ~/docker/observability
+#   docker compose up -d
+# 浏览器访问 http://10.10.9.36:3000（admin/admin），Explore 选 Loki 查日志、
 # 选 Tempo 查链路；Loki 日志行的 trace_id 可一键跳转 Tempo 对应链路。
 # 服务侧要求：conf 配置 observability.otlp=127.0.0.1:4317（span 导出）与
-# log.file=logs/<service>.log（promtail 采集源，目录见 promtail-config 挂载）。
+# log.file=logs/<service>.log（promtail 采集源）。
+# 注意：promtail 的日志源挂载按部署位置调整——模板项目内自部署用相对路径
+# ../../logs；独立部署（~/docker/observability）时改业务项目日志目录的绝对路径。
 services:
   loki:
     image: grafana/loki:3.1.1
