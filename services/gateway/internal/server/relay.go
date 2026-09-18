@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
@@ -82,8 +83,13 @@ func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 		return nil, errorv1.ErrInternal("透传组装发起者身份失败")
 	}
 	sendOpts := []core.SendOption{core.WithSender(sender)}
-	if id := idempotencyID(entry, r.requestIDOf(ctx)); id != "" {
-		sendOpts = append(sendOpts, core.WithRequestID(id))
+	if id := r.requestIDOf(ctx); id != "" {
+		// 观测标记随消息头往返（所有 op）：actor 日志经 ctx.Header 记录 request_id，
+		// 与客户端 SDK 调试日志一一对应；去重行为仍由注解 + WithRequestID 显式触发。
+		sendOpts = append(sendOpts, core.WithHeader(consts.HeaderKeyRequestID, id))
+		if entry.Idempotency == relay.Idempotent {
+			sendOpts = append(sendOpts, core.WithRequestID(id))
+		}
 	}
 	if entry.IsTell {
 		if err := r.rt.Tell(ctx, pid, req, sendOpts...); err != nil {

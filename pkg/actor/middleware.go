@@ -5,18 +5,26 @@ package actor
 import (
 	"fmt"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	atlaslog "github.com/huangyuCN/atlas/log"
 )
 
 // LoggingMiddleware 是默认日志中间件：按 actor 类型/PID/消息类型打点。
 // 用 ctx 形态（atlaslog.Ctx）：actor 处理上下文携带 span 时，日志行自动
-// 关联 trace_id/span_id（Loki 日志 ↔ Tempo 链路互跳的基础）。
+// 关联 trace_id/span_id（Loki 日志 ↔ Tempo 链路互跳的基础）；带客户端
+// 请求 ID 时记录 request_id（与客户端 SDK 调试日志一一对应）。
 func LoggingMiddleware(next core.TellHandler) core.TellHandler {
 	return func(ctx core.ActorContext, msg any) error {
 		if ctx != nil {
-			atlaslog.Ctx(ctx.Context()).Debug("actor tell",
-				"type", ctx.Self().Type(), "uid", ctx.Self().UID(), "msg", fmt.Sprintf("%T", msg))
+			if id, ok := ctx.Header(consts.HeaderKeyRequestID); ok {
+				atlaslog.Ctx(ctx.Context()).Debug("actor tell",
+					"type", ctx.Self().Type(), "uid", ctx.Self().UID(),
+					"msg", fmt.Sprintf("%T", msg), "request_id", id)
+			} else {
+				atlaslog.Ctx(ctx.Context()).Debug("actor tell",
+					"type", ctx.Self().Type(), "uid", ctx.Self().UID(), "msg", fmt.Sprintf("%T", msg))
+			}
 		}
 		return next(ctx, msg)
 	}
@@ -50,19 +58,23 @@ func AskRecoveryMiddleware(next core.AskHandler) core.AskHandler {
 
 // AskLoggingMiddleware 是默认 Ask 日志中间件：按 actor 类型/PID/请求类型打点
 // （Debug 级，与 Tell 的 LoggingMiddleware 对称；错误请求升 Warn 记录原因）。
-// 用 ctx 形态：日志自动关联 span 的 trace_id/span_id（链路追踪开启时）。
+// 用 ctx 形态：日志自动关联 span 的 trace_id/span_id（链路追踪开启时）；
+// 带客户端请求 ID 时记录 request_id（与客户端 SDK 调试日志一一对应）。
 func AskLoggingMiddleware(next core.AskHandler) core.AskHandler {
 	return func(ctx core.ActorContext, req any) (any, error) {
 		if ctx == nil {
 			return next(ctx, req)
 		}
-		atlaslog.Ctx(ctx.Context()).Debug("actor ask",
-			"type", ctx.Self().Type(), "uid", ctx.Self().UID(), "req", fmt.Sprintf("%T", req))
+		kv := []any{
+			"type", ctx.Self().Type(), "uid", ctx.Self().UID(), "req", fmt.Sprintf("%T", req),
+		}
+		if id, ok := ctx.Header(consts.HeaderKeyRequestID); ok {
+			kv = append(kv, "request_id", id)
+		}
+		atlaslog.Ctx(ctx.Context()).Debug("actor ask", kv...)
 		resp, err := next(ctx, req)
 		if err != nil {
-			atlaslog.Ctx(ctx.Context()).Warn("actor ask failed",
-				"type", ctx.Self().Type(), "uid", ctx.Self().UID(),
-				"req", fmt.Sprintf("%T", req), "err", err)
+			atlaslog.Ctx(ctx.Context()).Warn("actor ask failed", append(kv, "err", err)...)
 		}
 		return resp, err
 	}

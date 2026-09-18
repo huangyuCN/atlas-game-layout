@@ -60,3 +60,7 @@ func EventTopic(kind string) string { return TopicEvent + kind }
 
 // GatewayTopic 拼接 Gateway 控制主题：atlas.gw.<instanceID>。
 func GatewayTopic(instanceID string) string { return TopicGatewayControl + instanceID }
+
+// HeaderKeyRequestID 是投递头中的客户端请求幂等键键名（gateway 透传注入，
+// actor 日志经 ctx.Header 记录，与客户端 SDK 调试日志一一对应）。
+const HeaderKeyRequestID = "x-atlas-request-id"
