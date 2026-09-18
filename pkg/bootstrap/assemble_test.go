@@ -9,16 +9,18 @@ import (
 )
 
 // testBootstrap 是手写的测试配置：内嵌 Runtime 提供 proto.Message，
-// 另存 Registry/Log 实现 ConfigLike（无需 protojson 解组）。
+// 另存 Registry/Log/Observability 实现 ConfigLike（无需 protojson 解组）。
 type testBootstrap struct {
 	*configspb.Runtime
 	reg *configspb.Registry
 	lg  *configspb.Log
+	obs *configspb.Observability
 }
 
-func (b *testBootstrap) GetRuntime() *configspb.Runtime   { return b.Runtime }
-func (b *testBootstrap) GetRegistry() *configspb.Registry { return b.reg }
-func (b *testBootstrap) GetLog() *configspb.Log           { return b.lg }
+func (b *testBootstrap) GetRuntime() *configspb.Runtime             { return b.Runtime }
+func (b *testBootstrap) GetRegistry() *configspb.Registry           { return b.reg }
+func (b *testBootstrap) GetLog() *configspb.Log                     { return b.lg }
+func (b *testBootstrap) GetObservability() *configspb.Observability { return b.obs }
 
 // writeConf 在 dir 下生成 services/demo/configs/config.yaml 并切换工作目录。
 func writeConf(t *testing.T, dir, content string) {
@@ -52,8 +54,8 @@ func TestAssembleLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleLoaded() 错误 = %v", err)
 	}
-	if len(opts) != 2 {
-		t.Fatalf("应为 2 个模块（供应/App 打包模块），实际 %d 个", len(opts))
+	if len(opts) != 3 {
+		t.Fatalf("应为 3 个模块（供应/App 打包模块/链路导出停止钩子），实际 %d 个", len(opts))
 	}
 }
 
@@ -70,8 +72,8 @@ func TestAssembleLoadedIgnoresRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleLoaded() 错误 = %v", err)
 	}
-	if len(opts) != 2 {
-		t.Fatalf("registry 段不应改变模块数量，期望 2 个，实际 %d 个", len(opts))
+	if len(opts) != 3 {
+		t.Fatalf("registry 段不应改变模块数量，期望 3 个，实际 %d 个", len(opts))
 	}
 }
 

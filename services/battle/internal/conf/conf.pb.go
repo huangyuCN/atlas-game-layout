@@ -25,12 +25,14 @@ const (
 )
 
 type Bootstrap struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Runtime       *configs.Runtime       `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	Registry      *configs.Registry      `protobuf:"bytes,2,opt,name=registry,proto3" json:"registry,omitempty"`
-	Server        *configs.Server        `protobuf:"bytes,3,opt,name=server,proto3" json:"server,omitempty"`
-	Data          *configs.Data          `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
-	Log           *configs.Log           `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Runtime  *configs.Runtime       `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	Registry *configs.Registry      `protobuf:"bytes,2,opt,name=registry,proto3" json:"registry,omitempty"`
+	Server   *configs.Server        `protobuf:"bytes,3,opt,name=server,proto3" json:"server,omitempty"`
+	Data     *configs.Data          `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	Log      *configs.Log           `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
+	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
+	Observability *configs.Observability `protobuf:"bytes,6,opt,name=observability,proto3" json:"observability,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -100,17 +102,25 @@ func (x *Bootstrap) GetLog() *configs.Log {
 	return nil
 }
 
+func (x *Bootstrap) GetObservability() *configs.Observability {
+	if x != nil {
+		return x.Observability
+	}
+	return nil
+}
+
 var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\"\xf0\x01\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xb4\x02\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
 	"\x06server\x18\x03 \x01(\v2\x15.atlas.configs.ServerR\x06server\x12'\n" +
 	"\x04data\x18\x04 \x01(\v2\x13.atlas.configs.DataR\x04data\x12$\n" +
-	"\x03log\x18\x05 \x01(\v2\x12.atlas.configs.LogR\x03logBKZIgithub.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;confb\x06proto3"
+	"\x03log\x18\x05 \x01(\v2\x12.atlas.configs.LogR\x03log\x12B\n" +
+	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservabilityBKZIgithub.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;confb\x06proto3"
 
 var (
 	file_services_battle_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -126,12 +136,13 @@ func file_services_battle_internal_conf_conf_proto_rawDescGZIP() []byte {
 
 var file_services_battle_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_services_battle_internal_conf_conf_proto_goTypes = []any{
-	(*Bootstrap)(nil),        // 0: battle.conf.Bootstrap
-	(*configs.Runtime)(nil),  // 1: atlas.configs.Runtime
-	(*configs.Registry)(nil), // 2: atlas.configs.Registry
-	(*configs.Server)(nil),   // 3: atlas.configs.Server
-	(*configs.Data)(nil),     // 4: atlas.configs.Data
-	(*configs.Log)(nil),      // 5: atlas.configs.Log
+	(*Bootstrap)(nil),             // 0: battle.conf.Bootstrap
+	(*configs.Runtime)(nil),       // 1: atlas.configs.Runtime
+	(*configs.Registry)(nil),      // 2: atlas.configs.Registry
+	(*configs.Server)(nil),        // 3: atlas.configs.Server
+	(*configs.Data)(nil),          // 4: atlas.configs.Data
+	(*configs.Log)(nil),           // 5: atlas.configs.Log
+	(*configs.Observability)(nil), // 6: atlas.configs.Observability
 }
 var file_services_battle_internal_conf_conf_proto_depIdxs = []int32{
 	1, // 0: battle.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
@@ -139,11 +150,12 @@ var file_services_battle_internal_conf_conf_proto_depIdxs = []int32{
 	3, // 2: battle.conf.Bootstrap.server:type_name -> atlas.configs.Server
 	4, // 3: battle.conf.Bootstrap.data:type_name -> atlas.configs.Data
 	5, // 4: battle.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	6, // 5: battle.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_services_battle_internal_conf_conf_proto_init() }

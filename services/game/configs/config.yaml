@@ -21,3 +21,8 @@ data:
 log:
   level: info
   format: text
+  file: logs/game.log
+
+# 可观测性：OTLP 链路导出端点（Tempo 的 gRPC 端口；空或不配 = noop 不导出）。
+observability:
+  otlp: 127.0.0.1:4317

@@ -1,10 +1,12 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"go.uber.org/fx"
 	"google.golang.org/protobuf/proto"
@@ -17,6 +19,7 @@ type ConfigLike interface {
 	GetRuntime() *configspb.Runtime
 	GetRegistry() *configspb.Registry
 	GetLog() *configspb.Log
+	GetObservability() *configspb.Observability
 }
 
 // Assemble 按服务名加载配置并装配通用模块：
@@ -35,7 +38,9 @@ func Assemble(name string, cfg proto.Message, extra ...fx.Option) ([]fx.Option, 
 	return AssembleLoaded(cfg, extra...)
 }
 
-// AssembleLoaded 对已加载的配置装配通用模块（拆分出来便于单测）。
+// AssembleLoaded 对已加载的配置装配通用模块（拆分出来便于单测）：
+// 日志（含文件输出，供采集器进 Loki）与链路导出（OTLP → Tempo，端点空则
+// noop）在此统一初始化，四服务共用。
 func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) {
 	like, ok := cfg.(ConfigLike)
 	if !ok {
@@ -50,13 +55,24 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 	if l := like.GetLog(); l != nil {
 		logOpts.Level = l.GetLevel()
 		logOpts.Format = l.GetFormat()
+		logOpts.File = l.GetFile()
 	}
 	if err := pkglog.Init(logOpts); err != nil {
 		return nil, err
 	}
 
+	// OTLP 链路导出（端点未配置时 noop）：服务停止时 flush 未导出的 span。
+	shutdownTrace, err := observability.InitTracing(context.Background(),
+		like.GetObservability().GetOtlp(), runtime.GetName())
+	if err != nil {
+		return nil, err
+	}
+
 	opts := []fx.Option{
 		fx.Supply(cfg),
+		fx.Invoke(func(lc fx.Lifecycle) {
+			lc.Append(fx.Hook{OnStop: shutdownTrace})
+		}),
 		Module(Options{Name: runtime.GetName(), ID: runtime.GetId()}),
 	}
 	opts = append(opts, extra...)

@@ -10,11 +10,13 @@ import (
 )
 
 // LoggingMiddleware 是默认日志中间件：按 actor 类型/PID/消息类型打点。
+// 用 ctx 形态（atlaslog.Ctx）：actor 处理上下文携带 span 时，日志行自动
+// 关联 trace_id/span_id（Loki 日志 ↔ Tempo 链路互跳的基础）。
 func LoggingMiddleware(next core.TellHandler) core.TellHandler {
 	return func(ctx core.ActorContext, msg any) error {
 		if ctx != nil {
-			atlaslog.Debugf("actor tell: type=%s uid=%s msg=%T",
-				ctx.Self().Type(), ctx.Self().UID(), msg)
+			atlaslog.Ctx(ctx.Context()).Debug("actor tell",
+				"type", ctx.Self().Type(), "uid", ctx.Self().UID(), "msg", fmt.Sprintf("%T", msg))
 		}
 		return next(ctx, msg)
 	}
@@ -48,17 +50,19 @@ func AskRecoveryMiddleware(next core.AskHandler) core.AskHandler {
 
 // AskLoggingMiddleware 是默认 Ask 日志中间件：按 actor 类型/PID/请求类型打点
 // （Debug 级，与 Tell 的 LoggingMiddleware 对称；错误请求升 Warn 记录原因）。
+// 用 ctx 形态：日志自动关联 span 的 trace_id/span_id（链路追踪开启时）。
 func AskLoggingMiddleware(next core.AskHandler) core.AskHandler {
 	return func(ctx core.ActorContext, req any) (any, error) {
 		if ctx == nil {
 			return next(ctx, req)
 		}
-		atlaslog.Debugf("actor ask: type=%s uid=%s req=%T",
-			ctx.Self().Type(), ctx.Self().UID(), req)
+		atlaslog.Ctx(ctx.Context()).Debug("actor ask",
+			"type", ctx.Self().Type(), "uid", ctx.Self().UID(), "req", fmt.Sprintf("%T", req))
 		resp, err := next(ctx, req)
 		if err != nil {
-			atlaslog.Warnf("actor ask failed: type=%s uid=%s req=%T err=%v",
-				ctx.Self().Type(), ctx.Self().UID(), req, err)
+			atlaslog.Ctx(ctx.Context()).Warn("actor ask failed",
+				"type", ctx.Self().Type(), "uid", ctx.Self().UID(),
+				"req", fmt.Sprintf("%T", req), "err", err)
 		}
 		return resp, err
 	}

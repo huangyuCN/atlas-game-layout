@@ -24,9 +24,13 @@ const (
 )
 
 type Log struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Level         string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"`
-	Format        string                 `protobuf:"bytes,2,opt,name=format,proto3" json:"format,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Level  string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"`
+	Format string                 `protobuf:"bytes,2,opt,name=format,proto3" json:"format,omitempty"`
+	// file 是日志文件输出路径（可选；空 = 仅 stdout）。服务器测试环境建议
+	// 配置到部署目录 logs/<service>.log——promtail 采集该目录进 Loki，
+	// Grafana 面板即可按服务/级别查询日志。
+	File          string `protobuf:"bytes,3,opt,name=file,proto3" json:"file,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -75,14 +79,22 @@ func (x *Log) GetFormat() string {
 	return ""
 }
 
+func (x *Log) GetFile() string {
+	if x != nil {
+		return x.File
+	}
+	return ""
+}
+
 var File_protobuf_configs_log_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_log_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotobuf/configs/log.proto\x12\ratlas.configs\"3\n" +
+	"\x1aprotobuf/configs/log.proto\x12\ratlas.configs\"G\n" +
 	"\x03Log\x12\x14\n" +
 	"\x05level\x18\x01 \x01(\tR\x05level\x12\x16\n" +
-	"\x06format\x18\x02 \x01(\tR\x06formatBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
+	"\x06format\x18\x02 \x01(\tR\x06format\x12\x12\n" +
+	"\x04file\x18\x03 \x01(\tR\x04fileBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
 
 var (
 	file_protobuf_configs_log_proto_rawDescOnce sync.Once

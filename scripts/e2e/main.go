@@ -28,8 +28,10 @@ import (
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgetcd "github.com/huangyuCN/atlas-game-layout/pkg/etcd"
+	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	pkgredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	battleassemble "github.com/huangyuCN/atlas-game-layout/services/battle/assemble"
@@ -37,6 +39,7 @@ import (
 	gwassemble "github.com/huangyuCN/atlas-game-layout/services/gateway/assemble"
 	matcherassemble "github.com/huangyuCN/atlas-game-layout/services/matcher/assemble"
 	atlasregistry "github.com/huangyuCN/atlas/registry"
+	"go.opentelemetry.io/otel"
 )
 
 // middlewareAddrs 是中间件地址集（默认与 deploy/docker-compose 端口约定一致）。
@@ -293,6 +296,21 @@ func verifySettlement(ps [2]*player) error {
 }
 
 func main() {
+	// 可观测性：e2e 装置显式初始化（不读服务配置）——日志文件进 Loki（promtail 采集）、
+	// span 经 OTLP 进 Tempo（127.0.0.1:4317，与 deploy/observability 的 compose 对齐），
+	// 便于测试后在 Grafana 面板查询日志与链路。
+	if err := pkglog.Init(pkglog.Options{Service: "e2e", Level: "info", File: "logs/e2e.log"}); err != nil {
+		panic(err)
+	}
+	shutdown, err := observability.InitTracing(context.Background(), "127.0.0.1:4317", "e2e")
+	if err != nil {
+		panic(err)
+	}
+	// 探针 span：验证全局 provider 与 OTLP 导出通路（Tempo 面板应能查到）。
+	probeCtx, probe := otel.Tracer("e2e-probe").Start(context.Background(), "e2e.probe")
+	_ = probeCtx
+	probe.End()
+	defer func() { _ = shutdown(context.Background()) }() // 退出前 flush 未导出的 span
 	mode := flag.String("mode", "dual", "客户端形态：dual（TCP+KCP）/ single（WS）/ party（组队 2v2）/ fault（异常下线联动）/ kick（顶号+断线恢复）")
 	frames := flag.Uint64("frames", 20, "每客户端帧输入数")
 	etcdFlag := flag.String("etcd", "127.0.0.1:12379", "etcd endpoints（逗号分隔）")

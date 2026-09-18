@@ -25,16 +25,18 @@ const (
 )
 
 type Bootstrap struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Runtime       *configs.Runtime       `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	Registry      *configs.Registry      `protobuf:"bytes,2,opt,name=registry,proto3" json:"registry,omitempty"`
-	Server        *configs.Server        `protobuf:"bytes,3,opt,name=server,proto3" json:"server,omitempty"`
-	Data          *configs.Data          `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
-	Log           *configs.Log           `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
-	Tcp           *Bootstrap_Net         `protobuf:"bytes,10,opt,name=tcp,proto3" json:"tcp,omitempty"`
-	Websocket     *Bootstrap_Net         `protobuf:"bytes,11,opt,name=websocket,proto3" json:"websocket,omitempty"`
-	Kcp           *Bootstrap_Net         `protobuf:"bytes,12,opt,name=kcp,proto3" json:"kcp,omitempty"`
-	Udp           *Bootstrap_Net         `protobuf:"bytes,13,opt,name=udp,proto3" json:"udp,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Runtime   *configs.Runtime       `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	Registry  *configs.Registry      `protobuf:"bytes,2,opt,name=registry,proto3" json:"registry,omitempty"`
+	Server    *configs.Server        `protobuf:"bytes,3,opt,name=server,proto3" json:"server,omitempty"`
+	Data      *configs.Data          `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	Log       *configs.Log           `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
+	Tcp       *Bootstrap_Net         `protobuf:"bytes,10,opt,name=tcp,proto3" json:"tcp,omitempty"`
+	Websocket *Bootstrap_Net         `protobuf:"bytes,11,opt,name=websocket,proto3" json:"websocket,omitempty"`
+	Kcp       *Bootstrap_Net         `protobuf:"bytes,12,opt,name=kcp,proto3" json:"kcp,omitempty"`
+	Udp       *Bootstrap_Net         `protobuf:"bytes,13,opt,name=udp,proto3" json:"udp,omitempty"`
+	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
+	Observability *configs.Observability `protobuf:"bytes,14,opt,name=observability,proto3" json:"observability,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -132,6 +134,13 @@ func (x *Bootstrap) GetUdp() *Bootstrap_Net {
 	return nil
 }
 
+func (x *Bootstrap) GetObservability() *configs.Observability {
+	if x != nil {
+		return x.Observability
+	}
+	return nil
+}
+
 // Net 是客户端接入协议的监听地址（M4 里程碑启用）。
 type Bootstrap_Net struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -181,7 +190,7 @@ var File_services_gateway_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_gateway_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	")services/gateway/internal/conf/conf.proto\x12\fgateway.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\"\xd3\x03\n" +
+	")services/gateway/internal/conf/conf.proto\x12\fgateway.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\x97\x04\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
@@ -192,7 +201,8 @@ const file_services_gateway_internal_conf_conf_proto_rawDesc = "" +
 	" \x01(\v2\x1b.gateway.conf.Bootstrap.NetR\x03tcp\x129\n" +
 	"\twebsocket\x18\v \x01(\v2\x1b.gateway.conf.Bootstrap.NetR\twebsocket\x12-\n" +
 	"\x03kcp\x18\f \x01(\v2\x1b.gateway.conf.Bootstrap.NetR\x03kcp\x12-\n" +
-	"\x03udp\x18\r \x01(\v2\x1b.gateway.conf.Bootstrap.NetR\x03udp\x1a\x19\n" +
+	"\x03udp\x18\r \x01(\v2\x1b.gateway.conf.Bootstrap.NetR\x03udp\x12B\n" +
+	"\robservability\x18\x0e \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x1a\x19\n" +
 	"\x03Net\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addrBLZJgithub.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf;confb\x06proto3"
 
@@ -210,29 +220,31 @@ func file_services_gateway_internal_conf_conf_proto_rawDescGZIP() []byte {
 
 var file_services_gateway_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_services_gateway_internal_conf_conf_proto_goTypes = []any{
-	(*Bootstrap)(nil),        // 0: gateway.conf.Bootstrap
-	(*Bootstrap_Net)(nil),    // 1: gateway.conf.Bootstrap.Net
-	(*configs.Runtime)(nil),  // 2: atlas.configs.Runtime
-	(*configs.Registry)(nil), // 3: atlas.configs.Registry
-	(*configs.Server)(nil),   // 4: atlas.configs.Server
-	(*configs.Data)(nil),     // 5: atlas.configs.Data
-	(*configs.Log)(nil),      // 6: atlas.configs.Log
+	(*Bootstrap)(nil),             // 0: gateway.conf.Bootstrap
+	(*Bootstrap_Net)(nil),         // 1: gateway.conf.Bootstrap.Net
+	(*configs.Runtime)(nil),       // 2: atlas.configs.Runtime
+	(*configs.Registry)(nil),      // 3: atlas.configs.Registry
+	(*configs.Server)(nil),        // 4: atlas.configs.Server
+	(*configs.Data)(nil),          // 5: atlas.configs.Data
+	(*configs.Log)(nil),           // 6: atlas.configs.Log
+	(*configs.Observability)(nil), // 7: atlas.configs.Observability
 }
 var file_services_gateway_internal_conf_conf_proto_depIdxs = []int32{
-	2, // 0: gateway.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
-	3, // 1: gateway.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
-	4, // 2: gateway.conf.Bootstrap.server:type_name -> atlas.configs.Server
-	5, // 3: gateway.conf.Bootstrap.data:type_name -> atlas.configs.Data
-	6, // 4: gateway.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	1, // 5: gateway.conf.Bootstrap.tcp:type_name -> gateway.conf.Bootstrap.Net
-	1, // 6: gateway.conf.Bootstrap.websocket:type_name -> gateway.conf.Bootstrap.Net
-	1, // 7: gateway.conf.Bootstrap.kcp:type_name -> gateway.conf.Bootstrap.Net
-	1, // 8: gateway.conf.Bootstrap.udp:type_name -> gateway.conf.Bootstrap.Net
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	2,  // 0: gateway.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
+	3,  // 1: gateway.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
+	4,  // 2: gateway.conf.Bootstrap.server:type_name -> atlas.configs.Server
+	5,  // 3: gateway.conf.Bootstrap.data:type_name -> atlas.configs.Data
+	6,  // 4: gateway.conf.Bootstrap.log:type_name -> atlas.configs.Log
+	1,  // 5: gateway.conf.Bootstrap.tcp:type_name -> gateway.conf.Bootstrap.Net
+	1,  // 6: gateway.conf.Bootstrap.websocket:type_name -> gateway.conf.Bootstrap.Net
+	1,  // 7: gateway.conf.Bootstrap.kcp:type_name -> gateway.conf.Bootstrap.Net
+	1,  // 8: gateway.conf.Bootstrap.udp:type_name -> gateway.conf.Bootstrap.Net
+	7,  // 9: gateway.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_services_gateway_internal_conf_conf_proto_init() }

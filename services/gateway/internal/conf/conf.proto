@@ -10,6 +10,7 @@ import "protobuf/configs/registry.proto";
 import "protobuf/configs/server.proto";
 import "protobuf/configs/data.proto";
 import "protobuf/configs/log.proto";
+import "protobuf/configs/observability.proto";
 
 message Bootstrap {
   atlas.configs.Runtime runtime = 1;
@@ -26,4 +27,6 @@ message Bootstrap {
   Net websocket = 11;
   Net kcp = 12;
   Net udp = 13;
+  // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
+  atlas.configs.Observability observability = 14;
 }

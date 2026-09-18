@@ -1,0 +1,58 @@
+# 可观测性栈（服务器测试环境）：Loki（日志）+ Promtail（日志采集）+ Tempo（链路）
+# + Grafana（统一面板）。用法（服务器）：
+#   docker compose -f deploy/observability/docker-compose.yaml up -d
+# 然后浏览器访问 http://10.10.9.36:3000（admin/admin），Explore 选 Loki 查日志、
+# 选 Tempo 查链路；Loki 日志行的 trace_id 可一键跳转 Tempo 对应链路。
+# 服务侧要求：conf 配置 observability.otlp=127.0.0.1:4317（span 导出）与
+# log.file=logs/<service>.log（promtail 采集源，目录见 promtail-config 挂载）。
+services:
+  loki:
+    image: grafana/loki:3.1.1
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - ./positions:/positions
+      # 服务日志目录（宿主路径；模板服务经 conf log.file 写 logs/<service>.log）
+      - ../../logs:/srv/logs
+    depends_on:
+      - loki
+
+  tempo:
+    image: grafana/tempo:2.3.1
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    user: root # 单机测试：root 落盘挂载卷，免容器用户权限问题
+    volumes:
+      - ./tempo-config.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"  # 查询 API
+      - "4317:4317"  # OTLP gRPC（服务侧 exporter 目标）
+      - "4318:4318"  # OTLP HTTP
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      # 测试环境：跳过首次改密（内网隔离；生产必须配置强密码）。
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+      - tempo
+
+volumes:
+  loki-data:
+  tempo-data:
+  grafana-data:

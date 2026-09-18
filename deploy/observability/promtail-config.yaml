@@ -1,0 +1,34 @@
+# Promtail 采集服务日志文件进 Loki（模板服务经 conf log.file 写 logs/<service>.log）。
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /positions/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: atlas
+    static_configs:
+      # 每个服务一个条目（文件名 = conf log.file 的服务命名约定）
+      - targets: [localhost]
+        labels:
+          __path__: /srv/logs/game.log
+          service: game
+      - targets: [localhost]
+        labels:
+          __path__: /srv/logs/gateway.log
+          service: gateway
+      - targets: [localhost]
+        labels:
+          __path__: /srv/logs/battle.log
+          service: battle
+      - targets: [localhost]
+        labels:
+          __path__: /srv/logs/matcher.log
+          service: matcher
+      - targets: [localhost]
+        labels:
+          __path__: /srv/logs/e2e.log
+          service: e2e

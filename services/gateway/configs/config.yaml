@@ -16,6 +16,7 @@ data:
 log:
   level: info
   format: text
+  file: logs/gateway.log
 # 业务四协议按需启用：删除对应节即裁掉该协议（不监听端口、不注册 handler），
 # 模板按部署形态只暴露需要的通道。
 tcp:
@@ -26,3 +27,7 @@ kcp:
   addr: 0.0.0.0:9003
 udp:
   addr: 0.0.0.0:9004
+
+# 可观测性：OTLP 链路导出端点（Tempo 的 gRPC 端口；空或不配 = noop 不导出）。
+observability:
+  otlp: 127.0.0.1:4317

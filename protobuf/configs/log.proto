@@ -8,4 +8,8 @@ option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;con
 message Log {
   string level = 1;
   string format = 2;
+  // file 是日志文件输出路径（可选；空 = 仅 stdout）。服务器测试环境建议
+  // 配置到部署目录 logs/<service>.log——promtail 采集该目录进 Loki，
+  // Grafana 面板即可按服务/级别查询日志。
+  string file = 3;
 }
