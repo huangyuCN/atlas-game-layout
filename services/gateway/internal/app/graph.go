@@ -17,6 +17,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/server"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
+	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
@@ -109,6 +110,7 @@ func newGateway(
 	cfg *conf.Bootstrap,
 	sess *session.Manager,
 	actors *actorclient.Client,
+	meter metrics.Collector,
 	nc *natsgo.Conn,
 	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
 ) (*server.Gateway, error) {
@@ -122,7 +124,7 @@ func newGateway(
 	if err != nil {
 		return nil, fmt.Errorf("gateway: 透传路由表合并失败: %w", err)
 	}
-	g := server.NewGateway(instanceID, table, sess, actors, nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	g := server.NewGateway(instanceID, table, sess, actors, meter, nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
 	// 通道绑定副作用（Gateway 会话模型的领域知识，装配声明——不进注解协议）：
 	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道（battle 帧推送寻址）。
 	g.Relay().WithChannelBinding("/battle.v1.BattleService/JoinBattle", relay.Slot(session.ChannelBattle))

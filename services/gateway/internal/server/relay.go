@@ -15,6 +15,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
+	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame"
 	"google.golang.org/protobuf/proto"
@@ -25,6 +26,8 @@ type Relay struct {
 	table relay.Table
 	sess  *session.Manager
 	rt    actorclient.Runtime
+	// meter 是可选指标采集器（nil = 不打点；noop 零开销）。
+	meter metrics.Collector
 	// conn 摘取与 Gateway 共用（连接寻址 → 会话绑定反查）。
 	connOf func(ctx context.Context) *session.Conn
 	// bindings 声明「转发成功后把当前连接绑定到玩家会话的哪个槽位」（如
@@ -34,8 +37,8 @@ type Relay struct {
 }
 
 // NewRelay 构造透传引擎（table 为各域生成路由表经 relay.Merge 合并的结果）。
-func NewRelay(table relay.Table, sess *session.Manager, rt actorclient.Runtime, connOf func(ctx context.Context) *session.Conn) *Relay {
-	return &Relay{table: table, sess: sess, rt: rt, connOf: connOf, bindings: make(map[string]relay.Slot)}
+func NewRelay(table relay.Table, sess *session.Manager, rt actorclient.Runtime, meter metrics.Collector, connOf func(ctx context.Context) *session.Conn) *Relay {
+	return &Relay{table: table, sess: sess, rt: rt, meter: meter, connOf: connOf, bindings: make(map[string]relay.Slot)}
 }
 
 // WithChannelBinding 声明「op 转发成功后绑定会话通道槽」的局部规则（装配期注入）。
@@ -64,12 +67,21 @@ func (r *Relay) Each(fn func(entry relay.RouteEntry) error) error {
 	return nil
 }
 
-// Forward 处理一次透传请求：身份识别 → target PID → sender 注入 → Ask/Tell。
+// Forward 处理一次透传请求（计数薄壳）：op 标签取路由条目 operation，
+// result 按 forward 结果 success/error——自留会话接口（meteredSession）与
+// 透传共用 gateway_requests_total，面板按 op 汇总全部入口 QPS。
+func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.Message) (proto.Message, error) {
+	rep, err := r.forward(ctx, entry, req)
+	meterRequest(r.meter, entry.Operation, err)
+	return rep, err
+}
+
+// forward 是 Forward 的业务本体：身份识别 → target PID → sender 注入 → Ask/Tell。
 // 业务错误原样透传（code/reason 经集群 error 通道往返保留，产生点即语义）。
 // 幂等：entry 注解声明 IDEMPOTENT 且客户端帧携带请求幂等键（Atlas-Frame-Request-Id）
 // 时，把 ID 注入投递去重键——Ask 同 (pid, request_id) 窗口内只执行一次并复用结果，
 // Tell 窗口内重复投递直接丢弃；客户端未携带或注解未声明走原路径零开销。
-func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.Message) (proto.Message, error) {
+func (r *Relay) forward(ctx context.Context, entry relay.RouteEntry, req proto.Message) (proto.Message, error) {
 	playerID, err := r.identify(ctx)
 	if err != nil {
 		return nil, err

@@ -20,6 +20,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
+	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	"github.com/nats-io/nats.go"
@@ -93,6 +94,7 @@ type Gateway struct {
 	pushers    map[transport.Kind]pushServer
 	udpSrv     *udpt.Server // UDP 按 peer 寻址（无 connID 语义）
 	relay      *Relay       // 业务 op 透传引擎（表由注解生成，见 relay.go）
+	meter      metrics.Collector
 }
 
 // onSessionsExpired 异常下线联动撮合域（会话过期清扫回调）：
@@ -114,6 +116,7 @@ func NewGateway(
 	table relay.Table,
 	sess *session.Manager,
 	actors *actorclient.Client,
+	meter metrics.Collector,
 	nc *nats.Conn,
 	tcpSrv, wsSrv, kcpSrv pushServer,
 	udpSrv *udpt.Server,
@@ -130,9 +133,10 @@ func NewGateway(
 			transport.KindKCP:       kcpSrv,
 		},
 		udpSrv: udpSrv,
+		meter:  meter,
 	}
-	// 透传引擎与 Gateway 共用连接摘取与会话管理器。
-	g.relay = NewRelay(table, sess, actors, func(ctx context.Context) *session.Conn {
+	// 透传引擎与 Gateway 共用连接摘取、会话管理器与指标采集器。
+	g.relay = NewRelay(table, sess, actors, meter, func(ctx context.Context) *session.Conn {
 		return connFrom(ctx, g.pushers, g.udpSrv)
 	})
 	// 会话过期联动撮合域（异常下线兜底）。

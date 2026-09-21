@@ -20,6 +20,9 @@ log:
   format: text
   file: logs/matcher.log
 
-# 可观测性：OTLP 链路导出端点（Tempo 的 gRPC 端口；空或不配 = noop 不导出）。
+# 可观测性：OTLP 链路导出端点（Tempo 的 gRPC 端口；空或不配 = noop 不导出）
+# 与 Prometheus 抓取端点（prometheus 服务经 host.docker.internal 抓取；空或不配 = noop）。
 observability:
   otlp: 127.0.0.1:4317
+  metrics:
+    prometheus: 0.0.0.0:9152

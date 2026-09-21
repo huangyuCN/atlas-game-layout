@@ -1,11 +1,14 @@
 # 基础环境（可观测栈）：Loki（日志）+ Promtail（日志采集）+ Tempo（链路）
-# + Grafana（统一面板）。这是主机级基础环境，建议独立于业务项目目录部署
-# （服务器实际部署于 ~/docker/observability，与项目目录解耦；本文件为部署源）：
+# + Prometheus（指标）+ Grafana（统一面板）。这是主机级基础环境，建议独立于
+# 业务项目目录部署（服务器实际部署于 ~/docker/observability，与项目目录解耦；
+# 本文件为部署源）：
 #   cp -r deploy/observability/. ~/docker/observability/ && cd ~/docker/observability
 #   docker compose up -d
 # 浏览器访问 http://10.10.9.36:3000（admin/admin），Explore 选 Loki 查日志、
-# 选 Tempo 查链路；Loki 日志行的 trace_id 可一键跳转 Tempo 对应链路。
-# 服务侧要求：conf 配置 observability.otlp=127.0.0.1:4317（span 导出）与
+# 选 Tempo 查链路、选 Prometheus 查指标；Loki 日志行的 trace_id 可一键跳转
+# Tempo 对应链路。
+# 服务侧要求：conf 配置 observability.otlp=127.0.0.1:4317（span 导出）、
+# observability.metrics.prometheus=0.0.0.0:<port>（指标端点）与
 # log.file=logs/<service>.log（promtail 采集源）。
 # 注意：promtail 的日志源挂载按部署位置调整——模板项目内自部署用相对路径
 # ../../logs；独立部署（~/docker/observability）时改业务项目日志目录的绝对路径。
@@ -42,6 +45,20 @@ services:
       - "4317:4317"  # OTLP gRPC（服务侧 exporter 目标）
       - "4318:4318"  # OTLP HTTP
 
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=3d
+    volumes:
+      - ./prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      # 服务在宿主机运行：容器内经 host.docker.internal 抓取业务指标端点
+      - "host.docker.internal:host-gateway"
+
   grafana:
     image: grafana/grafana:11.2.0
     ports:
@@ -55,8 +72,10 @@ services:
     depends_on:
       - loki
       - tempo
+      - prometheus
 
 volumes:
   loki-data:
   tempo-data:
+  prometheus-data:
   grafana-data:

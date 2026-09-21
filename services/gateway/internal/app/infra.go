@@ -12,6 +12,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
+	"github.com/huangyuCN/atlas/metrics"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -49,19 +50,21 @@ func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 	return conn, nil
 }
 
-// newSessionManager 装配分布式会话管理器。
-func newSessionManager(cfg *conf.Bootstrap, cli *pkredis.Client) *session.Manager {
+// newSessionManager 装配分布式会话管理器（并注入指标采集器）。
+func newSessionManager(cfg *conf.Bootstrap, cli *pkredis.Client, meter metrics.Collector) *session.Manager {
 	instanceID := ""
 	if r := cfg.GetRuntime(); r != nil {
 		instanceID = r.GetId()
 	}
-	return session.NewManager(session.NewRedisStore(cli), instanceID, sessionTTL)
+	m := session.NewManager(session.NewRedisStore(cli), instanceID, sessionTTL)
+	m.SetMeter(meter)
+	return m
 }
 
 // NewActorClient 装配远程 actor 客户端背后的集群运行时
 // （Locator=etcd、NATS 传输；PlayerActor 懒激活在 game 节点执行，
 // 本节点注册「只发不接」副本以支持发送侧判定）。
-func NewActorClient(cfg *conf.Bootstrap, ec *clientv3.Client) (*actorclient.Client, error) {
+func NewActorClient(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Collector) (*actorclient.Client, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
@@ -80,6 +83,7 @@ func NewActorClient(cfg *conf.Bootstrap, ec *clientv3.Client) (*actorclient.Clie
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),
 		Tracer:        pkgactor.DefaultTracer(),
+		Meter:         meter,
 		Discovery:     discovery,
 	})
 	if err != nil {

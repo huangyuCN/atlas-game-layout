@@ -1,0 +1,28 @@
+# Prometheus 抓取配置：自身 + 四服务（game/gateway/matcher/battle）。
+# 服务运行在宿主机（./bin/<svc>），Prometheus 在容器内——经 host.docker.internal
+# 抓取（docker-compose 已配 extra_hosts: host-gateway）。
+# 服务侧要求：conf 配置 observability.metrics.prometheus=0.0.0.0:<port>
+# （模板默认 game 9150 / gateway 9151 / matcher 9152 / battle 9153）。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: atlas-game
+    static_configs:
+      - targets: ["host.docker.internal:9150"]
+        labels:
+          service: game
+      - targets: ["host.docker.internal:9151"]
+        labels:
+          service: gateway
+      - targets: ["host.docker.internal:9152"]
+        labels:
+          service: matcher
+      - targets: ["host.docker.internal:9153"]
+        labels:
+          service: battle

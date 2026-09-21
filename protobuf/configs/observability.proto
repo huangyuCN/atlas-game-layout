@@ -1,6 +1,7 @@
-// 公共配置：可观测性（链路追踪 OTLP 导出端点）。
+// 公共配置：可观测性（链路追踪 OTLP 导出端点 + 指标暴露）。
 // 空端点 = 不注册 exporter（noop，零开销）；配置后服务侧 span 经 OTLP gRPC
-// 导出到 Tempo/Jaeger 等后端，Grafana 面板查询链路。
+// 导出到 Tempo/Jaeger 等后端，Grafana 面板查询链路；
+// 指标经 Prometheus 文本端点暴露，由 Prometheus 抓取、Grafana 面板查询。
 syntax = "proto3";
 
 package atlas.configs;
@@ -10,4 +11,13 @@ option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;con
 message Observability {
   // otlp 是 OTLP gRPC 导出端点（host:port，如 127.0.0.1:4317）；空 = 不导出。
   string otlp = 1;
+  // metrics 是指标暴露配置；不配置 = 不暴露任何端点（noop，零开销）。
+  Metrics metrics = 2;
+}
+
+// Metrics 是指标暴露配置。
+message Metrics {
+  // prometheus 是 Prometheus 抓取端点监听地址（host:port，如 0.0.0.0:9150）；
+  // 空 = 不暴露（采集器退化为 noop）。
+  string prometheus = 1;
 }

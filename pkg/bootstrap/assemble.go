@@ -8,6 +8,7 @@ import (
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	"github.com/huangyuCN/atlas/metrics"
 	"go.uber.org/fx"
 	"google.golang.org/protobuf/proto"
 )
@@ -68,10 +69,21 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 		return nil, err
 	}
 
+	// 指标采集与 Prometheus 抓取端点（未配置时 noop 采集器，热路径零开销）：
+	// 采集器以 metrics.Collector 接口注入依赖图（actor 运行时与业务打点共用），
+	// 服务停止时关闭抓取端点与底层 provider。
+	meter, shutdownMetrics, err := observability.InitMetrics(
+		like.GetObservability().GetMetrics().GetPrometheus(), runtime.GetName())
+	if err != nil {
+		return nil, err
+	}
+
 	opts := []fx.Option{
 		fx.Supply(cfg),
+		fx.Provide(func() metrics.Collector { return meter }),
 		fx.Invoke(func(lc fx.Lifecycle) {
 			lc.Append(fx.Hook{OnStop: shutdownTrace})
+			lc.Append(fx.Hook{OnStop: shutdownMetrics})
 		}),
 		Module(Options{Name: runtime.GetName(), ID: runtime.GetId()}),
 	}

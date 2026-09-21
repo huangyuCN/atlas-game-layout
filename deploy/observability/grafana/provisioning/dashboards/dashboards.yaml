@@ -1,0 +1,12 @@
+# Grafana dashboard provisioning：从本目录加载 JSON 面板（无人值守预置）。
+apiVersion: 1
+
+providers:
+  - name: atlas
+    orgId: 1
+    folder: Atlas
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

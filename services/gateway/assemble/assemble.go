@@ -11,6 +11,7 @@ package assemble
 import (
 	"context"
 	"fmt"
+	"github.com/huangyuCN/atlas/metrics"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,6 +63,7 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 	var h graphHandles
 	root := fx.New(
 		fx.NopLogger,
+		fx.Provide(func() metrics.Collector { return metrics.Noop() }), // 嵌入式形态默认 noop（观测由 bootstrap 生产形态接线）
 		fx.Supply(newBootstrap(o)),
 		gwapp.Module,
 		fx.Populate(&h),

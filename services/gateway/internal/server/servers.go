@@ -64,13 +64,16 @@ func NewUDPServer(cfg *conf.Bootstrap) (*udpt.Server, error) {
 }
 
 // RegisterGatewayHandlers 将会话生命周期与透传引擎注册到各协议 Server：
-// 会话接口（gateway.v1.Session，Gateway 自留）+ 透传路由表（域 service 的
-// access=CLIENT op，运行时注册，注解驱动）；四传输同构（连接即会话，UDP/KCP 按帧槽验证）。
+// 会话接口（gateway.v1.Session，Gateway 自留）以 meteredSession 打点装饰注册 +
+// 透传路由表（域 service 的 access=CLIENT op，运行时注册，注解驱动）；
+// 四传输同构（连接即会话，UDP/KCP 按帧槽验证）。
 // 协议可选：仅对配置声明了的协议注册（conf 协议节 nil = 该协议不启用，
 // Server 不注册 handler 也不进启停组——对外不可用，模板可按需裁剪）。
 func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server, g *Gateway) error {
+	// 会话接口统一打点装饰（自留接口与透传共用 gateway_requests_total）。
+	sess := newMeteredSession(g, g.meter)
 	if cfg.GetTcp() != nil {
-		if err := gatewayv1.RegisterSessionTCPServer(tcpSrv, g); err != nil {
+		if err := gatewayv1.RegisterSessionTCPServer(tcpSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 TCP 会话协议失败: %w", err)
 		}
 		if err := RegisterRelayTCPServer(tcpSrv, g.Relay()); err != nil {
@@ -78,7 +81,7 @@ func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *ws
 		}
 	}
 	if cfg.GetWebsocket() != nil {
-		if err := gatewayv1.RegisterSessionWSServer(wsSrv, g); err != nil {
+		if err := gatewayv1.RegisterSessionWSServer(wsSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 WS 会话协议失败: %w", err)
 		}
 		if err := RegisterRelayWSServer(wsSrv, g.Relay()); err != nil {
@@ -86,7 +89,7 @@ func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *ws
 		}
 	}
 	if cfg.GetKcp() != nil {
-		if err := gatewayv1.RegisterSessionKCPServer(kcpSrv, g); err != nil {
+		if err := gatewayv1.RegisterSessionKCPServer(kcpSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 KCP 会话协议失败: %w", err)
 		}
 		if err := RegisterRelayKCPServer(kcpSrv, g.Relay()); err != nil {
@@ -94,7 +97,7 @@ func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *ws
 		}
 	}
 	if cfg.GetUdp() != nil {
-		if err := gatewayv1.RegisterSessionUDPServer(udpSrv, g); err != nil {
+		if err := gatewayv1.RegisterSessionUDPServer(udpSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 UDP 会话协议失败: %w", err)
 		}
 		if err := RegisterRelayUDPServer(udpSrv, g.Relay()); err != nil {

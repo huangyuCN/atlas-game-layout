@@ -11,6 +11,7 @@ import (
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
+	"github.com/huangyuCN/atlas/metrics"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -63,7 +64,7 @@ func NewMongoClient(cfg *conf.Bootstrap) (*mongo.Client, error) {
 
 // NewActorRuntime 装配 actor 集群运行时
 // （Locator=etcd、传输=NATS、懒激活按服务发现选 game 节点）。
-func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtime, error) {
+func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Collector) (*pkgactor.Runtime, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
@@ -82,6 +83,7 @@ func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtim
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),
 		Tracer:        pkgactor.DefaultTracer(),
+		Meter:         meter,
 		Discovery:     discovery,
 	})
 	if err != nil {

@@ -9,6 +9,15 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/huangyuCN/atlas/metrics"
+)
+
+// 会话层指标名（Prometheus 抓取；gauge 事件驱动 Set，counter 按 channel 有界）。
+const (
+	MetricSessions      = "gateway_sessions"             // 当前本地会话数（gauge）
+	MetricSessionBinds  = "gateway_session_binds_total"  // 会话绑定计数（labels: channel）
+	MetricSessionSweeps = "gateway_session_sweeps_total" // 心跳过期清扫计数
 )
 
 // ErrSessionNotFound 表示玩家会话不存在（本地无连接且路由已过期）。
@@ -63,6 +72,7 @@ type Manager struct {
 	instanceID string
 	ttl        time.Duration
 	sweptHook  func(swept []SweptSession) // 过期清扫联动钩子（nil = 不联动）
+	meter      metrics.Collector          // 可选指标采集器（nil = 不打点）
 
 	mu    sync.RWMutex
 	local map[string]*Session // playerID → 本地会话
@@ -82,6 +92,9 @@ func NewManager(store Store, instanceID string, ttl time.Duration) *Manager {
 	}
 }
 
+// SetMeter 注入指标采集器（装配期一次；nil = 不打点）。
+func (m *Manager) SetMeter(c metrics.Collector) { m.meter = c }
+
 // Bind 将连接绑定到玩家会话的指定通道，并向 redis 路由表登记。
 // 返回绑定前的旧路由（nil 表示首次登录），供挤下线判断；
 // 新登录会使旧路由（含旧 token）失效。
@@ -100,7 +113,17 @@ func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Ch
 	if err != nil {
 		return nil, err
 	}
+	m.countBind(channel)
 	return m.persistRoute(ctx, playerID, next, now)
+}
+
+// countBind 打点一次会话绑定并刷新会话数 gauge（meter 为 nil 时短路）。
+func (m *Manager) countBind(channel Channel) {
+	if m.meter == nil {
+		return
+	}
+	m.meter.Counter(MetricSessionBinds, "channel", string(channel)).Add(1)
+	m.meter.Gauge(MetricSessions).Set(float64(m.Count()))
 }
 
 // bindLocal 更新本地会话表与反向索引（内部加锁），返回本次会话快照。
@@ -172,7 +195,16 @@ func (m *Manager) Unbind(ctx context.Context, playerID string, connID uint64) {
 	m.dropConnRefs(sess)
 	m.tokenIndexRemove(sess.Token)
 	m.mu.Unlock()
+	m.countRemove()
 	m.deleteRouteIfOwned(ctx, playerID, connID)
+}
+
+// countRemove 打点一次会话移除并刷新会话数 gauge（meter 为 nil 时短路）。
+func (m *Manager) countRemove() {
+	if m.meter == nil {
+		return
+	}
+	m.meter.Gauge(MetricSessions).Set(float64(m.Count()))
 }
 
 // dropStaleRefs 注销旧会话中已不在新会话的连接反向索引（调用方持写锁）。
@@ -376,6 +408,12 @@ func (m *Manager) SweepOnce(ctx context.Context) int {
 				token = sess.Token
 			}
 			swept = append(swept, SweptSession{PlayerID: id, Token: token})
+		}
+	}
+	if removed > 0 {
+		m.countRemove()
+		if m.meter != nil {
+			m.meter.Counter(MetricSessionSweeps).Add(float64(removed))
 		}
 	}
 	if len(swept) > 0 && m.sweptHook != nil {

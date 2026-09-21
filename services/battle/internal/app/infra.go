@@ -12,6 +12,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/repo"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
+	"github.com/huangyuCN/atlas/metrics"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -55,7 +56,7 @@ func newResultRepo(cli *mongo.Client) repo.ResultRepo {
 
 // NewActorRuntime 装配 actor 集群运行时（战斗 actor 宿主，
 // Locator=etcd、传输=NATS、懒激活按服务发现选 battle 节点）。
-func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtime, error) {
+func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Collector) (*pkgactor.Runtime, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
@@ -74,6 +75,7 @@ func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtim
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),
 		Tracer:        pkgactor.DefaultTracer(),
+		Meter:         meter,
 		Discovery:     discovery,
 	})
 	if err != nil {

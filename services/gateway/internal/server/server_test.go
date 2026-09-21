@@ -17,6 +17,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
+	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
@@ -101,7 +102,7 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 
 	sess := session.NewManager(session.NewRedisStore(cli), id, 30*time.Second)
 	mock := newMockActorRuntime()
-	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), nc,
+	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), metrics.Noop(), nc,
 		push, new(fakePusher), kcpPush, udpSrv)
 	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
 	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))

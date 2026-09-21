@@ -5,6 +5,7 @@ import (
 
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
+	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
 	"go.uber.org/fx"
 )
@@ -19,6 +20,8 @@ func TestGraphStaticValidation(t *testing.T) {
 	}
 	if err := fx.ValidateApp(
 		fx.Supply(cfg),
+		// 指标采集器由 bootstrap 装配供给（AssembleLoaded），静态校验时补 noop。
+		fx.Provide(func() metrics.Collector { return metrics.Noop() }),
 		Module,
 		// 消费 servers 组：强制 ValidateApp 展开传输层构造依赖链
 		fx.Invoke(fx.Annotate(

@@ -16,6 +16,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	etcdlocator "github.com/huangyuCN/atlas/contrib/locator/etcd"
 	atlaslog "github.com/huangyuCN/atlas/log"
+	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -38,6 +39,10 @@ type Options struct {
 	// 模板装配传入 otel.New(otel.GetTracerProvider().Tracer("atlas-actor"))，
 	// 开发者配置 OTel SDK（如 otlp/jaeger exporter）后自动生效。
 	Tracer core.Tracer
+	// Meter 是可选的指标采集器（atlas metrics.Collector，如 contrib/metrics/otel
+	// 的 OTel+Prometheus 实现；nil 时为 noop，打点零开销）。注入后 core/cluster
+	// 运行时自动导出 actor 指标（投递计数、handler 耗时、邮箱深度、重启等）。
+	Meter metrics.Collector
 }
 
 // Runtime 是 actor 集群运行时封装。
@@ -92,6 +97,9 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	}
 	if opts.Tracer != nil {
 		rtOpts = append(rtOpts, cluster.WithTracer(opts.Tracer))
+	}
+	if opts.Meter != nil {
+		rtOpts = append(rtOpts, cluster.WithMetrics(opts.Meter))
 	}
 	rt, err := cluster.NewRuntime(cfg, rtOpts...)
 	if err != nil {

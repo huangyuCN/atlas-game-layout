@@ -1,0 +1,159 @@
+{
+  "title": "Atlas 服务总览",
+  "uid": "atlas-overview",
+  "tags": ["atlas"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "服务",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": {
+          "query": "label_values(actor_messages_processed_total, service)",
+          "refId": "service"
+        },
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "在线玩家（game）",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "max(game_players_online)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "网关会话数（gateway，本实例）",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(gateway_sessions)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "网关入口 QPS（按 op）",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (op) (rate(gateway_requests_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{op}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "网关会话绑定 / 过期清扫速率",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (channel) (rate(gateway_session_binds_total[1m]))",
+          "legendFormat": "bind {{channel}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(gateway_session_sweeps_total[1m]))",
+          "legendFormat": "swept",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "actor 消息投递速率（按结果）",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (service, result) (rate(actor_user_messages_total{service=~\"$service\"}[1m]))",
+          "legendFormat": "{{service}} {{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "actor handler 耗时 p99（按类型/kind）",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (service, type, kind, le) (rate(actor_handle_duration_seconds_bucket{service=~\"$service\"}[5m])))",
+          "legendFormat": "{{service}} {{type}} {{kind}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "actor 邮箱深度（user 队列，最大值）",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "max by (service, type) (actor_mailbox_depth{service=~\"$service\", queue=\"user\"})",
+          "legendFormat": "{{service}} {{type}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "异常计数（panic / 重启 / epoch 失配 / 死信）",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(actor_panics_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "panic {{service}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service) (rate(actor_restarts_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "restart {{service}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (service) (rate(actor_epoch_mismatch_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "epoch {{service}}",
+          "refId": "C"
+        },
+        {
+          "expr": "sum by (service) (rate(actor_deadletter_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "deadletter {{service}}",
+          "refId": "D"
+        }
+      ]
+    }
+  ]
+}

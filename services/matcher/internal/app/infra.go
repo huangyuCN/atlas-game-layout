@@ -14,6 +14,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
 	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
 	"github.com/huangyuCN/atlas/matchmaker"
+	"github.com/huangyuCN/atlas/metrics"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -50,7 +51,7 @@ func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 
 // NewActorRuntime 装配 actor 集群客户端（成局后开局调用 + 战斗 actor 懒激活副本）：
 // ServiceName 指向 battle——副本注册使本节点的懒激活判定成立，实际拉起在 battle 节点（M7）。
-func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtime, error) {
+func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Collector) (*pkgactor.Runtime, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
@@ -69,6 +70,7 @@ func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client) (*pkgactor.Runtim
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),
 		Tracer:        pkgactor.DefaultTracer(),
+		Meter:         meter,
 		Discovery:     discovery,
 	})
 	if err != nil {

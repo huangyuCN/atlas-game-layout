@@ -54,8 +54,8 @@ func TestAssembleLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleLoaded() 错误 = %v", err)
 	}
-	if len(opts) != 3 {
-		t.Fatalf("应为 3 个模块（供应/App 打包模块/链路导出停止钩子），实际 %d 个", len(opts))
+	if len(opts) != 4 {
+		t.Fatalf("应为 4 个模块（供应/指标采集器/App 打包模块/停止钩子），实际 %d 个", len(opts))
 	}
 }
 
@@ -72,8 +72,8 @@ func TestAssembleLoadedIgnoresRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleLoaded() 错误 = %v", err)
 	}
-	if len(opts) != 3 {
-		t.Fatalf("registry 段不应改变模块数量，期望 3 个，实际 %d 个", len(opts))
+	if len(opts) != 4 {
+		t.Fatalf("registry 段不应改变模块数量，期望 4 个，实际 %d 个", len(opts))
 	}
 }
 
