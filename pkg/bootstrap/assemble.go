@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/version"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/metrics"
 	"go.uber.org/fx"
 	"google.golang.org/protobuf/proto"
@@ -65,6 +67,7 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 
 	// 服务身份（runtime.name/id/version/env）：链路资源属性与指标常量标签同源。
 	identity := serviceIdentityOf(like)
+	atlaslog.Infof("服务启动: name=%s id=%s build=%s", identity.Name, identity.ID, version.String())
 
 	// OTLP 链路导出（端点未配置时 noop）：资源带服务身份、采样器与采样率可配；
 	// 服务停止时 flush 未导出的 span。
@@ -93,7 +96,7 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 			lc.Append(fx.Hook{OnStop: shutdownTrace})
 			lc.Append(fx.Hook{OnStop: m.Shutdown})
 		}),
-		Module(Options{Name: runtime.GetName(), ID: runtime.GetId()}),
+		Module(Options{Name: runtime.GetName(), ID: runtime.GetId(), Version: version.Version}),
 	}
 	opts = append(opts, extra...)
 	return opts, nil
@@ -102,13 +105,18 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 // defaultSampleRatio 是 sample_ratio 未配置时的默认采样率（全量采集）。
 const defaultSampleRatio = 1.0
 
-// serviceIdentityOf 从 runtime 配置提取服务身份（链路资源属性与指标常量标签共用）。
+// serviceIdentityOf 从 runtime 配置提取服务身份（链路资源属性与指标常量标签共用）：
+// 版本缺省取构建注入值（lib/version），配置 runtime.version 可覆盖。
 func serviceIdentityOf(like ConfigLike) observability.ServiceIdentity {
 	runtime := like.GetRuntime()
+	ver := runtime.GetVersion()
+	if ver == "" {
+		ver = version.Version
+	}
 	return observability.ServiceIdentity{
 		Name:    runtime.GetName(),
 		ID:      runtime.GetId(),
-		Version: runtime.GetVersion(),
+		Version: ver,
 		Env:     runtime.GetEnv(),
 	}
 }

@@ -1,7 +1,7 @@
 runtime:
   name: matcher
   id: matcher-1
-  version: 0.1.0   # 进链路资源 service.version（Grafana 按版本区分）
+  # version 缺省取构建注入版本（lib/version，Makefile/CI 经 -ldflags 写入）；需要时在此覆盖
   env: test        # 进链路资源 deployment.environment.name
 registry:
   etcd:

@@ -21,9 +21,6 @@ import (
 	"go.uber.org/fx"
 )
 
-// ServiceVersion 是注册到注册中心的服务版本（进程内形态固定值）。
-const ServiceVersion = "0.1.0"
-
 // Options 是进程内装配参数。
 type Options struct {
 	NodeID        string

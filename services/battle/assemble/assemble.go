@@ -11,6 +11,7 @@ import (
 	"github.com/huangyuCN/atlas/metrics"
 	"time"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/version"
 	"github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
@@ -23,9 +24,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/fx"
 )
-
-// ServiceVersion 是注册到注册中心的服务版本（进程内形态固定值）。
-const ServiceVersion = "0.1.0"
 
 // BattleConfig 是战斗参数覆盖（供 e2e 等外部包注入；镜像 internal/actor.Config——
 // Go internal 规则禁止外部包直接引用 actor.Config，故以本包类型暴露，toActor 单点映射）。
@@ -195,7 +193,7 @@ func instanceOf(nodeID, grpcHost string) *registry.ServiceInstance {
 	return &registry.ServiceInstance{
 		ID:        nodeID,
 		Name:      "battle",
-		Version:   ServiceVersion,
+		Version:   version.Version, // 注册中心上报版本：构建期注入（lib/version）
 		Endpoints: []string{"grpc://" + grpcHost},
 	}
 }

@@ -1,0 +1,111 @@
+# 模板发布流程：推送 tag（v*）时按 tag 版本构建四服务并发布产物。
+#
+# 版本注入：make build VERSION=${GITHUB_REF_NAME} → -ldflags -X lib/version.*，
+# 服务启动日志、链路资源 service.version、指标 service_version 标签均为该 tag；
+# 提交与构建时间同样注入（见 Makefile 的 LDFLAGS）。
+# 依赖检出与 ci.yml 一致：Atlas/cow/atlas-sdk-go 经 go.mod 本地 replace 指向源码树。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  # Atlas/cow 检出版本：与 ci.yml 保持一致（模板以 atlas feat/actor 分支为编译基准）。
+  ATLAS_REF: feat/actor
+  COW_REF: main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 模板仓库
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Checkout Atlas（replace ../atlas）
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          repository: huangyuCN/atlas
+          ref: ${{ env.ATLAS_REF }}
+          path: .ci-deps/atlas
+          persist-credentials: false
+          token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Checkout atlas-sdk-go（replace ../atlas-sdk-go）
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          repository: huangyuCN/atlas-sdk-go
+          ref: main
+          path: .ci-deps/atlas-sdk-go
+          persist-credentials: false
+          token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Checkout cow（replace ../cow）
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          repository: huangyuCN/cow
+          ref: ${{ env.COW_REF }}
+          path: .ci-deps/cow
+          persist-credentials: false
+          token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: 校验依赖检出（私有仓库需 PAT）
+        run: |
+          for dep in atlas cow atlas-sdk-go; do
+            if [ ! -f "$GITHUB_WORKSPACE/.ci-deps/$dep/go.mod" ]; then
+              echo "::error::无法检出 huangyuCN/$dep（私有仓库需 ATLAS_CI_TOKEN 等 PAT，见 ci.yml 说明）"
+              exit 1
+            fi
+          done
+
+      - name: 移动依赖到 replace 路径
+        run: |
+          parent="$(dirname "$GITHUB_WORKSPACE")"
+          rm -rf "$parent/atlas" "$parent/cow" "$parent/atlas-sdk-go"
+          mv "$GITHUB_WORKSPACE/.ci-deps/atlas" "$parent/atlas"
+          mv "$GITHUB_WORKSPACE/.ci-deps/cow" "$parent/cow"
+          mv "$GITHUB_WORKSPACE/.ci-deps/atlas-sdk-go" "$parent/atlas-sdk-go"
+          rmdir "$GITHUB_WORKSPACE/.ci-deps" 2>/dev/null || true
+
+      - name: 单元测试
+        run: go test -count=1 ./...
+
+      - name: 按 tag 版本构建四服务
+        run: make build VERSION="${GITHUB_REF_NAME}"
+
+      - name: 校验版本已注入二进制
+        run: |
+          for s in gateway game matcher battle; do
+            if ! strings "bin/$s" | grep -q "${GITHUB_REF_NAME}"; then
+              echo "::error::bin/$s 未注入版本 ${GITHUB_REF_NAME}"
+              exit 1
+            fi
+          done
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-game-layout-${{ github.ref_name }}
+          path: bin/*
+          if-no-files-found: error
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" bin/* \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

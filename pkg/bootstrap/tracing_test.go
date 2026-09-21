@@ -3,11 +3,13 @@ package bootstrap
 import (
 	"testing"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/version"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 )
 
-// TestServiceIdentityOf 验证 runtime → 服务身份映射（含 Runtime 缺失时零值）。
+// TestServiceIdentityOf 验证 runtime → 服务身份映射：
+// 版本配置优先，未配置回退构建注入值（lib/version）；其余字段直接透传。
 func TestServiceIdentityOf(t *testing.T) {
 	got := serviceIdentityOf(&testBootstrap{Runtime: &configspb.Runtime{
 		Name: "game", Id: "game-1", Version: "v1.2.3", Env: "test",
@@ -16,8 +18,17 @@ func TestServiceIdentityOf(t *testing.T) {
 	if got != want {
 		t.Fatalf("serviceIdentityOf() = %+v, 期望 %+v", got, want)
 	}
-	if got := serviceIdentityOf(&testBootstrap{}); got != (observability.ServiceIdentity{}) {
-		t.Fatalf("Runtime 缺失应为零值身份，实际 %+v", got)
+
+	// 配置未写 version：回退构建注入版本。
+	got = serviceIdentityOf(&testBootstrap{Runtime: &configspb.Runtime{Name: "game"}})
+	if got.Version != version.Version {
+		t.Fatalf("version 缺省应回退构建注入值 %q，实际 %q", version.Version, got.Version)
+	}
+
+	// Runtime 缺失：仅版本回退，其余零值。
+	got = serviceIdentityOf(&testBootstrap{})
+	if got.Name != "" || got.ID != "" || got.Env != "" || got.Version != version.Version {
+		t.Fatalf("Runtime 缺失时身份不符: %+v", got)
 	}
 }
 
@@ -51,7 +62,7 @@ func TestTracingOptionsOf(t *testing.T) {
 				},
 			},
 			want: observability.TracingOptions{
-				Identity:    observability.ServiceIdentity{Name: "game"},
+				Identity:    observability.ServiceIdentity{Name: "game", Version: version.Version},
 				Endpoint:    "http://127.0.0.1:4318",
 				Sampler:     observability.TraceSamplerAlwaysOn,
 				SampleRatio: 0.25,
@@ -64,7 +75,7 @@ func TestTracingOptionsOf(t *testing.T) {
 				obs:     &configspb.Observability{Sampler: configspb.TraceSampler_TRACE_SAMPLER_ALWAYS_OFF},
 			},
 			want: observability.TracingOptions{
-				Identity:    observability.ServiceIdentity{Name: "game"},
+				Identity:    observability.ServiceIdentity{Name: "game", Version: version.Version},
 				Sampler:     observability.TraceSamplerAlwaysOff,
 				SampleRatio: 1,
 			},
@@ -76,7 +87,7 @@ func TestTracingOptionsOf(t *testing.T) {
 				obs:     &configspb.Observability{SampleRatio: new(float64)},
 			},
 			want: observability.TracingOptions{
-				Identity:    observability.ServiceIdentity{Name: "game"},
+				Identity:    observability.ServiceIdentity{Name: "game", Version: version.Version},
 				Sampler:     observability.TraceSamplerParentBasedRatio,
 				SampleRatio: 0,
 			},

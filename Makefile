@@ -8,6 +8,16 @@ SERVICES := gateway game matcher battle
 GO ?= go
 PROTOC ?= protoc
 
+# 版本注入：构建期把版本/提交/构建时间写入 lib/version（-X 只能改 var，不能改 const）。
+# 本地 make build 取 git describe；CI 可显式覆盖：make build VERSION=${GITHUB_REF_NAME}。
+MODULE := github.com/huangyuCN/atlas-game-layout
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X $(MODULE)/lib/version.Version=$(VERSION) \
+           -X $(MODULE)/lib/version.Commit=$(COMMIT) \
+           -X $(MODULE)/lib/version.BuildTime=$(BUILD_TIME)
+
 .PHONY: help build lint comment-lint check-dup run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
 
 help: ## 列出所有目标
@@ -16,12 +26,12 @@ help: ## 列出所有目标
 build: ## 构建全部服务到 ./bin
 	@mkdir -p $(BIN_DIR)
 	@for s in $(SERVICES); do \
-		$(GO) build -o $(BIN_DIR)/$$s ./services/$$s/cmd || exit 1; \
+		$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$$s ./services/$$s/cmd || exit 1; \
 	done
 
 build-%: ## 构建单个服务（make build-gateway）
 	@mkdir -p $(BIN_DIR)
-	$(GO) build -o $(BIN_DIR)/$* ./services/$*/cmd
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$* ./services/$*/cmd
 
 lint: ## 代码规范检查：包名前缀 + Go doc 注释 + 重复代码
 	$(GO) run ./scripts/check-pkgname . scripts/check-pkgname/allowlist.txt

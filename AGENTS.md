@@ -170,6 +170,7 @@ game/battle 的业务 actor（`services/*/internal/actor/`）采用**按域分�
 | `session/` | 会话相关纯定义 |
 | `gametime/` | 游戏时间工具 |
 | `metrics/` | 指标定义 |
+| `version/` | 构建版本信息（版本/提交/构建时间，构建期经 `-ldflags -X` 注入）|
 
 ## pkg/ — 每服务公共装配与通用工具
 
@@ -205,7 +206,8 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 
 ```bash
 # 构建 / 运行
-make build                # 构建四服务到 ./bin
+make build                # 构建四服务到 ./bin（自动注入 git 版本/提交/构建时间）
+make build VERSION=v1.0.0 # 显式指定版本（CI 打 tag 时用；见 .github/workflows/release.yml）
 make run-all              # 一键起四服务（前台交错输出，Ctrl-C 全部退出）
 make compose              # 起中间件（etcd/redis/nats/mongo）
 
