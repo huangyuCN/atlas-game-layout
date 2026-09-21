@@ -15,7 +15,6 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	etcdlocator "github.com/huangyuCN/atlas/contrib/locator/etcd"
-	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/nats-io/nats.go"
@@ -90,7 +89,10 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	rtOpts := []cluster.Option{
 		cluster.WithDirectory(dir),
 		cluster.WithTransport(cluster.NewNATSTransport(nc, cluster.WithLocalNodeID(opts.NodeID))),
-		cluster.WithLogger(atlaslog.GetLogger()),
+		// 日志不显式注入：cluster 默认取 atlas 全局 Logger，而 bootstrap 已用
+		// pkg/log.Init 把本服务配置好的 Logger 装进全局（级别/格式/文件/service_name）。
+		// 这里若再 GetLogger() 捕获一次，只是取到同一实例的快照，反而在
+		// 将来二次 SetLogger（重载/测试替换）时固化为旧实例。
 	}
 	if opts.Discovery != nil && opts.ServiceName != "" {
 		rtOpts = append(rtOpts, cluster.WithDiscovery(opts.Discovery, opts.ServiceName))
