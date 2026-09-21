@@ -7,7 +7,21 @@ import (
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 )
 
-// TestTracingOptionsOf 验证 runtime + observability → TracingOptions 映射。
+// TestServiceIdentityOf 验证 runtime → 服务身份映射（含 Runtime 缺失时零值）。
+func TestServiceIdentityOf(t *testing.T) {
+	got := serviceIdentityOf(&testBootstrap{Runtime: &configspb.Runtime{
+		Name: "game", Id: "game-1", Version: "v1.2.3", Env: "test",
+	}})
+	want := observability.ServiceIdentity{Name: "game", ID: "game-1", Version: "v1.2.3", Env: "test"}
+	if got != want {
+		t.Fatalf("serviceIdentityOf() = %+v, 期望 %+v", got, want)
+	}
+	if got := serviceIdentityOf(&testBootstrap{}); got != (observability.ServiceIdentity{}) {
+		t.Fatalf("Runtime 缺失应为零值身份，实际 %+v", got)
+	}
+}
+
+// TestTracingOptionsOf 验证 observability 配置 + 服务身份 → TracingOptions 映射。
 func TestTracingOptionsOf(t *testing.T) {
 	ratio := 0.25
 	cases := []struct {
@@ -21,12 +35,9 @@ func TestTracingOptionsOf(t *testing.T) {
 				Name: "game", Id: "game-1", Version: "v1.2.3", Env: "test",
 			}},
 			want: observability.TracingOptions{
-				ServiceName:    "game",
-				ServiceID:      "game-1",
-				ServiceVersion: "v1.2.3",
-				Env:            "test",
-				Sampler:        observability.TraceSamplerParentBasedRatio,
-				SampleRatio:    1,
+				Identity:    observability.ServiceIdentity{Name: "game", ID: "game-1", Version: "v1.2.3", Env: "test"},
+				Sampler:     observability.TraceSamplerParentBasedRatio,
+				SampleRatio: 1,
 			},
 		},
 		{
@@ -40,8 +51,8 @@ func TestTracingOptionsOf(t *testing.T) {
 				},
 			},
 			want: observability.TracingOptions{
+				Identity:    observability.ServiceIdentity{Name: "game"},
 				Endpoint:    "http://127.0.0.1:4318",
-				ServiceName: "game",
 				Sampler:     observability.TraceSamplerAlwaysOn,
 				SampleRatio: 0.25,
 			},
@@ -53,7 +64,7 @@ func TestTracingOptionsOf(t *testing.T) {
 				obs:     &configspb.Observability{Sampler: configspb.TraceSampler_TRACE_SAMPLER_ALWAYS_OFF},
 			},
 			want: observability.TracingOptions{
-				ServiceName: "game",
+				Identity:    observability.ServiceIdentity{Name: "game"},
 				Sampler:     observability.TraceSamplerAlwaysOff,
 				SampleRatio: 1,
 			},
@@ -65,7 +76,7 @@ func TestTracingOptionsOf(t *testing.T) {
 				obs:     &configspb.Observability{SampleRatio: new(float64)},
 			},
 			want: observability.TracingOptions{
-				ServiceName: "game",
+				Identity:    observability.ServiceIdentity{Name: "game"},
 				Sampler:     observability.TraceSamplerParentBasedRatio,
 				SampleRatio: 0,
 			},
@@ -73,7 +84,7 @@ func TestTracingOptionsOf(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := tracingOptionsOf(tc.cfg)
+			got, err := tracingOptionsOf(tc.cfg, serviceIdentityOf(tc.cfg))
 			if err != nil {
 				t.Fatalf("tracingOptionsOf() 错误 = %v", err)
 			}
@@ -90,7 +101,7 @@ func TestTracingOptionsOfUnknownSampler(t *testing.T) {
 		Runtime: &configspb.Runtime{Name: "game"},
 		obs:     &configspb.Observability{Sampler: configspb.TraceSampler(9)},
 	}
-	if _, err := tracingOptionsOf(cfg); err == nil {
+	if _, err := tracingOptionsOf(cfg, serviceIdentityOf(cfg)); err == nil {
 		t.Fatal("未知采样器应报错，实际为 nil")
 	}
 }

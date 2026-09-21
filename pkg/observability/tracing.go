@@ -14,13 +14,11 @@ import (
 
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 // TraceSampler 是链路采样器种类（零值 = 按比率采样且跟随父级）。
@@ -48,19 +46,13 @@ func (s TraceSampler) String() string {
 	return fmt.Sprintf("unknown(%d)", int(s))
 }
 
-// TracingOptions 是链路追踪初始化参数（runtime 身份 + observability 配置）。
+// TracingOptions 是链路追踪初始化参数（服务身份 + observability 配置）。
 type TracingOptions struct {
+	// Identity 是服务身份（Name 必填），决定链路资源属性；与指标常量标签同源。
+	Identity ServiceIdentity
 	// Endpoint 是 OTLP 导出端点，必须带 scheme：grpc://（明文 gRPC）/grpcs://（TLS gRPC）/
 	// http://（OTLP/HTTP 明文）/https://（OTLP/HTTP+TLS）；空 = 不导出（noop）。
 	Endpoint string
-	// ServiceName 注入 service.name（必填）。
-	ServiceName string
-	// ServiceID 注入 service.instance.id（空则不注入）。
-	ServiceID string
-	// ServiceVersion 注入 service.version（空则不注入）。
-	ServiceVersion string
-	// Env 注入 deployment.environment.name（空则不注入）。
-	Env string
 	// Sampler 是采样器种类（零值 = 跟随父级、按 SampleRatio 抽根）。
 	Sampler TraceSampler
 	// SampleRatio 是根 span 采样率（0..1），仅 Sampler=TraceSamplerParentBasedRatio 使用。
@@ -75,7 +67,7 @@ func InitTracing(ctx context.Context, opts TracingOptions) (shutdown func(contex
 	if opts.Endpoint == "" {
 		return noop, nil
 	}
-	if opts.ServiceName == "" {
+	if opts.Identity.Name == "" {
 		return noop, fmt.Errorf("observability: 初始化链路导出需要服务名")
 	}
 	if err := opts.validate(); err != nil {
@@ -121,21 +113,11 @@ func (o TracingOptions) validate() error {
 	return nil
 }
 
-// buildResource 构造链路资源：服务身份按 semconv 注入（空值跳过），
+// buildResource 构造链路资源：服务身份按 semconv 注入（空值跳过，见 ServiceIdentity），
 // 另带 telemetry.sdk.* 便于后端识别 SDK 版本。
 func buildResource(ctx context.Context, opts TracingOptions) (*sdkresource.Resource, error) {
-	attrs := []attribute.KeyValue{semconv.ServiceName(opts.ServiceName)}
-	if opts.ServiceVersion != "" {
-		attrs = append(attrs, semconv.ServiceVersion(opts.ServiceVersion))
-	}
-	if opts.ServiceID != "" {
-		attrs = append(attrs, semconv.ServiceInstanceID(opts.ServiceID))
-	}
-	if opts.Env != "" {
-		attrs = append(attrs, semconv.DeploymentEnvironmentNameKey.String(opts.Env))
-	}
 	res, err := sdkresource.New(ctx,
-		sdkresource.WithAttributes(attrs...),
+		sdkresource.WithAttributes(opts.Identity.resourceAttrs()...),
 		sdkresource.WithTelemetrySDK(),
 	)
 	if err != nil {

@@ -43,10 +43,7 @@ func TestNewTraceExporterScheme(t *testing.T) {
 // TestBuildResource 验证资源属性：身份字段注入、空值不注入、telemetry.sdk 随行。
 func TestBuildResource(t *testing.T) {
 	res, err := buildResource(context.Background(), TracingOptions{
-		ServiceName:    "game",
-		ServiceID:      "game-1",
-		ServiceVersion: "v1.2.3",
-		Env:            "test",
+		Identity: ServiceIdentity{Name: "game", ID: "game-1", Version: "v1.2.3", Env: "test"},
 	})
 	if err != nil {
 		t.Fatalf("buildResource() 错误 = %v", err)
@@ -71,7 +68,7 @@ func TestBuildResource(t *testing.T) {
 	}
 
 	// 空值不注入（只保留 service.name）。
-	res, err = buildResource(context.Background(), TracingOptions{ServiceName: "game"})
+	res, err = buildResource(context.Background(), TracingOptions{Identity: ServiceIdentity{Name: "game"}})
 	if err != nil {
 		t.Fatalf("buildResource() 错误 = %v", err)
 	}
@@ -123,19 +120,19 @@ func TestInitTracingValidation(t *testing.T) {
 	}
 	// 非法采样率。
 	if _, err := InitTracing(ctx, TracingOptions{
-		Endpoint: "grpc://127.0.0.1:4317", ServiceName: "game", SampleRatio: 1.5,
+		Endpoint: "grpc://127.0.0.1:4317", Identity: ServiceIdentity{Name: "game"}, SampleRatio: 1.5,
 	}); err == nil {
 		t.Fatal("sample_ratio 越界应报错")
 	}
 	// 未知采样器。
 	if _, err := InitTracing(ctx, TracingOptions{
-		Endpoint: "grpc://127.0.0.1:4317", ServiceName: "game", Sampler: TraceSampler(9),
+		Endpoint: "grpc://127.0.0.1:4317", Identity: ServiceIdentity{Name: "game"}, Sampler: TraceSampler(9),
 	}); err == nil {
 		t.Fatal("未知采样器应报错")
 	}
 	// 非法端点 scheme。
 	if _, err := InitTracing(ctx, TracingOptions{
-		Endpoint: "127.0.0.1:4317", ServiceName: "game",
+		Endpoint: "127.0.0.1:4317", Identity: ServiceIdentity{Name: "game"},
 	}); err == nil {
 		t.Fatal("缺 scheme 端点应报错")
 	}

@@ -21,18 +21,28 @@
 | 议题 | 决策 |
 |------|------|
 | 资源属性 | semconv：`service.name` / `service.version` / `service.instance.id` / `deployment.environment.name`，另加 `telemetry.sdk.*`；空值不注入 |
+| 服务身份同源 | `ServiceIdentity{Name,ID,Version,Env}` 由 `pkg/bootstrap` 从 runtime 提取一次，链路资源与指标常量标签共用 |
+| 指标身份标签 | `service` / `service_version` / `service_instance_id` / `env`（短名与既有 `service` 风格一致；实例不用 `instance`——会与 Prometheus 抓取目标标签冲突被改名为 `exported_instance`）|
 | 采样器 | proto enum `TraceSampler`：`PARENT_BASED_RATIO`（默认，跟随父级、根按比率）/ `ALWAYS_ON` / `ALWAYS_OFF` |
 | 采样率 | `optional double sample_ratio`，缺省 1.0（避免「没配 = 0 = 全丢」），校验 0..1 |
 | 端点 | 强制显式 scheme：`grpc://`（明文 gRPC）/`grpcs://`（TLS gRPC）/`http://`（OTLP/HTTP 明文）/`https://`（OTLP/HTTP+TLS）；缺失或未知启动报错 |
 | HTTP 路径 | 端点带 path 时按给定路径；不带时用导出器默认 `/v1/traces` |
 | biz 埋点 | 全部 handler 公开方法（15 个），span 名 `<service>.<接口>.<方法>`，错误记 `RecordError + SetStatus(Error)` |
-| 不做 | 指标侧 resource 标签、host/process 资源属性、baggage/自定义 propagator |
+| 不做 | host/process 资源属性、baggage/自定义 propagator |
 
 ## 3. 追踪初始化
 
 `pkg/observability`：
 
 ```go
+// ServiceIdentity 是服务身份：链路资源属性与指标常量标签共用同一份来源。
+type ServiceIdentity struct {
+    Name    string // 链路 service.name / 指标 service 标签
+    ID      string // 链路 service.instance.id / 指标 service_instance_id 标签
+    Version string // 链路 service.version / 指标 service_version 标签
+    Env     string // 链路 deployment.environment.name / 指标 env 标签
+}
+
 // TraceSampler 是采样器种类（零值 = 按比率、跟随父级）。
 type TraceSampler int
 
@@ -42,22 +52,19 @@ const (
     TraceSamplerAlwaysOff
 )
 
-// TracingOptions 是链路追踪初始化参数（来自 runtime 与 observability 配置）。
+// TracingOptions 是链路追踪初始化参数（服务身份 + observability 配置）。
 type TracingOptions struct {
-    Endpoint       string       // OTLP 端点，必须带 scheme
-    ServiceName    string       // → service.name（必填）
-    ServiceID      string       // → service.instance.id
-    ServiceVersion string       // → service.version
-    Env            string       // → deployment.environment.name
-    Sampler        TraceSampler // 采样器
-    SampleRatio    float64      // 仅 parent_based_ratio 使用；缺省由调用方填 1.0
+    Identity    ServiceIdentity // 服务身份（Name 必填）
+    Endpoint    string          // OTLP 端点，必须带 scheme
+    Sampler     TraceSampler    // 采样器
+    SampleRatio float64         // 仅 parent_based_ratio 使用；缺省由调用方填 1.0
 }
 
 func InitTracing(ctx context.Context, opts TracingOptions) (shutdown func(context.Context) error, err error)
 ```
 
 - 端点为空：直接返回 noop shutdown（不注册 provider，零开销）。
-- 服务名为空：报错（Resource 缺 service.name 无法定位）。
+- 身份名为空：报错（Resource 缺 service.name 无法定位）。
 - `SampleRatio` 不在 [0,1]：报错。
 - 采样器：`sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio))` / `sdktrace.AlwaysSample()` / `sdktrace.NeverSample()`。
 - Resource：`resource.New(ctx, resource.WithAttributes(attrs...), resource.WithTelemetrySDK())`。
@@ -151,6 +158,5 @@ enum TraceSampler {
 ## 9. 不做（YAGNI）
 
 - 不加 host/process 资源属性（`WithHost`/`WithProcess`）——需要时再加。
-- 不改指标侧 resource 标签（`service_version`/`env`/实例 ID）。
 - 不引入自定义 propagator / baggage。
 - 不为旧端点写法（无 scheme）做回落。

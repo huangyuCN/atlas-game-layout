@@ -13,7 +13,7 @@ import (
 
 // TestInitMetricsNoop 验证未配置抓取地址时返回 noop 采集器（零开销、无监听地址）。
 func TestInitMetricsNoop(t *testing.T) {
-	m, err := InitMetrics("", "game")
+	m, err := InitMetrics("", ServiceIdentity{Name: "game"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestInitMetricsNoop(t *testing.T) {
 
 // TestInitMetricsRequiresServiceName 验证配置了端点但缺服务名时报错。
 func TestInitMetricsRequiresServiceName(t *testing.T) {
-	if _, err := InitMetrics("127.0.0.1:0", ""); err == nil {
+	if _, err := InitMetrics("127.0.0.1:0", ServiceIdentity{}); err == nil {
 		t.Fatal("缺服务名应报错")
 	}
 }
@@ -39,7 +39,7 @@ func TestInitMetricsRequiresServiceName(t *testing.T) {
 // TestInitMetricsEndpoint 验证采集值经 /metrics 端点可被抓取，
 // 且 service 常量标签随行导出。
 func TestInitMetricsEndpoint(t *testing.T) {
-	m, err := InitMetrics("127.0.0.1:0", "game")
+	m, err := InitMetrics("127.0.0.1:0", ServiceIdentity{Name: "game", ID: "game-1", Version: "v1.2.3", Env: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,9 +59,10 @@ func TestInitMetricsEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	// 常量标签随行导出：gauge 行形如 test_players_online{service="game"} 3。
-	if !strings.Contains(text, "test_players_online{service=\"game\"} 3") {
-		t.Fatalf("/metrics 缺 test_players_online 值: %s", text)
+	// 常量标签随行导出（Prometheus 按标签名排序）：服务身份四项齐全。
+	want := `test_players_online{env="test",service="game",service_instance_id="game-1",service_version="v1.2.3"} 3`
+	if !strings.Contains(text, want) {
+		t.Fatalf("/metrics 缺服务身份标签\nwant 含 %s\n got %s", want, text)
 	}
 }
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
+	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
@@ -63,9 +63,12 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 		return nil, err
 	}
 
+	// 服务身份（runtime.name/id/version/env）：链路资源属性与指标常量标签同源。
+	identity := serviceIdentityOf(like)
+
 	// OTLP 链路导出（端点未配置时 noop）：资源带服务身份、采样器与采样率可配；
 	// 服务停止时 flush 未导出的 span。
-	traceOpts, err := tracingOptionsOf(like)
+	traceOpts, err := tracingOptionsOf(like, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +79,9 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 
 	// 指标采集与 Prometheus 抓取端点（未配置时 noop 采集器，热路径零开销）：
 	// 采集器以 metrics.Collector 接口注入依赖图（actor 运行时与业务打点共用），
-	// 服务停止时关闭抓取端点与底层 provider。
+	// 常量标签带同一份服务身份；服务停止时关闭抓取端点与底层 provider。
 	m, err := observability.InitMetrics(
-		like.GetObservability().GetMetrics().GetPrometheus(), runtime.GetName())
+		like.GetObservability().GetMetrics().GetPrometheus(), identity)
 	if err != nil {
 		return nil, err
 	}
@@ -99,9 +102,20 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 // defaultSampleRatio 是 sample_ratio 未配置时的默认采样率（全量采集）。
 const defaultSampleRatio = 1.0
 
-// tracingOptionsOf 把 runtime 身份与 observability 配置映射为追踪初始化参数：
+// serviceIdentityOf 从 runtime 配置提取服务身份（链路资源属性与指标常量标签共用）。
+func serviceIdentityOf(like ConfigLike) observability.ServiceIdentity {
+	runtime := like.GetRuntime()
+	return observability.ServiceIdentity{
+		Name:    runtime.GetName(),
+		ID:      runtime.GetId(),
+		Version: runtime.GetVersion(),
+		Env:     runtime.GetEnv(),
+	}
+}
+
+// tracingOptionsOf 把 observability 配置与身份映射为追踪初始化参数：
 // proto 采样器枚举 → Go 枚举（未知取值快速失败），sample_ratio 缺省 1.0。
-func tracingOptionsOf(like ConfigLike) (observability.TracingOptions, error) {
+func tracingOptionsOf(like ConfigLike, identity observability.ServiceIdentity) (observability.TracingOptions, error) {
 	obs := like.GetObservability()
 	sampler, err := traceSamplerOf(obs.GetSampler())
 	if err != nil {
@@ -111,15 +125,11 @@ func tracingOptionsOf(like ConfigLike) (observability.TracingOptions, error) {
 	if obs != nil && obs.SampleRatio != nil {
 		ratio = *obs.SampleRatio
 	}
-	runtime := like.GetRuntime()
 	return observability.TracingOptions{
-		Endpoint:       obs.GetOtlp(),
-		ServiceName:    runtime.GetName(),
-		ServiceID:      runtime.GetId(),
-		ServiceVersion: runtime.GetVersion(),
-		Env:            runtime.GetEnv(),
-		Sampler:        sampler,
-		SampleRatio:    ratio,
+		Identity:    identity,
+		Endpoint:    obs.GetOtlp(),
+		Sampler:     sampler,
+		SampleRatio: ratio,
 	}, nil
 }
 

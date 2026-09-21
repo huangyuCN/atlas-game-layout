@@ -37,16 +37,17 @@ func (m *Metrics) Shutdown(ctx context.Context) error {
 
 // InitMetrics 建立指标采集器与 Prometheus 抓取端点：
 // promAddr 为空时返回 noop 采集器（不监听端口、零开销）——配置缺失不阻断启动；
-// serviceName 作为 service 常量标签附加到全部导出指标（面板按服务区分）。
-func InitMetrics(promAddr, serviceName string) (*Metrics, error) {
+// 服务身份（id）作为常量标签附加到全部导出指标（service / service_version /
+// service_instance_id / env，空值不注入），与链路资源属性同源。
+func InitMetrics(promAddr string, id ServiceIdentity) (*Metrics, error) {
 	if promAddr == "" {
 		return &Metrics{Collector: metrics.Noop()}, nil
 	}
-	if serviceName == "" {
+	if id.Name == "" {
 		return nil, fmt.Errorf("observability: 初始化指标暴露需要服务名")
 	}
 	exp, err := otelmetrics.New(
-		otelmetrics.WithConstLabels(map[string]string{"service": serviceName}),
+		otelmetrics.WithConstLabels(id.metricLabels()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("observability: 构建指标采集器失败: %w", err)
