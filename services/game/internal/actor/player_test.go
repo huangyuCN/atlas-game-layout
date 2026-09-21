@@ -17,7 +17,6 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
-	"github.com/huangyuCN/atlas/metrics"
 )
 
 // flushMode 是 memRepo.FlushPlayer 的注入模式（编排路径故障注入）。
@@ -260,7 +259,7 @@ func newActorEnv(t *testing.T, snapTTL, snapTick time.Duration) (*core.LocalRunt
 	svc := handler.NewPlayerHandler(store, biz.PlayerServiceOptions{
 		NewPlayerID: func() string { return "p-test" },
 	})
-	if err := rt.Register(NewProps(svc, store, match, snapTick, metrics.Noop())); err != nil {
+	if err := rt.Register(NewProps(svc, store, match, snapTick)); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	regPID, err := types.NewPID("player", "alice")

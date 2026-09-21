@@ -13,6 +13,11 @@ import (
 
 // newTestManager 起 miniredis 并构造 Manager（ttl 默认 30s）。
 func newTestManager(t *testing.T, instanceID string) *Manager {
+	return newTestManagerWithTTL(t, instanceID, 30*time.Second)
+}
+
+// newTestManagerWithTTL 同上，但指定会话 TTL（过期清扫用例）。
+func newTestManagerWithTTL(t *testing.T, instanceID string, ttl time.Duration) *Manager {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	cli, err := pkredis.NewClient(pkredis.Options{Addr: mr.Addr()})
@@ -20,7 +25,7 @@ func newTestManager(t *testing.T, instanceID string) *Manager {
 		t.Fatalf("NewClient: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	return NewManager(NewRedisStore(cli), instanceID, 30*time.Second)
+	return NewManager(NewRedisStore(cli), instanceID, ttl)
 }
 
 // fakeConn 是会话视角的测试连接。

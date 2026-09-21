@@ -117,9 +117,9 @@ func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Ch
 	return m.persistRoute(ctx, playerID, next, now)
 }
 
-// countBind 打点一次会话绑定并刷新会话数 gauge（meter 为 nil 时短路）。
+// countBind 打点一次会话绑定并刷新会话数 gauge（meter 为 nil/noop 时短路）。
 func (m *Manager) countBind(channel Channel) {
-	if m.meter == nil {
+	if m.meter == nil || metrics.IsNoop(m.meter) {
 		return
 	}
 	m.meter.Counter(MetricSessionBinds, "channel", string(channel)).Add(1)
@@ -199,9 +199,9 @@ func (m *Manager) Unbind(ctx context.Context, playerID string, connID uint64) {
 	m.deleteRouteIfOwned(ctx, playerID, connID)
 }
 
-// countRemove 打点一次会话移除并刷新会话数 gauge（meter 为 nil 时短路）。
+// countRemove 打点一次会话移除并刷新会话数 gauge（meter 为 nil/noop 时短路）。
 func (m *Manager) countRemove() {
-	if m.meter == nil {
+	if m.meter == nil || metrics.IsNoop(m.meter) {
 		return
 	}
 	m.meter.Gauge(MetricSessions).Set(float64(m.Count()))
@@ -392,6 +392,7 @@ func (m *Manager) SweepOnce(ctx context.Context) int {
 		if sess != nil && sess.LastHeartbeat.Before(deadline) {
 			delete(m.local, id)
 			m.dropConnRefs(sess)
+			m.tokenIndexRemove(sess.Token)
 			removed++
 		}
 		m.mu.Unlock()
@@ -412,7 +413,7 @@ func (m *Manager) SweepOnce(ctx context.Context) int {
 	}
 	if removed > 0 {
 		m.countRemove()
-		if m.meter != nil {
+		if m.meter != nil && !metrics.IsNoop(m.meter) {
 			m.meter.Counter(MetricSessionSweeps).Add(float64(removed))
 		}
 	}

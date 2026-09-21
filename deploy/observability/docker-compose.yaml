@@ -54,7 +54,9 @@ services:
       - ./prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      # 宿主 9095：9090 常被本地代理（mihomo）占用；容器内仍监听 9090，
+      # 故 Grafana 数据源（http://prometheus:9090）与自抓取无需改动。
+      - "9095:9090"
     extra_hosts:
       # 服务在宿主机运行：容器内经 host.docker.internal 抓取业务指标端点
       - "host.docker.internal:host-gateway"

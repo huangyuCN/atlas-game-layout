@@ -1,6 +1,8 @@
 // Package observability 提供服务侧可观测性的初始化装配：
-// 链路追踪经 OTLP gRPC 导出到后端（服务器测试环境为 Tempo；Grafana 面板查询）。
-// 端点未配置时跳过初始化——全局 provider 保持 noop，热路径零开销。
+// 链路追踪经 OTLP gRPC 导出到后端（服务器测试环境为 Tempo），
+// 指标经 contrib/metrics/otel 采集并以 Prometheus 文本端点暴露；
+// 两者未配置端点时均跳过初始化——provider/采集器退化为 noop，热路径零开销。
+// Grafana 面板统一查询日志（Loki）、链路（Tempo）与指标（Prometheus）。
 package observability
 
 import (

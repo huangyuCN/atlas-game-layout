@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/huangyuCN/atlas/contrib/actor/core"
+	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
 
 // TestNewRuntimeValidation 验证装配参数校验（无需外部服务）。
@@ -60,4 +61,35 @@ func TestDefaultChainsLength(t *testing.T) {
 	if got := len(DefaultAskChain()); got != 2 {
 		t.Fatalf("DefaultAskChain 长度 = %d, 期望 2（logging/recovery）", got)
 	}
+}
+
+// TestCountByType 验证按类型统计活跃 PID（拉取式在线数指标的基础）。
+func TestCountByType(t *testing.T) {
+	pids := []types.PID{
+		mustPID(t, "player", "p1"),
+		mustPID(t, "player", "p2"),
+		mustPID(t, "battle", "b1"),
+	}
+	if got := countByType(pids, "player"); got != 2 {
+		t.Fatalf("player 计数 = %d, 期望 2", got)
+	}
+	if got := countByType(pids, "battle"); got != 1 {
+		t.Fatalf("battle 计数 = %d, 期望 1", got)
+	}
+	if got := countByType(pids, "ghost"); got != 0 {
+		t.Fatalf("未知类型计数 = %d, 期望 0", got)
+	}
+	if got := countByType(nil, "player"); got != 0 {
+		t.Fatalf("空快照计数 = %d, 期望 0", got)
+	}
+}
+
+// mustPID 构造测试 PID（非法即失败）。
+func mustPID(t *testing.T, typ, uid string) types.PID {
+	t.Helper()
+	pid, err := types.NewPID(typ, uid)
+	if err != nil {
+		t.Fatalf("NewPID(%s,%s): %v", typ, uid, err)
+	}
+	return pid
 }

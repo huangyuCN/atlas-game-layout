@@ -1,7 +1,7 @@
-// server 包内指标接线与业务打点：请求计数（自留会话接口 + 透传引擎共用一个
-// counter，面板按 op 汇总全部入口 QPS）。指标名/标签遵循有界基数约定——
+// Package server 提供包内指标接线与业务打点：请求计数（自留会话接口 + 透传引擎
+// 共用一个 counter，面板按 op 汇总全部入口 QPS）。指标名/标签遵循有界基数约定——
 // op 取注解路由表 op 与自留接口方法（集合有界），result 仅 success/error；
-// meter 为 nil 时全部打点短路（noop 零开销）。
+// meter 为 nil/noop 时全部打点短路（noop 零开销）。
 package server
 
 import (
@@ -21,9 +21,10 @@ const (
 	resultError   = "error"
 )
 
-// meterRequest 打点一次请求（op 为协议 op 路径；err 非 nil 记 error）。
+// meterRequest 打点一次请求（op 为协议 op 路径；err 非 nil 记 error；
+// meter 为 nil/noop 时短路，未配置后端零分配）。
 func meterRequest(c metrics.Collector, op string, err error) {
-	if c == nil {
+	if c == nil || metrics.IsNoop(c) {
 		return
 	}
 	result := resultSuccess

@@ -22,7 +22,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
-	"github.com/huangyuCN/atlas/metrics"
 )
 
 // tickSnapshot 是定时落盘自消息（OnStart 注册 Repeat，经本地类型路由分发；
@@ -39,14 +38,15 @@ const (
 
 // NewProps 构造 PlayerActor 注册规格（SpawnAuto 懒激活 + 默认中间件链）。
 // snapTick 是统一落盘周期（≤0 关闭定时落盘）；match 是匹配队列客户端
-// （nil 降级：匹配方法返回内部错误，单测可注入 fake）；
-// meter 是可选指标采集器（nil = 不打点，noop 零开销）。
-func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.MatchmakerClient, snapTick time.Duration, meter metrics.Collector) core.Props {
+// （nil 降级：匹配方法返回内部错误，单测可注入 fake）。
+// 在线玩家数由拉取式指标按本节点活跃实例统计（见 app.registerActor），
+// 不在生命周期里成对增减——避免急停/重启等不回调 OnStop 的路径造成漂移。
+func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.MatchmakerClient, snapTick time.Duration) core.Props {
 	return core.Props{
 		Type: consts.ActorTypePlayer,
 		NewHandler: func(pid types.PID) core.Handler {
 			p := &PlayerActor{
-				pid: pid, svc: svc, store: store, match: match, snapTick: snapTick, meter: meter,
+				pid: pid, svc: svc, store: store, match: match, snapTick: snapTick,
 			}
 			return gamev1.NewPlayerServiceServer(p, core.WithLocalTell(p.onTickSnapshot))
 		},
@@ -57,7 +57,7 @@ func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.Matchmaker
 	}
 }
 
-// MetricPlayersOnline 是在线玩家数 gauge（PlayerActor 激活 +1 / 停止 -1）。
+// MetricPlayersOnline 是在线玩家数 gauge（拉取式：采集时统计本节点活跃 PlayerActor）。
 const MetricPlayersOnline = "game_players_online"
 
 // PlayerActor 是玩家在线态 actor：同一玩家全局唯一实例（Locator 注册 player:<id>）。
@@ -76,24 +76,19 @@ type PlayerActor struct {
 	store                                   repo.PlayerRepo
 	match                                   biz.MatchmakerClient
 
-	player            *models.Player    // 内存聚合根（在线缓存；登录后持有）
-	partyID           string            // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
-	snapTick          time.Duration     // 统一落盘周期（≤0 关闭定时落盘）
-	lastCRC           uint32            // 上次成功落盘的数据指纹（CRC 跳过用）
-	frozen            bool              // 在线冻结标记：双库失败后拒绝改档（数据不再堆积）
-	freezeRetryCancel core.CancelFunc   // 冻结期重试定时器的取消句柄
-	meter             metrics.Collector // 可选指标采集器（nil = 不打点）
+	player            *models.Player  // 内存聚合根（在线缓存；登录后持有）
+	partyID           string          // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）
+	snapTick          time.Duration   // 统一落盘周期（≤0 关闭定时落盘）
+	lastCRC           uint32          // 上次成功落盘的数据指纹（CRC 跳过用）
+	frozen            bool            // 在线冻结标记：双库失败后拒绝改档（数据不再堆积）
+	freezeRetryCancel core.CancelFunc // 冻结期重试定时器的取消句柄
 }
 
-// OnStart 实现 core.Handler 生命周期：注册定时落盘 Repeat（3 分钟节奏），
-// 并把在线玩家 gauge +1（先注册逻辑，注册失败不计入在线）。
+// OnStart 实现 core.Handler 生命周期：注册定时落盘 Repeat（3 分钟节奏）。
 func (p *PlayerActor) OnStart(ctx core.ActorContext) error {
 	p.pid = ctx.Self()
 	if p.snapTick > 0 {
 		ctx.Repeat(p.snapTick, p.snapTick, tickSnapshot{})
-	}
-	if p.meter != nil {
-		p.meter.Gauge(MetricPlayersOnline).Add(1)
 	}
 	return nil
 }
@@ -102,9 +97,6 @@ func (p *PlayerActor) OnStart(ctx core.ActorContext) error {
 // 落库已在停止前的下线流程完成（流程反转：落库成功才发起 Stop）；
 // 这里不再有可失败的写路径。
 func (p *PlayerActor) OnStop(ctx core.ActorContext, reason types.ExitReason) error {
-	if p.meter != nil {
-		p.meter.Gauge(MetricPlayersOnline).Add(-1)
-	}
 	if p.match != nil {
 		_, _ = p.match.Cancel(ctx.Context(), p.pid.UID())
 		if p.partyID != "" {

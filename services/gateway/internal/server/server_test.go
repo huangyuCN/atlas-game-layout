@@ -85,6 +85,11 @@ func newGWEnv(t *testing.T, id string, mr *miniredis.Miniredis, natsURL string) 
 // 四协议 Server 全量构造并完成会话 + 透传注册（验证装配路径），仅 TCP 启动
 // （帧链路端到端用）；会话回写注入推送记录桩，断言不依赖真实客户端连接。
 func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
+	return newGWEnvMeter(t, id, redisAddr, natsURL, metrics.Noop())
+}
+
+// newGWEnvMeter 同 newGWEnvWithRedis，但注入指定指标采集器（业务打点断言用）。
+func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Collector) *gwEnv {
 	t.Helper()
 	cli, err := pkredis.NewClient(pkredis.Options{Addr: redisAddr})
 	if err != nil {
@@ -102,7 +107,7 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 
 	sess := session.NewManager(session.NewRedisStore(cli), id, 30*time.Second)
 	mock := newMockActorRuntime()
-	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), metrics.Noop(), nc,
+	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), meter, nc,
 		push, new(fakePusher), kcpPush, udpSrv)
 	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
 	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))

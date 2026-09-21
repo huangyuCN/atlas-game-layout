@@ -33,14 +33,14 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "max(game_players_online)",
+          "expr": "sum(game_players_online)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 2,
-      "title": "网关会话数（gateway，本实例）",
+      "title": "网关会话数（gateway，集群合计）",
       "type": "stat",
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },

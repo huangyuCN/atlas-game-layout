@@ -72,7 +72,7 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 	// 指标采集与 Prometheus 抓取端点（未配置时 noop 采集器，热路径零开销）：
 	// 采集器以 metrics.Collector 接口注入依赖图（actor 运行时与业务打点共用），
 	// 服务停止时关闭抓取端点与底层 provider。
-	meter, shutdownMetrics, err := observability.InitMetrics(
+	m, err := observability.InitMetrics(
 		like.GetObservability().GetMetrics().GetPrometheus(), runtime.GetName())
 	if err != nil {
 		return nil, err
@@ -80,10 +80,10 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 
 	opts := []fx.Option{
 		fx.Supply(cfg),
-		fx.Provide(func() metrics.Collector { return meter }),
+		fx.Provide(func() metrics.Collector { return m.Collector }),
 		fx.Invoke(func(lc fx.Lifecycle) {
 			lc.Append(fx.Hook{OnStop: shutdownTrace})
-			lc.Append(fx.Hook{OnStop: shutdownMetrics})
+			lc.Append(fx.Hook{OnStop: m.Shutdown})
 		}),
 		Module(Options{Name: runtime.GetName(), ID: runtime.GetId()}),
 	}

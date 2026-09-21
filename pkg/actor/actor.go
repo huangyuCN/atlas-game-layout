@@ -154,3 +154,19 @@ func ParsePID(s string) (types.PID, error) { return types.ParsePID(s) }
 
 // Raw 返回底层集群运行时（高级场景）。
 func (r *Runtime) Raw() *cluster.Runtime { return r.inner }
+
+// CountByType 返回本节点指定 actor 类型的活跃实例数（供拉取式指标按需统计）。
+func (r *Runtime) CountByType(typ string) int {
+	return countByType(r.inner.Local().Cells(), typ)
+}
+
+// countByType 从 PID 快照统计指定类型的数量（纯函数，便于单测）。
+func countByType(pids []types.PID, typ string) int {
+	n := 0
+	for _, pid := range pids {
+		if pid.Type() == typ {
+			n++
+		}
+	}
+	return n
+}
