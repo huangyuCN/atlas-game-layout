@@ -11,16 +11,38 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
+// Mode 是 redis 部署形态（枚举；零值即单点，Options{} 与单点语义一致）。
+type Mode int
+
+// 部署形态的全部取值。
+const (
+	ModeSingle   Mode = iota // 单点（默认）
+	ModeSentinel             // 主从哨兵
+	ModeCluster              // 集群分片
+)
+
+// String 返回形态名（错误信息与日志用）；越界值返回 unknown(n) 以便自解释。
+func (m Mode) String() string {
+	switch m {
+	case ModeSingle:
+		return "single"
+	case ModeSentinel:
+		return "sentinel"
+	case ModeCluster:
+		return "cluster"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(m))
+	}
+}
+
 // Options 是 Redis 连接选项。
 type Options struct {
-	// Addr 是单点 Redis 地址（Mode 为空或 "single" 时使用，host:port）。
-	Addr string
-	// Mode 是部署形态："single"（默认）/ "sentinel"（主从哨兵）/ "cluster"（集群分片）。
-	Mode string
-	// MasterName 是哨兵监控的主库名（Mode=sentinel 时必填）。
-	MasterName string
-	// Addrs 是哨兵或集群节点地址列表（Mode=sentinel/cluster 时必填）。
+	// Addrs 是节点地址列表（host:port）：single 恰好 1 个；sentinel/cluster 为全部节点。
 	Addrs []string
+	// Mode 是部署形态（零值 = ModeSingle）。
+	Mode Mode
+	// MasterName 是哨兵监控的主库名（ModeSentinel 必填）。
+	MasterName string
 	// Password 是可选密码。
 	Password string
 	// DB 是数据库编号（仅 single/sentinel 形态；cluster 按 key 哈希分片，不支持 DB 选择）。
@@ -33,24 +55,27 @@ type Client struct {
 }
 
 // NewClient 按 Mode 构造 Redis 客户端（惰性连接，不验证）：
-//   - 空 / "single"：直连 Addr；
-//   - "sentinel"：经哨兵发现主库（MasterName + Addrs），主从切换自动跟随；
-//   - "cluster"：集群分片客户端（Addrs 为任一节点引导地址）。
+//   - ModeSingle：直连 Addrs[0]（必须恰好 1 个地址）；
+//   - ModeSentinel：经哨兵发现主库（MasterName + Addrs），主从切换自动跟随；
+//   - ModeCluster：集群分片客户端（Addrs 为任一节点引导地址）。
 func NewClient(opts Options) (*Client, error) {
 	var inner goredis.UniversalClient
 	switch opts.Mode {
-	case "", "single":
-		if opts.Addr == "" {
-			return nil, fmt.Errorf("redis: addr 不能为空")
+	case ModeSingle:
+		if len(opts.Addrs) != 1 {
+			return nil, fmt.Errorf("redis: single 形态需要且只接受 1 个地址，收到 %d 个", len(opts.Addrs))
 		}
 		inner = goredis.NewClient(&goredis.Options{
-			Addr:     opts.Addr,
+			Addr:     opts.Addrs[0],
 			Password: opts.Password,
 			DB:       opts.DB,
 		})
-	case "sentinel":
-		if opts.MasterName == "" || len(opts.Addrs) == 0 {
-			return nil, fmt.Errorf("redis: sentinel 形态需要 master_name 与哨兵地址")
+	case ModeSentinel:
+		if opts.MasterName == "" {
+			return nil, fmt.Errorf("redis: sentinel 形态需要 master_name")
+		}
+		if len(opts.Addrs) == 0 {
+			return nil, fmt.Errorf("redis: sentinel 形态需要至少 1 个哨兵地址")
 		}
 		inner = goredis.NewFailoverClient(&goredis.FailoverOptions{
 			MasterName:    opts.MasterName,
@@ -58,9 +83,9 @@ func NewClient(opts Options) (*Client, error) {
 			Password:      opts.Password,
 			DB:            opts.DB,
 		})
-	case "cluster":
+	case ModeCluster:
 		if len(opts.Addrs) == 0 {
-			return nil, fmt.Errorf("redis: cluster 形态需要节点地址")
+			return nil, fmt.Errorf("redis: cluster 形态需要至少 1 个节点地址")
 		}
 		inner = goredis.NewClusterClient(&goredis.ClusterOptions{
 			Addrs:    opts.Addrs,
@@ -68,7 +93,7 @@ func NewClient(opts Options) (*Client, error) {
 			ReadOnly: true, // 读请求可落副本（写仍走主库）
 		})
 	default:
-		return nil, fmt.Errorf("redis: 未知 mode %q（支持 single/sentinel/cluster）", opts.Mode)
+		return nil, fmt.Errorf("redis: 未知形态 %s", opts.Mode)
 	}
 	return &Client{inner: inner}, nil
 }

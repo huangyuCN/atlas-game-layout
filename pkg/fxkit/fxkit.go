@@ -1,13 +1,15 @@
 // Package fxkit 提供跨服务复用的 fx 泛型提供器：
 // 各服务 internal/conf 的 *Bootstrap 均引用公共配置消息（protobuf/configs），
 // 借助泛型把「从配置提取参数构造底层客户端」的实现收敛为一份，
-// 供各服务的 fx 模块以 `fxkit.NewEtcdClient[*conf.Bootstrap]` 形式直接提供。
+// 供各服务的 fx 模块以 `fxkit.NewEtcdClient[*conf.Bootstrap]`、
+// `fxkit.NewRedisClient[*conf.Bootstrap]` 形式直接提供。
 package fxkit
 
 import (
 	"fmt"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
+	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas/registry"
@@ -50,4 +52,62 @@ func NewRegistrar(ec *clientv3.Client) (registry.Registrar, error) {
 		return nil, fmt.Errorf("fxkit: 构造注册器失败: %w", err)
 	}
 	return reg, nil
+}
+
+// WithData 是提取数据中间件配置段所需的最小接口
+// （各服务生成的 *Bootstrap 自动满足）。
+type WithData interface {
+	GetData() *configspb.Data
+}
+
+// RedisOptions 把 data.redis 配置映射为 redis.Options：proto 枚举 → Go 枚举
+// 只此一份，避免各服务重复映射。配置段缺失时返回零值（单点、无地址），
+// 由 NewRedisClient 统一校验后快速失败。
+func RedisOptions[B WithData](cfg B) (pkredis.Options, error) {
+	var r *configspb.Data_Redis
+	if d := cfg.GetData(); d != nil {
+		r = d.GetRedis()
+	}
+	if r == nil {
+		return pkredis.Options{}, nil
+	}
+	mode, err := redisModeOf(r.GetMode())
+	if err != nil {
+		return pkredis.Options{}, err
+	}
+	return pkredis.Options{
+		Addrs:      r.GetAddrs(),
+		Mode:       mode,
+		MasterName: r.GetMasterName(),
+		Password:   r.GetPassword(),
+		DB:         int(r.GetDb()),
+	}, nil
+}
+
+// NewRedisClient 从配置装配 redis 客户端（惰性连接，不建连）；
+// 配置缺失或形态非法时快速失败——依赖 redis 的服务应尽早暴露而非静默降级。
+func NewRedisClient[B WithData](cfg B) (*pkredis.Client, error) {
+	opts, err := RedisOptions(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("fxkit: %w", err)
+	}
+	cli, err := pkredis.NewClient(opts)
+	if err != nil {
+		return nil, fmt.Errorf("fxkit: 构造 redis 客户端失败: %w", err)
+	}
+	return cli, nil
+}
+
+// redisModeOf 把 proto 形态枚举映射为 redis.Mode；未知取值快速失败。
+func redisModeOf(m configspb.Data_RedisMode) (pkredis.Mode, error) {
+	switch m {
+	case configspb.Data_REDIS_MODE_SINGLE:
+		return pkredis.ModeSingle, nil
+	case configspb.Data_REDIS_MODE_SENTINEL:
+		return pkredis.ModeSentinel, nil
+	case configspb.Data_REDIS_MODE_CLUSTER:
+		return pkredis.ModeCluster, nil
+	default:
+		return 0, fmt.Errorf("redis: 未知配置形态 %d", int32(m))
+	}
 }

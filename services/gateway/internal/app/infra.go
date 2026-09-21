@@ -20,19 +20,6 @@ import (
 // sessionTTL 是会话路由的默认租期（心跳续租周期，与 game 会话租期对齐）。
 const sessionTTL = 30 * time.Second
 
-// NewRedisClient 装配 redis 客户端（会话路由表后端）。
-func NewRedisClient(cfg *conf.Bootstrap) (*pkredis.Client, error) {
-	opts := pkredis.Options{}
-	if d := cfg.GetData(); d != nil && d.GetRedis() != nil {
-		opts.Addr = d.GetRedis().GetAddr()
-	}
-	cli, err := pkredis.NewClient(opts)
-	if err != nil {
-		return nil, fmt.Errorf("app: 构造 redis 客户端失败: %w", err)
-	}
-	return cli, nil
-}
-
 // NewNatsConn 装配 NATS 连接（推送订阅 + gateway 控制通道）。
 func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 	url := ""

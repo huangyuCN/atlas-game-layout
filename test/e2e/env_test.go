@@ -34,7 +34,7 @@ func probeCore(t *testing.T) string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	cli, err := pkredis.NewClient(pkredis.Options{Addr: itRedisAddr})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{itRedisAddr}})
 	if err != nil {
 		return "redis 构造失败: " + err.Error()
 	}
@@ -81,7 +81,7 @@ func newGame(t *testing.T) *gameassemble.Game {
 		NodeID:        "game-it",
 		EtcdEndpoints: []string{itEtcdEndpoints},
 		NatsURL:       itNatsURL,
-		RedisAddr:     itRedisAddr,
+		RedisAddrs:    []string{itRedisAddr},
 		MongoURI:      itMongoURI,
 		MongoDB:       itMongoDB,
 	})
@@ -99,7 +99,7 @@ func newGateway(t *testing.T, id string) *gwassemble.Gateway {
 		ID:            id,
 		EtcdEndpoints: []string{itEtcdEndpoints},
 		NatsURL:       itNatsURL,
-		RedisAddr:     itRedisAddr,
+		RedisAddrs:    []string{itRedisAddr},
 	})
 	if err != nil {
 		t.Fatalf("gateway 装配: %v", err)

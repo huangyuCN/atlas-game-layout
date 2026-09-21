@@ -93,7 +93,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 
 	game, err := gameassemble.New(ctx, gameassemble.Options{
 		NodeID: "game-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL,
-		RedisAddr: mw.redisAddr, MongoURI: mw.mongoURI, MongoDB: mw.mongoDB,
+		RedisAddrs: []string{mw.redisAddr}, MongoURI: mw.mongoURI, MongoDB: mw.mongoDB,
 	})
 	if err != nil {
 		return rollback("game", err)
@@ -101,7 +101,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 	stops = append(stops, game.Stop)
 
 	gw, err := gwassemble.New(ctx, gwassemble.Options{
-		ID: "e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddr: mw.redisAddr,
+		ID: "e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddrs: []string{mw.redisAddr},
 	})
 	if err != nil {
 		return rollback("gateway", err)
@@ -118,7 +118,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 	stops = append(stops, bat.Stop)
 
 	m, err := matcherassemble.New(ctx, matcherassemble.Options{
-		NodeID: "matcher-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddr: mw.redisAddr,
+		NodeID: "matcher-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddrs: []string{mw.redisAddr},
 	})
 	if err != nil {
 		return rollback("matcher", err)
@@ -166,7 +166,7 @@ func probeMiddlewares(mw middlewareAddrs) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	rc, err := pkgredis.NewClient(pkgredis.Options{Addr: mw.redisAddr})
+	rc, err := pkgredis.NewClient(pkgredis.Options{Addrs: []string{mw.redisAddr}})
 	if err != nil {
 		return fmt.Errorf("redis 构造失败: %w", err)
 	}

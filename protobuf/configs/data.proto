@@ -6,8 +6,23 @@ package atlas.configs;
 option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
 
 message Data {
+  // RedisMode 是 redis 部署形态；零值（0）即单点。
+  enum RedisMode {
+    REDIS_MODE_SINGLE = 0;   // 单点（默认）
+    REDIS_MODE_SENTINEL = 1; // 主从哨兵
+    REDIS_MODE_CLUSTER = 2;  // 集群分片
+  }
   message Redis {
-    string addr = 1;
+    // mode 是部署形态；不配即单点。
+    RedisMode mode = 1;
+    // addrs 是节点地址（host:port）：单点恰好 1 个；哨兵/集群为节点列表。
+    repeated string addrs = 2;
+    // master_name 是哨兵监控的主库名（哨兵形态必填）。
+    string master_name = 3;
+    // password 是可选密码。
+    string password = 4;
+    // db 是库编号（仅单点/哨兵；集群按 key 哈希分片，不支持）。
+    int32 db = 5;
   }
   message Nats {
     string url = 1;

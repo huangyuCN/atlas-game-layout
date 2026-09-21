@@ -12,7 +12,9 @@ server:
     addr: 0.0.0.0:9180
 data:
   redis:
-    addr: 127.0.0.1:16379
+    # mode 缺省即 single（单点）；哨兵/集群形态与字段见 protobuf/configs/data.proto
+    addrs:
+      - 127.0.0.1:16379
   nats:
     url: nats://127.0.0.1:14222
   mongo:

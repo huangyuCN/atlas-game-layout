@@ -32,7 +32,7 @@ type Options struct {
 	ID            string
 	EtcdEndpoints []string
 	NatsURL       string
-	RedisAddr     string
+	RedisAddrs    []string
 }
 
 // Gateway 是装配完成的 gateway 实例句柄。
@@ -165,7 +165,7 @@ func newBootstrap(o Options) *conf.Bootstrap {
 		Kcp:       &conf.Bootstrap_Net{Addr: randomPort},
 		Udp:       &conf.Bootstrap_Net{Addr: randomPort},
 		Data: &configspb.Data{
-			Redis: &configspb.Data_Redis{Addr: o.RedisAddr},
+			Redis: &configspb.Data_Redis{Addrs: o.RedisAddrs},
 			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
 		},
 	}

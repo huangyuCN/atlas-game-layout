@@ -41,7 +41,7 @@ var Module = fx.Module("gateway",
 		// ── infra：注册中心 + 外部客户端 ──
 		fxkit.NewEtcdClient[*conf.Bootstrap],
 		fxkit.NewRegistrar, // → registry.Registrar，供 atlas.App 服务注册
-		NewRedisClient,
+		fxkit.NewRedisClient[*conf.Bootstrap],
 		NewNatsConn,
 		// ── server：五协议传输层构造（启停归属驱动方）──
 		server.NewHTTPServer,

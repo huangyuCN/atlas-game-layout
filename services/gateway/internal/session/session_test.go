@@ -20,7 +20,7 @@ func newTestManager(t *testing.T, instanceID string) *Manager {
 func newTestManagerWithTTL(t *testing.T, instanceID string, ttl time.Duration) *Manager {
 	t.Helper()
 	mr := miniredis.RunT(t)
-	cli, err := pkredis.NewClient(pkredis.Options{Addr: mr.Addr()})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{mr.Addr()}})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestSweepSkipsFreshSessions(t *testing.T) {
 // TestRouteLegacyValueCompatibility 验证 M2 旧版纯实例 ID 字符串可解析。
 func TestRouteLegacyValueCompatibility(t *testing.T) {
 	mr := miniredis.RunT(t)
-	cli, err := pkredis.NewClient(pkredis.Options{Addr: mr.Addr()})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{mr.Addr()}})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

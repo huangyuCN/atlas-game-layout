@@ -43,7 +43,7 @@ func containerAction(ctx context.Context, action, container string) error {
 // snapshotTTL 查询快照 key 的 TTL；PERSIST 过返回 -1ns，键不存在返回 -2ns
 // （go-redis 语义；直接返回 Duration，避免秒级截断把负值归零）。
 func snapshotTTL(ctx context.Context, redisAddr, playerID string) (time.Duration, error) {
-	rc, err := pkgredis.NewClient(pkgredis.Options{Addr: redisAddr})
+	rc, err := pkgredis.NewClient(pkgredis.Options{Addrs: []string{redisAddr}})
 	if err != nil {
 		return 0, err
 	}

@@ -10,7 +10,7 @@ func TestNewBootstrap(t *testing.T) {
 		NodeID:        "game-it",
 		EtcdEndpoints: []string{"127.0.0.1:12379"},
 		NatsURL:       "nats://127.0.0.1:14222",
-		RedisAddr:     "127.0.0.1:16379",
+		RedisAddrs:    []string{"127.0.0.1:16379"},
 		MongoURI:      "mongodb://127.0.0.1:27017",
 		MongoDB:       "game_it",
 	}
@@ -31,8 +31,8 @@ func TestNewBootstrap(t *testing.T) {
 	}
 
 	// data：redis/nats/mongo 透传。
-	if got := cfg.GetData().GetRedis().GetAddr(); got != "127.0.0.1:16379" {
-		t.Errorf("data.redis.addr = %q", got)
+	if got := cfg.GetData().GetRedis().GetAddrs(); len(got) != 1 || got[0] != "127.0.0.1:16379" {
+		t.Errorf("data.redis.addrs = %v", got)
 	}
 	if got := cfg.GetData().GetNats().GetUrl(); got != "nats://127.0.0.1:14222" {
 		t.Errorf("data.nats.url = %q", got)

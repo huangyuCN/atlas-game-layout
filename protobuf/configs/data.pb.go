@@ -23,6 +23,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// RedisMode 是 redis 部署形态；零值（0）即单点。
+type Data_RedisMode int32
+
+const (
+	Data_REDIS_MODE_SINGLE   Data_RedisMode = 0 // 单点（默认）
+	Data_REDIS_MODE_SENTINEL Data_RedisMode = 1 // 主从哨兵
+	Data_REDIS_MODE_CLUSTER  Data_RedisMode = 2 // 集群分片
+)
+
+// Enum value maps for Data_RedisMode.
+var (
+	Data_RedisMode_name = map[int32]string{
+		0: "REDIS_MODE_SINGLE",
+		1: "REDIS_MODE_SENTINEL",
+		2: "REDIS_MODE_CLUSTER",
+	}
+	Data_RedisMode_value = map[string]int32{
+		"REDIS_MODE_SINGLE":   0,
+		"REDIS_MODE_SENTINEL": 1,
+		"REDIS_MODE_CLUSTER":  2,
+	}
+)
+
+func (x Data_RedisMode) Enum() *Data_RedisMode {
+	p := new(Data_RedisMode)
+	*p = x
+	return p
+}
+
+func (x Data_RedisMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Data_RedisMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_protobuf_configs_data_proto_enumTypes[0].Descriptor()
+}
+
+func (Data_RedisMode) Type() protoreflect.EnumType {
+	return &file_protobuf_configs_data_proto_enumTypes[0]
+}
+
+func (x Data_RedisMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Data_RedisMode.Descriptor instead.
+func (Data_RedisMode) EnumDescriptor() ([]byte, []int) {
+	return file_protobuf_configs_data_proto_rawDescGZIP(), []int{0, 0}
+}
+
 type Data struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Redis         *Data_Redis            `protobuf:"bytes,1,opt,name=redis,proto3" json:"redis,omitempty"`
@@ -84,8 +134,17 @@ func (x *Data) GetMongo() *Data_Mongo {
 }
 
 type Data_Redis struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Addr          string                 `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// mode 是部署形态；不配即单点。
+	Mode Data_RedisMode `protobuf:"varint,1,opt,name=mode,proto3,enum=atlas.configs.Data_RedisMode" json:"mode,omitempty"`
+	// addrs 是节点地址（host:port）：单点恰好 1 个；哨兵/集群为节点列表。
+	Addrs []string `protobuf:"bytes,2,rep,name=addrs,proto3" json:"addrs,omitempty"`
+	// master_name 是哨兵监控的主库名（哨兵形态必填）。
+	MasterName string `protobuf:"bytes,3,opt,name=master_name,json=masterName,proto3" json:"master_name,omitempty"`
+	// password 是可选密码。
+	Password string `protobuf:"bytes,4,opt,name=password,proto3" json:"password,omitempty"`
+	// db 是库编号（仅单点/哨兵；集群按 key 哈希分片，不支持）。
+	Db            int32 `protobuf:"varint,5,opt,name=db,proto3" json:"db,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -120,11 +179,39 @@ func (*Data_Redis) Descriptor() ([]byte, []int) {
 	return file_protobuf_configs_data_proto_rawDescGZIP(), []int{0, 0}
 }
 
-func (x *Data_Redis) GetAddr() string {
+func (x *Data_Redis) GetMode() Data_RedisMode {
 	if x != nil {
-		return x.Addr
+		return x.Mode
+	}
+	return Data_REDIS_MODE_SINGLE
+}
+
+func (x *Data_Redis) GetAddrs() []string {
+	if x != nil {
+		return x.Addrs
+	}
+	return nil
+}
+
+func (x *Data_Redis) GetMasterName() string {
+	if x != nil {
+		return x.MasterName
 	}
 	return ""
+}
+
+func (x *Data_Redis) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *Data_Redis) GetDb() int32 {
+	if x != nil {
+		return x.Db
+	}
+	return 0
 }
 
 type Data_Nats struct {
@@ -227,18 +314,27 @@ var File_protobuf_configs_data_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_data_proto_rawDesc = "" +
 	"\n" +
-	"\x1bprotobuf/configs/data.proto\x12\ratlas.configs\"\x84\x02\n" +
+	"\x1bprotobuf/configs/data.proto\x12\ratlas.configs\"\xdc\x03\n" +
 	"\x04Data\x12/\n" +
 	"\x05redis\x18\x01 \x01(\v2\x19.atlas.configs.Data.RedisR\x05redis\x12,\n" +
 	"\x04nats\x18\x02 \x01(\v2\x18.atlas.configs.Data.NatsR\x04nats\x12/\n" +
-	"\x05mongo\x18\x03 \x01(\v2\x19.atlas.configs.Data.MongoR\x05mongo\x1a\x1b\n" +
-	"\x05Redis\x12\x12\n" +
-	"\x04addr\x18\x01 \x01(\tR\x04addr\x1a\x18\n" +
+	"\x05mongo\x18\x03 \x01(\v2\x19.atlas.configs.Data.MongoR\x05mongo\x1a\x9d\x01\n" +
+	"\x05Redis\x121\n" +
+	"\x04mode\x18\x01 \x01(\x0e2\x1d.atlas.configs.Data.RedisModeR\x04mode\x12\x14\n" +
+	"\x05addrs\x18\x02 \x03(\tR\x05addrs\x12\x1f\n" +
+	"\vmaster_name\x18\x03 \x01(\tR\n" +
+	"masterName\x12\x1a\n" +
+	"\bpassword\x18\x04 \x01(\tR\bpassword\x12\x0e\n" +
+	"\x02db\x18\x05 \x01(\x05R\x02db\x1a\x18\n" +
 	"\x04Nats\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x1a5\n" +
 	"\x05Mongo\x12\x10\n" +
 	"\x03uri\x18\x01 \x01(\tR\x03uri\x12\x1a\n" +
-	"\bdatabase\x18\x02 \x01(\tR\bdatabaseBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
+	"\bdatabase\x18\x02 \x01(\tR\bdatabase\"S\n" +
+	"\tRedisMode\x12\x15\n" +
+	"\x11REDIS_MODE_SINGLE\x10\x00\x12\x17\n" +
+	"\x13REDIS_MODE_SENTINEL\x10\x01\x12\x16\n" +
+	"\x12REDIS_MODE_CLUSTER\x10\x02BAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
 
 var (
 	file_protobuf_configs_data_proto_rawDescOnce sync.Once
@@ -252,22 +348,25 @@ func file_protobuf_configs_data_proto_rawDescGZIP() []byte {
 	return file_protobuf_configs_data_proto_rawDescData
 }
 
+var file_protobuf_configs_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_protobuf_configs_data_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_protobuf_configs_data_proto_goTypes = []any{
-	(*Data)(nil),       // 0: atlas.configs.Data
-	(*Data_Redis)(nil), // 1: atlas.configs.Data.Redis
-	(*Data_Nats)(nil),  // 2: atlas.configs.Data.Nats
-	(*Data_Mongo)(nil), // 3: atlas.configs.Data.Mongo
+	(Data_RedisMode)(0), // 0: atlas.configs.Data.RedisMode
+	(*Data)(nil),        // 1: atlas.configs.Data
+	(*Data_Redis)(nil),  // 2: atlas.configs.Data.Redis
+	(*Data_Nats)(nil),   // 3: atlas.configs.Data.Nats
+	(*Data_Mongo)(nil),  // 4: atlas.configs.Data.Mongo
 }
 var file_protobuf_configs_data_proto_depIdxs = []int32{
-	1, // 0: atlas.configs.Data.redis:type_name -> atlas.configs.Data.Redis
-	2, // 1: atlas.configs.Data.nats:type_name -> atlas.configs.Data.Nats
-	3, // 2: atlas.configs.Data.mongo:type_name -> atlas.configs.Data.Mongo
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 0: atlas.configs.Data.redis:type_name -> atlas.configs.Data.Redis
+	3, // 1: atlas.configs.Data.nats:type_name -> atlas.configs.Data.Nats
+	4, // 2: atlas.configs.Data.mongo:type_name -> atlas.configs.Data.Mongo
+	0, // 3: atlas.configs.Data.Redis.mode:type_name -> atlas.configs.Data.RedisMode
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_protobuf_configs_data_proto_init() }
@@ -280,13 +379,14 @@ func file_protobuf_configs_data_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protobuf_configs_data_proto_rawDesc), len(file_protobuf_configs_data_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_protobuf_configs_data_proto_goTypes,
 		DependencyIndexes: file_protobuf_configs_data_proto_depIdxs,
+		EnumInfos:         file_protobuf_configs_data_proto_enumTypes,
 		MessageInfos:      file_protobuf_configs_data_proto_msgTypes,
 	}.Build()
 	File_protobuf_configs_data_proto = out.File

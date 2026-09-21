@@ -16,7 +16,7 @@ func newTestClient(t *testing.T) *Client {
 		t.Fatalf("启动 miniredis 失败: %v", err)
 	}
 	t.Cleanup(mr.Close)
-	client, err := NewClient(Options{Addr: mr.Addr()})
+	client, err := NewClient(Options{Addrs: []string{mr.Addr()}})
 	if err != nil {
 		t.Fatalf("NewClient() 错误 = %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPlayerSessionTTL(t *testing.T) {
 		t.Fatalf("启动 miniredis 失败: %v", err)
 	}
 	t.Cleanup(mr.Close)
-	c, err := NewClient(Options{Addr: mr.Addr()})
+	c, err := NewClient(Options{Addrs: []string{mr.Addr()}})
 	if err != nil {
 		t.Fatalf("NewClient() 错误 = %v", err)
 	}

@@ -24,7 +24,7 @@ const (
 // probeBackends 探测真实 redis/nats；不可用返回 skip 消息。
 func probeBackends(t *testing.T) string {
 	t.Helper()
-	cli, err := pkredis.NewClient(pkredis.Options{Addr: integrationRedisAddr})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{integrationRedisAddr}})
 	if err != nil {
 		return "redis 客户端构造失败: " + err.Error()
 	}

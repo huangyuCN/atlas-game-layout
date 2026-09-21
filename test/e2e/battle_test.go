@@ -168,7 +168,7 @@ func startMatcherForBattle(t *testing.T, ctx context.Context) *matcherassemble.M
 		NodeID:        "matcher-it",
 		EtcdEndpoints: []string{itEtcdEndpoints},
 		NatsURL:       itNatsURL,
-		RedisAddr:     itRedisAddr,
+		RedisAddrs:    []string{itRedisAddr},
 	})
 	if err != nil {
 		t.Fatalf("matcher 装配: %v", err)

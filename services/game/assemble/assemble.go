@@ -31,7 +31,7 @@ type Options struct {
 	NodeID        string
 	EtcdEndpoints []string
 	NatsURL       string
-	RedisAddr     string
+	RedisAddrs    []string
 	MongoURI      string
 	MongoDB       string
 }
@@ -173,7 +173,7 @@ func newBootstrap(o Options) *conf.Bootstrap {
 			Http: &configspb.Server_HTTP{Addr: randomPort},
 		},
 		Data: &configspb.Data{
-			Redis: &configspb.Data_Redis{Addr: o.RedisAddr},
+			Redis: &configspb.Data_Redis{Addrs: o.RedisAddrs},
 			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
 			Mongo: &configspb.Data_Mongo{Uri: o.MongoURI, Database: o.MongoDB},
 		},

@@ -87,7 +87,7 @@ func TestE2EMatcherQueue(t *testing.T) {
 		NodeID:        "matcher-it",
 		EtcdEndpoints: []string{itEtcdEndpoints},
 		NatsURL:       itNatsURL,
-		RedisAddr:     itRedisAddr,
+		RedisAddrs:    []string{itRedisAddr},
 		SinkOverride:  sink,
 	})
 	if err != nil {

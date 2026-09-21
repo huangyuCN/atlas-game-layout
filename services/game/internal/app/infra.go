@@ -8,26 +8,12 @@ import (
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
-	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
 	"github.com/huangyuCN/atlas/metrics"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
-
-// NewRedisClient 装配 redis 客户端（会话令牌 + 玩家快照缓存）。
-func NewRedisClient(cfg *conf.Bootstrap) (*pkredis.Client, error) {
-	opts := pkredis.Options{}
-	if d := cfg.GetData(); d != nil && d.GetRedis() != nil {
-		opts.Addr = d.GetRedis().GetAddr()
-	}
-	cli, err := pkredis.NewClient(opts)
-	if err != nil {
-		return nil, fmt.Errorf("app: 构造 redis 客户端失败: %w", err)
-	}
-	return cli, nil
-}
 
 // NewNatsConn 装配 NATS 连接（actor 集群传输）。
 func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {

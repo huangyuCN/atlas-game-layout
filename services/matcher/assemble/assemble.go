@@ -29,7 +29,7 @@ type Options struct {
 	NodeID        string
 	EtcdEndpoints []string
 	NatsURL       string
-	RedisAddr     string
+	RedisAddrs    []string
 	// SinkOverride 是成局观察方的测试注入点
 	//（nil 时用默认组合：nats 发布 + actor 开局调用，见 internal/app newSink）。
 	SinkOverride biz.MatchEventSink
@@ -146,7 +146,7 @@ func newBootstrap(o Options) *conf.Bootstrap {
 			Http: &configspb.Server_HTTP{Addr: randomPort},
 		},
 		Data: &configspb.Data{
-			Redis: &configspb.Data_Redis{Addr: o.RedisAddr},
+			Redis: &configspb.Data_Redis{Addrs: o.RedisAddrs},
 			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
 		},
 	}

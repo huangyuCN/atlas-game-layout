@@ -91,7 +91,7 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 // newGWEnvMeter 同 newGWEnvWithRedis，但注入指定指标采集器（业务打点断言用）。
 func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Collector) *gwEnv {
 	t.Helper()
-	cli, err := pkredis.NewClient(pkredis.Options{Addr: redisAddr})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{redisAddr}})
 	if err != nil {
 		t.Fatalf("redis client: %v", err)
 	}
