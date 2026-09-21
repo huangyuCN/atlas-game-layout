@@ -1,6 +1,6 @@
-// 公共配置：可观测性（链路追踪 OTLP 导出端点 + 指标暴露）。
-// 空端点 = 不注册 exporter（noop，零开销）；配置后服务侧 span 经 OTLP gRPC
-// 导出到 Tempo/Jaeger 等后端，Grafana 面板查询链路；
+// 公共配置：可观测性（链路追踪 OTLP 导出 + 指标暴露）。
+// 空端点 = 不注册 exporter（noop，零开销）；配置后服务侧 span 经 OTLP 导出到
+// Tempo/Jaeger 等后端（gRPC 或 HTTP，由端点 scheme 决定），Grafana 面板查询链路；
 // 指标经 Prometheus 文本端点暴露，由 Prometheus 抓取、Grafana 面板查询。
 syntax = "proto3";
 
@@ -8,11 +8,27 @@ package atlas.configs;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
 
+// TraceSampler 是链路采样器种类。
+enum TraceSampler {
+  // TRACE_SAMPLER_PARENT_BASED_RATIO 跟随上游采样决策，根 span 按 sample_ratio 抽取（默认）。
+  TRACE_SAMPLER_PARENT_BASED_RATIO = 0;
+  // TRACE_SAMPLER_ALWAYS_ON 全量采集。
+  TRACE_SAMPLER_ALWAYS_ON = 1;
+  // TRACE_SAMPLER_ALWAYS_OFF 全量丢弃。
+  TRACE_SAMPLER_ALWAYS_OFF = 2;
+}
+
 message Observability {
-  // otlp 是 OTLP gRPC 导出端点（host:port，如 127.0.0.1:4317）；空 = 不导出。
+  // otlp 是 OTLP 导出端点，必须带 scheme：
+  // grpc://（明文 gRPC）/ grpcs://（TLS gRPC）/ http://（OTLP/HTTP 明文）/ https://（OTLP/HTTP+TLS）；
+  // http(s) 不带 path 时使用导出器默认路径 /v1/traces。空 = 不导出。
   string otlp = 1;
   // metrics 是指标暴露配置；不配置 = 不暴露任何端点（noop，零开销）。
   Metrics metrics = 2;
+  // sampler 是采样器；不配置 = 跟随父级、根 span 按 sample_ratio 抽取。
+  TraceSampler sampler = 3;
+  // sample_ratio 是采样率（0..1，缺省 1.0）；仅 PARENT_BASED_RATIO 使用。
+  optional double sample_ratio = 4;
 }
 
 // Metrics 是指标暴露配置。

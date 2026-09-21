@@ -302,7 +302,13 @@ func main() {
 	if err := pkglog.Init(pkglog.Options{Service: "e2e", Level: "info", File: "logs/e2e.log"}); err != nil {
 		panic(err)
 	}
-	shutdown, err := observability.InitTracing(context.Background(), "127.0.0.1:4317", "e2e")
+	shutdown, err := observability.InitTracing(context.Background(), observability.TracingOptions{
+		Endpoint:    "grpc://127.0.0.1:4317",
+		ServiceName: "e2e",
+		ServiceID:   "e2e-1",
+		Env:         "test",
+		SampleRatio: 1, // 装置全量采集（库层零值 = 0 表示全丢，必须显式给）
+	})
 	if err != nil {
 		panic(err)
 	}

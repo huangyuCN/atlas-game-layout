@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/huangyuCN/atlas-game-layout/internal/metricstest"
+	"github.com/huangyuCN/atlas-game-layout/pkg/metricstest"
 )
 
 // TestSessionMetricsBindUnbind 验证绑定/解绑驱动绑定计数与本地会话数 gauge。

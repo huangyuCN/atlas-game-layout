@@ -6,8 +6,10 @@ import (
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // GameHandler 是 biz.GameService 的实现：
@@ -24,7 +26,10 @@ func NewGameHandler(players biz.PlayerStateAccess) *GameHandler {
 }
 
 // GetPlayer 实现 biz.GameService（聚合根内存快照）。
-func (h *GameHandler) GetPlayer(ctx context.Context, req *gamev1.GetPlayerRequest) (*gamev1.GetPlayerReply, error) {
+func (h *GameHandler) GetPlayer(ctx context.Context, req *gamev1.GetPlayerRequest) (rep *gamev1.GetPlayerReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "game.Game.GetPlayer",
+		attribute.String("player.id", req.GetPlayerId()))
+	defer func() { observability.EndSpan(span, err) }()
 	summary, err := h.players.GetPlayer(ctx, req.GetPlayerId())
 	if errors.Is(err, repo.ErrPlayerNotFound) {
 		return nil, errorv1.ErrPlayerNotFound("玩家不存在")
@@ -36,7 +41,10 @@ func (h *GameHandler) GetPlayer(ctx context.Context, req *gamev1.GetPlayerReques
 }
 
 // GetBackpack 实现 biz.GameService（聚合根内存快照）。
-func (h *GameHandler) GetBackpack(ctx context.Context, req *gamev1.GetBackpackRequest) (*gamev1.GetBackpackReply, error) {
+func (h *GameHandler) GetBackpack(ctx context.Context, req *gamev1.GetBackpackRequest) (rep *gamev1.GetBackpackReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "game.Game.GetBackpack",
+		attribute.String("player.id", req.GetPlayerId()))
+	defer func() { observability.EndSpan(span, err) }()
 	items, err := h.players.GetBackpack(ctx, req.GetPlayerId())
 	if errors.Is(err, repo.ErrPlayerNotFound) {
 		return nil, errorv1.ErrPlayerNotFound("玩家不存在")
@@ -48,7 +56,11 @@ func (h *GameHandler) GetBackpack(ctx context.Context, req *gamev1.GetBackpackRe
 }
 
 // GrantItem 实现 biz.GameService（聚合根 undo 写）。
-func (h *GameHandler) GrantItem(ctx context.Context, req *gamev1.GrantItemRequest) (*gamev1.GrantItemReply, error) {
+func (h *GameHandler) GrantItem(ctx context.Context, req *gamev1.GrantItemRequest) (rep *gamev1.GrantItemReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "game.Game.GrantItem",
+		attribute.String("player.id", req.GetPlayerId()),
+		attribute.Int("item.id", int(req.GetItemId())))
+	defer func() { observability.EndSpan(span, err) }()
 	if req.GetPlayerId() == "" || req.GetItemId() == 0 || req.GetCount() == 0 {
 		return nil, errorv1.ErrInvalidParams("玩家/道具/数量不能为空")
 	}

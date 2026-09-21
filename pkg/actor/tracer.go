@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	oteladapter "github.com/huangyuCN/atlas/contrib/actor/observe/otel"
 	"go.opentelemetry.io/otel"
@@ -10,6 +11,7 @@ import (
 // 未配置 OTel SDK（exporter）时全局 provider 为 noop——不产生遥测数据、
 // 热路径零开销；开发者按部署配置 exporter（otlp/jaeger 等）注册到全局
 // provider 后自动生效，业务代码与装配无需改动。
+// scope 名统一取 lib/consts.TracerNameActor，便于集中改名。
 func DefaultTracer() core.Tracer {
-	return oteladapter.New(otel.GetTracerProvider().Tracer("atlas-actor"))
+	return oteladapter.New(otel.GetTracerProvider().Tracer(consts.TracerNameActor))
 }

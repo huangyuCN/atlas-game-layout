@@ -9,9 +9,11 @@ import (
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	getlog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/matchmaker"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // partyAttrs 由等级构造匹配属性（属性名 "level"，与单人入队共用约定）。
@@ -34,7 +36,10 @@ func (h *MatcherHandler) publishRoster(ctx context.Context, partyID, leaderID st
 }
 
 // CreateParty 实现 matcherv1.MatcherServer：队长建队。
-func (h *MatcherHandler) CreateParty(ctx context.Context, req *matcherv1.CreatePartyRequest) (*matcherv1.CreatePartyReply, error) {
+func (h *MatcherHandler) CreateParty(ctx context.Context, req *matcherv1.CreatePartyRequest) (rep *matcherv1.CreatePartyReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.CreateParty",
+		attribute.String("player.id", req.GetPlayerId()))
+	defer func() { observability.EndSpan(span, err) }()
 	if h.party == nil {
 		return nil, errorv1.ErrInternal("组队服务不可用")
 	}
@@ -51,7 +56,11 @@ func (h *MatcherHandler) CreateParty(ctx context.Context, req *matcherv1.CreateP
 }
 
 // JoinParty 实现 matcherv1.MatcherServer：按 party_id 加入队伍（容量原子校验）。
-func (h *MatcherHandler) JoinParty(ctx context.Context, req *matcherv1.JoinPartyRequest) (*matcherv1.JoinPartyReply, error) {
+func (h *MatcherHandler) JoinParty(ctx context.Context, req *matcherv1.JoinPartyRequest) (rep *matcherv1.JoinPartyReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.JoinParty",
+		attribute.String("player.id", req.GetPlayerId()),
+		attribute.String("party.id", req.GetPartyId()))
+	defer func() { observability.EndSpan(span, err) }()
 	if h.party == nil {
 		return nil, errorv1.ErrInternal("组队服务不可用")
 	}
@@ -71,7 +80,11 @@ func (h *MatcherHandler) JoinParty(ctx context.Context, req *matcherv1.JoinParty
 
 // LeaveParty 实现 matcherv1.MatcherServer：离开队伍。
 // 若整队正在匹配中：先取消整队票（终态事件异步推送剩余成员），再移出名册。
-func (h *MatcherHandler) LeaveParty(ctx context.Context, req *matcherv1.LeavePartyRequest) (*matcherv1.LeavePartyReply, error) {
+func (h *MatcherHandler) LeaveParty(ctx context.Context, req *matcherv1.LeavePartyRequest) (rep *matcherv1.LeavePartyReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.LeaveParty",
+		attribute.String("player.id", req.GetPlayerId()),
+		attribute.String("party.id", req.GetPartyId()))
+	defer func() { observability.EndSpan(span, err) }()
 	if h.party == nil || h.partyMapper == nil {
 		return nil, errorv1.ErrInternal("组队服务不可用")
 	}
@@ -93,7 +106,10 @@ func (h *MatcherHandler) LeaveParty(ctx context.Context, req *matcherv1.LeavePar
 }
 
 // DescribeParty 实现 matcherv1.MatcherServer：名册快照（轮询兜底）。
-func (h *MatcherHandler) DescribeParty(ctx context.Context, req *matcherv1.DescribePartyRequest) (*matcherv1.PartyInfo, error) {
+func (h *MatcherHandler) DescribeParty(ctx context.Context, req *matcherv1.DescribePartyRequest) (rep *matcherv1.PartyInfo, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.DescribeParty",
+		attribute.String("party.id", req.GetPartyId()))
+	defer func() { observability.EndSpan(span, err) }()
 	if h.party == nil {
 		return nil, errorv1.ErrInternal("组队服务不可用")
 	}
@@ -117,7 +133,11 @@ func (h *MatcherHandler) DescribeParty(ctx context.Context, req *matcherv1.Descr
 }
 
 // QueueParty 实现 matcherv1.MatcherServer：队长发整队入队（1..N 人都可入队）。
-func (h *MatcherHandler) QueueParty(ctx context.Context, req *matcherv1.QueuePartyRequest) (*matcherv1.QueuePartyReply, error) {
+func (h *MatcherHandler) QueueParty(ctx context.Context, req *matcherv1.QueuePartyRequest) (rep *matcherv1.QueuePartyReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.QueueParty",
+		attribute.String("party.id", req.GetPartyId()),
+		attribute.String("ruleset", req.GetRuleset()))
+	defer func() { observability.EndSpan(span, err) }()
 	if h.party == nil || h.partyMapper == nil {
 		return nil, errorv1.ErrInternal("组队服务不可用")
 	}

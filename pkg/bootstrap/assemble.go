@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
@@ -62,9 +63,13 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 		return nil, err
 	}
 
-	// OTLP 链路导出（端点未配置时 noop）：服务停止时 flush 未导出的 span。
-	shutdownTrace, err := observability.InitTracing(context.Background(),
-		like.GetObservability().GetOtlp(), runtime.GetName())
+	// OTLP 链路导出（端点未配置时 noop）：资源带服务身份、采样器与采样率可配；
+	// 服务停止时 flush 未导出的 span。
+	traceOpts, err := tracingOptionsOf(like)
+	if err != nil {
+		return nil, err
+	}
+	shutdownTrace, err := observability.InitTracing(context.Background(), traceOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -89,4 +94,40 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 	}
 	opts = append(opts, extra...)
 	return opts, nil
+}
+
+// defaultSampleRatio 是 sample_ratio 未配置时的默认采样率（全量采集）。
+const defaultSampleRatio = 1.0
+
+// tracingOptionsOf 把 runtime 身份与 observability 配置映射为追踪初始化参数：
+// proto 采样器枚举 → Go 枚举（未知取值快速失败），sample_ratio 缺省 1.0。
+func tracingOptionsOf(like ConfigLike) (observability.TracingOptions, error) {
+	obs := like.GetObservability()
+	sampler, err := traceSamplerOf(obs.GetSampler())
+	if err != nil {
+		return observability.TracingOptions{}, err
+	}
+	ratio := defaultSampleRatio
+	if obs != nil && obs.SampleRatio != nil {
+		ratio = *obs.SampleRatio
+	}
+	runtime := like.GetRuntime()
+	return observability.TracingOptions{
+		Endpoint:       obs.GetOtlp(),
+		ServiceName:    runtime.GetName(),
+		ServiceID:      runtime.GetId(),
+		ServiceVersion: runtime.GetVersion(),
+		Env:            runtime.GetEnv(),
+		Sampler:        sampler,
+		SampleRatio:    ratio,
+	}, nil
+}
+
+// traceSamplerOf 把 proto 采样器枚举映射为 observability.TraceSampler（未知取值报错）。
+func traceSamplerOf(s configspb.TraceSampler) (observability.TraceSampler, error) {
+	return enumconv.Map(s, map[configspb.TraceSampler]observability.TraceSampler{
+		configspb.TraceSampler_TRACE_SAMPLER_PARENT_BASED_RATIO: observability.TraceSamplerParentBasedRatio,
+		configspb.TraceSampler_TRACE_SAMPLER_ALWAYS_ON:          observability.TraceSamplerAlwaysOn,
+		configspb.TraceSampler_TRACE_SAMPLER_ALWAYS_OFF:         observability.TraceSamplerAlwaysOff,
+	}, "采样器")
 }

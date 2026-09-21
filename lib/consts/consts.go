@@ -43,6 +43,14 @@ const (
 	PushOpBattleEnd      = "/battle.v1.BattleEndNotify"
 )
 
+// 链路追踪 instrumentation scope 名（span 归属的库标识，集中管理便于统一改名）。
+const (
+	// TracerNameActor 是 actor 运行时 span 的 scope 名（pkg/actor.DefaultTracer）。
+	TracerNameActor = "atlas-actor"
+	// TracerNameBiz 是 biz 层业务 span 的 scope 名（pkg/observability.StartSpan）。
+	TracerNameBiz = "atlas-biz"
+)
+
 // MatchStartedTopic 返回成局事件主题：atlas.event.match.started。
 func MatchStartedTopic() string { return TopicEvent + "match.started" }
 

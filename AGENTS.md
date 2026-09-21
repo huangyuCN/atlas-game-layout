@@ -84,8 +84,9 @@ atlas-game-layout/              ← Go module: github.com/huangyuCN/atlas-game-l
 │   └── battle/                 ← 战斗（actor + lockstep 会话 + 结算）
 ├── api/                        ← 协议定义（proto + 生成代码），按服务分目录
 ├── lib/                        ← 代码级公共定义（无框架依赖）：consts / idgen / session / errors / gametime
-├── pkg/                        ← 每服务公共装配（fx.Module 化）：actor / redis / nats / mongo / etcd / registry
+├── pkg/                        ← 每服务公共装配与通用工具：actor / redis / nats / mongo / etcd / registry
 │                                / bootstrap（配置+日志+App 组装）/ fxkit（跨服务 fx 泛型）/ serverutil
+│                                / observability（追踪+指标）/ enumconv / metricstest / spanstest
 ├── protobuf/                   ← 内部配置 proto（configs/*）
 ├── deploy/                     ← 中间件 docker-compose
 ├── scripts/e2e                 ← 双客户端闭环脚本（双形态）
@@ -170,9 +171,9 @@ game/battle 的业务 actor（`services/*/internal/actor/`）采用**按域分�
 | `gametime/` | 游戏时间工具 |
 | `metrics/` | 指标定义 |
 
-## pkg/ — 每服务公共装配
+## pkg/ — 每服务公共装配与通用工具
 
-fx.Module 化的可复用装配件，跨服务共享：
+fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通用功能一律放这里**）：
 
 | 子目录 | 职责 |
 |--------|------|
@@ -182,8 +183,11 @@ fx.Module 化的可复用装配件，跨服务共享：
 | `config/` | 配置加载 |
 | `log/` | 日志装配 |
 | `bootstrap/` | 配置加载 + 日志 + App 组装（进程形态样板）|
-| `fxkit/` | 跨服务 fx 泛型提供器 |
+| `fxkit/` | 跨服务 fx 泛型提供器（含配置 → client 映射）|
 | `serverutil/` | 传输层 Server 装配辅助 |
+| `observability/` | 链路追踪/指标初始化与 biz 层 span 辅助（StartSpan/EndSpan）|
+| `enumconv/` | proto 枚举 → Go 枚举映射辅助（未登记取值报错）|
+| `metricstest/` `spanstest/` | 测试装置：指标记录器 / 内存 span 导出器 |
 
 > 依赖分层：`lib/` < `pkg/` < `services/*/internal/*` < `assemble`。
 > `pkg/` 可依赖 Atlas 与 cow（装配层允许）；`lib/` 不依赖框架。

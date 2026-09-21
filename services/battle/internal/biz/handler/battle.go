@@ -8,7 +8,9 @@ import (
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // BattleHandler 是战斗管理 grpc 实现：
@@ -33,7 +35,10 @@ func battlePID(battleID string) (types.PID, error) {
 }
 
 // CreateBattle 实现 grpc：开局（matcher 成局后也可直接 actor 调用）。
-func (h *BattleHandler) CreateBattle(ctx context.Context, req *battlev1.CreateBattleRequest) (*battlev1.CreateBattleReply, error) {
+func (h *BattleHandler) CreateBattle(ctx context.Context, req *battlev1.CreateBattleRequest) (rep *battlev1.CreateBattleReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "battle.Battle.CreateBattle",
+		attribute.String("match.id", req.GetMatchId()))
+	defer func() { observability.EndSpan(span, err) }()
 	pid, err := battlePID(req.GetMatchId())
 	if err != nil {
 		return nil, err
@@ -46,7 +51,10 @@ func (h *BattleHandler) CreateBattle(ctx context.Context, req *battlev1.CreateBa
 }
 
 // GetBattle 实现 grpc：状态查询。
-func (h *BattleHandler) GetBattle(ctx context.Context, req *battlev1.GetBattleRequest) (*battlev1.GetBattleReply, error) {
+func (h *BattleHandler) GetBattle(ctx context.Context, req *battlev1.GetBattleRequest) (rep *battlev1.GetBattleReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "battle.Battle.GetBattle",
+		attribute.String("battle.id", req.GetBattleId()))
+	defer func() { observability.EndSpan(span, err) }()
 	pid, err := battlePID(req.GetBattleId())
 	if err != nil {
 		return nil, err

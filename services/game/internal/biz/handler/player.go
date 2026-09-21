@@ -8,11 +8,13 @@ import (
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/idgen"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/usecase"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/models"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // PlayerHandler 是 biz.PlayerService 的实现（注册/登录）。
@@ -32,7 +34,10 @@ func NewPlayerHandler(store repo.PlayerRepo, opts biz.PlayerServiceOptions) *Pla
 }
 
 // Register 实现 biz.PlayerService（两段式：建号回执，不建会话）。
-func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterReq) (*gamev1.RegisterReply, error) {
+func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterReq) (rep *gamev1.RegisterReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "game.Player.Register",
+		attribute.String("player.account", req.GetAccount()))
+	defer func() { observability.EndSpan(span, err) }()
 	if req.GetAccount() == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("账号与口令不能为空")
 	}
@@ -68,7 +73,10 @@ func (h *PlayerHandler) Register(ctx context.Context, req *gamev1.RegisterReq) (
 // （actor 持聚合根，登录时 LoadPlayer 一次）：biz 只校验凭据，不做选源——
 // 避免一次登录双份选源读取与两遍对齐补写，也避免与「redis/mongo 不可用拒登」
 // 的决策相冲突（选源失败必须在调用方显式失败，不能退回 mongo 数据继续登录）。
-func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginReq) (*gamev1.LoginReply, error) {
+func (h *PlayerHandler) Login(ctx context.Context, req *gamev1.LoginReq) (rep *gamev1.LoginReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "game.Player.Login",
+		attribute.String("player.id", req.GetPlayerId()))
+	defer func() { observability.EndSpan(span, err) }()
 	if req.GetPlayerId() == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("玩家与口令不能为空")
 	}

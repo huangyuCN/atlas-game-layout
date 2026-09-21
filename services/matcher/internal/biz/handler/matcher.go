@@ -9,8 +9,10 @@ import (
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/idgen"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas/matchmaker"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // ticketTTL 是玩家→ticket 映射与结算去重的租期（与 matchmaker 后端 ticket TTL 对齐）。
@@ -54,7 +56,11 @@ func NewMatcherHandler(d MatcherDeps) *MatcherHandler {
 }
 
 // QueueMatch 实现 biz.MatcherService：组装属性快照 ticket 入队并监听成局事件。
-func (h *MatcherHandler) QueueMatch(ctx context.Context, req *matcherv1.QueueMatchRequest) (*matcherv1.QueueMatchReply, error) {
+func (h *MatcherHandler) QueueMatch(ctx context.Context, req *matcherv1.QueueMatchRequest) (rep *matcherv1.QueueMatchReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.QueueMatch",
+		attribute.String("player.id", req.GetPlayerId()),
+		attribute.String("ruleset", req.GetRuleset()))
+	defer func() { observability.EndSpan(span, err) }()
 	if req.GetPlayerId() == "" {
 		return nil, errorv1.ErrInvalidParams("玩家不能为空")
 	}
@@ -92,7 +98,10 @@ func (h *MatcherHandler) QueueMatch(ctx context.Context, req *matcherv1.QueueMat
 }
 
 // CancelMatch 实现 biz.MatcherService：按玩家定位 ticket 并取消。
-func (h *MatcherHandler) CancelMatch(ctx context.Context, req *matcherv1.CancelMatchRequest) (*matcherv1.CancelMatchReply, error) {
+func (h *MatcherHandler) CancelMatch(ctx context.Context, req *matcherv1.CancelMatchRequest) (rep *matcherv1.CancelMatchReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.CancelMatch",
+		attribute.String("player.id", req.GetPlayerId()))
+	defer func() { observability.EndSpan(span, err) }()
 	ticketID, err := h.mapper.Get(ctx, req.GetPlayerId())
 	if err != nil {
 		return nil, errorv1.ErrInternal("查询匹配映射失败")
@@ -110,7 +119,10 @@ func (h *MatcherHandler) CancelMatch(ctx context.Context, req *matcherv1.CancelM
 }
 
 // QueryMatch 实现 biz.MatcherService：映射 + 后端状态联合判定。
-func (h *MatcherHandler) QueryMatch(ctx context.Context, req *matcherv1.QueryMatchRequest) (*matcherv1.QueryMatchReply, error) {
+func (h *MatcherHandler) QueryMatch(ctx context.Context, req *matcherv1.QueryMatchRequest) (rep *matcherv1.QueryMatchReply, err error) {
+	ctx, span := observability.StartSpan(ctx, "matcher.Matcher.QueryMatch",
+		attribute.String("player.id", req.GetPlayerId()))
+	defer func() { observability.EndSpan(span, err) }()
 	ticketID, err := h.mapper.Get(ctx, req.GetPlayerId())
 	if err != nil {
 		return nil, errorv1.ErrInternal("查询匹配映射失败")

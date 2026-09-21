@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/huangyuCN/atlas-game-layout/internal/metricstest"
+	"github.com/huangyuCN/atlas-game-layout/pkg/metricstest"
 	"github.com/huangyuCN/atlas/metrics"
 )
 

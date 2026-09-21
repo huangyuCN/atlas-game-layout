@@ -1,6 +1,8 @@
 runtime:
   name: gateway
   id: gateway-1
+  version: 0.1.0   # 进链路资源 service.version（Grafana 按版本区分）
+  env: test        # 进链路资源 deployment.environment.name
 registry:
   etcd:
     endpoints:
@@ -30,9 +32,10 @@ kcp:
 udp:
   addr: 0.0.0.0:9004
 
-# 可观测性：OTLP 链路导出端点（Tempo 的 gRPC 端口；空或不配 = noop 不导出）
+# 可观测性：OTLP 链路导出端点（必须带 scheme：grpc/grpcs/http/https；空或不配 = noop 不导出）
 # 与 Prometheus 抓取端点（prometheus 服务经 host.docker.internal 抓取；空或不配 = noop）。
+# 采样：sampler 缺省跟随父级、根 span 按 sample_ratio 抽取（sample_ratio 缺省 1.0）。
 observability:
-  otlp: 127.0.0.1:4317
+  otlp: grpc://127.0.0.1:4317
   metrics:
     prometheus: 0.0.0.0:9151

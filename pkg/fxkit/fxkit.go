@@ -8,6 +8,7 @@ package fxkit
 import (
 	"fmt"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
@@ -100,14 +101,9 @@ func NewRedisClient[B WithData](cfg B) (*pkredis.Client, error) {
 
 // redisModeOf 把 proto 形态枚举映射为 redis.Mode；未知取值快速失败。
 func redisModeOf(m configspb.Data_RedisMode) (pkredis.Mode, error) {
-	switch m {
-	case configspb.Data_REDIS_MODE_SINGLE:
-		return pkredis.ModeSingle, nil
-	case configspb.Data_REDIS_MODE_SENTINEL:
-		return pkredis.ModeSentinel, nil
-	case configspb.Data_REDIS_MODE_CLUSTER:
-		return pkredis.ModeCluster, nil
-	default:
-		return 0, fmt.Errorf("redis: 未知配置形态 %d", int32(m))
-	}
+	return enumconv.Map(m, map[configspb.Data_RedisMode]pkredis.Mode{
+		configspb.Data_REDIS_MODE_SINGLE:   pkredis.ModeSingle,
+		configspb.Data_REDIS_MODE_SENTINEL: pkredis.ModeSentinel,
+		configspb.Data_REDIS_MODE_CLUSTER:  pkredis.ModeCluster,
+	}, "redis 配置形态")
 }
