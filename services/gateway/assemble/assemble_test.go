@@ -30,10 +30,10 @@ func TestNewBootstrap(t *testing.T) {
 	}
 	// 进程内形态四协议与 http 监听地址固定随机端口。
 	for name, got := range map[string]string{
-		"tcp":       cfg.GetTcp().GetAddr(),
-		"websocket": cfg.GetWebsocket().GetAddr(),
-		"kcp":       cfg.GetKcp().GetAddr(),
-		"udp":       cfg.GetUdp().GetAddr(),
+		"tcp":       cfg.GetServer().GetTcp().GetAddr(),
+		"websocket": cfg.GetServer().GetWebsocket().GetAddr(),
+		"kcp":       cfg.GetServer().GetKcp().GetAddr(),
+		"udp":       cfg.GetServer().GetUdp().GetAddr(),
 		"grpc":      cfg.GetServer().GetGrpc().GetAddr(),
 		"http":      cfg.GetServer().GetHttp().GetAddr(),
 	} {

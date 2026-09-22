@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/huangyuCN/atlas"
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/huangyuCN/atlas/transport"
@@ -108,8 +109,8 @@ func New(p Params, o Options) (Result, error) {
 	if o.Version != "" {
 		opts = append(opts, atlas.Version(o.Version))
 	}
-	if len(p.Servers) > 0 {
-		opts = append(opts, atlas.Server(p.Servers...))
+	if servers := serverutil.ActiveServers(p.Servers); len(servers) > 0 {
+		opts = append(opts, atlas.Server(servers...))
 	}
 	if p.Registrar != nil {
 		opts = append(opts, atlas.Registrar(p.Registrar))

@@ -1,4 +1,6 @@
-// gateway 服务配置：引用公共配置消息 + 多协议接入端口。
+// gateway 服务配置：引用公共配置消息。
+// 四协议接入参数在 atlas.configs.Server 的 tcp/websocket/kcp/udp 四节
+// （不配该节 = 该协议不启用：不监听端口、不注册 handler）。
 syntax = "proto3";
 
 package gateway.conf;
@@ -18,15 +20,6 @@ message Bootstrap {
   atlas.configs.Server server = 3;
   atlas.configs.Data data = 4;
   atlas.configs.Log log = 5;
-
-  // Net 是客户端接入协议的监听地址（M4 里程碑启用）。
-  message Net {
-    string addr = 1;
-  }
-  Net tcp = 10;
-  Net websocket = 11;
-  Net kcp = 12;
-  Net udp = 13;
   // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
   atlas.configs.Observability observability = 14;
 }

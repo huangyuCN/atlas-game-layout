@@ -72,10 +72,12 @@ type serverSet struct {
 	fx.Out
 
 	HTTP transport.Server `group:"servers"`
-	TCP  transport.Server `group:"servers"`
-	WS   transport.Server `group:"servers"`
-	KCP  transport.Server `group:"servers"`
-	UDP  transport.Server `group:"servers"`
+	// 业务四协议按配置可选：未启用的协议为 nil（fx 值组不允许 optional，
+	// 故由 pkg/bootstrap.activeServers 在消费侧过滤——nil 进 atlas.App 会 panic）。
+	TCP transport.Server `group:"servers"`
+	WS  transport.Server `group:"servers"`
+	KCP transport.Server `group:"servers"`
+	UDP transport.Server `group:"servers"`
 }
 
 // newServerSet 聚合五协议 Server 到 servers 组与嵌入式子组。
@@ -88,16 +90,16 @@ func newServerSet(
 	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
 ) serverSet {
 	set := serverSet{HTTP: httpSrv}
-	if cfg.GetTcp() != nil {
+	if cfg.TCPEnabled() {
 		set.TCP = tcpSrv
 	}
-	if cfg.GetWebsocket() != nil {
+	if cfg.WebSocketEnabled() {
 		set.WS = wsSrv
 	}
-	if cfg.GetKcp() != nil {
+	if cfg.KCPEnabled() {
 		set.KCP = kcpSrv
 	}
-	if cfg.GetUdp() != nil {
+	if cfg.UDPEnabled() {
 		set.UDP = udpSrv
 	}
 	return set

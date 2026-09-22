@@ -93,3 +93,26 @@ func TestBootRequiresEndpoints(t *testing.T) {
 		t.Fatal("Boot 失败后应回收已启动的服务端")
 	}
 }
+
+// TestBootToleratesDisabledServers 验证值组里的 nil（未启用的协议）不阻断启停：
+// 装配层按配置节裁剪协议时 nil 仍留在值组里，若直接交给 atlas.App 会对着空服务端
+// 调 Start 而 panic（协议裁剪形态起不来）。
+func TestBootToleratesDisabledServers(t *testing.T) {
+	httpSrv, err := atlashttp.NewServer(atlashttp.WithAddress("127.0.0.1:0"))
+	if err != nil {
+		t.Fatalf("构造 HTTP 服务端失败: %v", err)
+	}
+	cfg := &testBootstrap{Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1"}}
+
+	var h bootHandles
+	inst, urls, err := Boot(context.Background(), cfg, serveGroup(nil, httpSrv), &h, "http")
+	if err != nil {
+		t.Fatalf("Boot() 错误 = %v", err)
+	}
+	if urls["http"] == nil {
+		t.Fatalf("端点归集不符合预期: %v", urls)
+	}
+	if err := inst.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() 错误 = %v", err)
+	}
+}

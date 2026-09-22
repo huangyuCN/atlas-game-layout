@@ -37,11 +37,25 @@ func WaitEndpoint(srv transport.Endpointer, timeout time.Duration) (*url.URL, er
 	}
 }
 
+// ActiveServers 过滤未启用的服务端：fx 值组里 nil 代表「该协议未启用」
+// （装配层按配置节裁剪，如网关只声明部分接入协议）；nil 不能进 atlas.App，
+// 否则会对着空服务端调 Start 而 panic。
+func ActiveServers(servers []transport.Server) []transport.Server {
+	out := make([]transport.Server, 0, len(servers))
+	for _, srv := range servers {
+		if srv != nil {
+			out = append(out, srv)
+		}
+	}
+	return out
+}
+
 // Endpoints 按 scheme 归集已启动服务端的就绪端点，返回 scheme → 完整 URL
 // （fx 值组不保证提供顺序，不能依赖下标；WS 等带路径的协议需要完整 URL）。
 // 服务端必须实现 transport.Endpointer：拿不到端点意味着无法对外寻址，属装配错误，
 // 直接报错而不是静默跳过。
 func Endpoints(servers []transport.Server) (map[string]*url.URL, error) {
+	servers = ActiveServers(servers)
 	out := make(map[string]*url.URL, len(servers))
 	for i, srv := range servers {
 		ep, ok := srv.(transport.Endpointer)

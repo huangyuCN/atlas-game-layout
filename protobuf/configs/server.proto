@@ -70,6 +70,108 @@ message Server {
     // tls 是 TLS 配置；不配 = 明文。
     TLS tls = 7;
   }
+  // TCP 是 TCP 业务通道启动参数（客户端长连接接入）。
+  message TCP {
+    // addr 是监听地址 host:port；空 = 随机端口。
+    string addr = 1;
+    // no_delay 是否关闭 Nagle 算法（TCP_NODELAY）；未设置 = 底层默认。
+    optional bool no_delay = 2;
+    // read_buffer 是读缓冲字节数；0 = 底层默认。
+    int32 read_buffer = 3;
+    // write_buffer 是写缓冲字节数；0 = 底层默认。
+    int32 write_buffer = 4;
+    // keep_alive 是 TCP keepalive 间隔（如 30s）；空 = 底层默认。
+    string keep_alive = 5;
+    // pool_size 是读写缓冲池大小；0 = 底层默认。
+    int32 pool_size = 6;
+    // idle_timeout 是连接空闲超时（如 60s）；空 = 不限。
+    string idle_timeout = 7;
+    // write_timeout 是单次写超时；空 = 不限。
+    string write_timeout = 8;
+    // max_conns 是最大并发连接数；0 = 不限。
+    int32 max_conns = 9;
+    // max_body_size 是单帧最大字节数；0 = 底层默认。
+    int64 max_body_size = 10;
+    // tls 是 TLS 配置；不配 = 明文。
+    TLS tls = 11;
+  }
+  // WebSocket 是 WebSocket 单通道启动参数（业务与战斗共用一条连接）。
+  message WebSocket {
+    // addr 是监听地址 host:port；空 = 随机端口。
+    string addr = 1;
+    // path 是 WS 挂载路径（如 /ws）；空 = "/"。
+    string path = 2;
+    // pool_size 是读写缓冲池大小；0 = 底层默认。
+    int32 pool_size = 3;
+    // read_buffer 是读缓冲字节数（与 write_buffer 成对，对应底层 BufferSize）；0 = 底层默认。
+    int32 read_buffer = 4;
+    // write_buffer 是写缓冲字节数；0 = 底层默认。
+    int32 write_buffer = 5;
+    // idle_timeout 是连接空闲超时；空 = 不限。
+    string idle_timeout = 6;
+    // write_timeout 是单次写超时；空 = 不限。
+    string write_timeout = 7;
+    // read_limit 是单条消息读上限（字节）；0 = 底层默认。
+    int64 read_limit = 8;
+    // max_conns 是最大并发连接数；0 = 不限。
+    int32 max_conns = 9;
+    // max_body_size 是单帧最大字节数；0 = 底层默认。
+    int64 max_body_size = 10;
+    // subprotocols 是协商的子协议列表；空 = 不限定。
+    repeated string subprotocols = 11;
+    // tls 是 TLS 配置；不配 = 明文。
+    TLS tls = 12;
+  }
+  // KCP 是 KCP 战斗通道启动参数（可靠 UDP）。
+  message KCP {
+    // addr 是监听地址 host:port；空 = 随机端口。
+    string addr = 1;
+    // block_crypt 是加密口令（字节数不足底层最小长度会启动失败）；空 = 不加密。
+    string block_crypt = 2;
+    // fec_data_shards 是 FEC 数据分片数（与 fec_parity_shards 必须成对配置）。
+    int32 fec_data_shards = 3;
+    // fec_parity_shards 是 FEC 校验分片数。
+    int32 fec_parity_shards = 4;
+    // mtu 是最大传输单元（字节）；0 = 底层默认。
+    int32 mtu = 5;
+    // window_snd 是发送窗口大小（与 window_rcv 必须成对配置）。
+    int32 window_snd = 6;
+    // window_rcv 是接收窗口大小。
+    int32 window_rcv = 7;
+    // fast_profile 启用低延迟预设（nodelay/interval/resend/nc）；显式参数优先于预设。
+    bool fast_profile = 8;
+    // lan_profile 启用局域网预设；显式参数优先于预设。
+    bool lan_profile = 9;
+    // max_body_size 是单帧最大字节数；0 = 底层默认。
+    int64 max_body_size = 10;
+    // idle_timeout 是连接空闲超时；空 = 不限。
+    string idle_timeout = 11;
+    // write_timeout 是单次写超时；空 = 不限。
+    string write_timeout = 12;
+    // max_conns 是最大并发连接数；0 = 不限。
+    int32 max_conns = 13;
+  }
+  // UDP 是 UDP 战斗通道启动参数（不可靠、低延迟）。
+  message UDP {
+    // addr 是监听地址 host:port；空 = 随机端口。
+    string addr = 1;
+    // pool_size 是读写缓冲池大小；0 = 底层默认。
+    int32 pool_size = 2;
+    // read_buffer 是单包读缓冲字节数；0 = 底层默认。
+    int32 read_buffer = 3;
+    // max_body_size 是单包最大字节数；0 = 底层默认。
+    int64 max_body_size = 4;
+    // idle_timeout 是对端空闲超时；空 = 不限。
+    string idle_timeout = 5;
+    // max_peers 是最大对端数；0 = 不限。
+    int32 max_peers = 6;
+  }
   GRPC grpc = 1;
   HTTP http = 2;
+  // tcp/websocket/kcp/udp 是客户端接入通道：不配该节 = 该协议不启用
+  // （网关只启动与注册已声明的协议）。
+  TCP tcp = 3;
+  WebSocket websocket = 4;
+  KCP kcp = 5;
+  UDP udp = 6;
 }

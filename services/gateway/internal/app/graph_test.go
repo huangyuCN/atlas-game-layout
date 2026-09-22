@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"github.com/huangyuCN/atlas/metrics"
@@ -30,5 +31,43 @@ func TestGraphStaticValidation(t *testing.T) {
 		)),
 	); err != nil {
 		t.Fatalf("依赖图静态校验失败: %v", err)
+	}
+}
+
+// TestNewServerSetTrimsDisabledProtocols 验证协议裁剪：未声明（server.<proto> 缺失）的协议
+// 不进 servers 值组——nil 进组会让 atlas.App 对着空服务端调 Start 而 panic。
+func TestNewServerSetTrimsDisabledProtocols(t *testing.T) {
+	cfg := &conf.Bootstrap{Server: &configspb.Server{
+		Http:      &configspb.Server_HTTP{Addr: "127.0.0.1:0"},
+		Tcp:       &configspb.Server_TCP{Addr: "127.0.0.1:0"},
+		Websocket: &configspb.Server_WebSocket{Addr: "127.0.0.1:0"},
+	}}
+	httpSrv, err := serverutil.HTTPServer(cfg.GetServer().GetHttp(), nil, nil)
+	if err != nil {
+		t.Fatalf("构造 HTTP 服务端失败: %v", err)
+	}
+	tcpSrv, err := serverutil.TCPServer(cfg.GetServer().GetTcp())
+	if err != nil {
+		t.Fatalf("构造 TCP 服务端失败: %v", err)
+	}
+	wsSrv, err := serverutil.WSServer(cfg.GetServer().GetWebsocket())
+	if err != nil {
+		t.Fatalf("构造 WebSocket 服务端失败: %v", err)
+	}
+	kcpSrv, err := serverutil.KCPServer(cfg.GetServer().GetKcp())
+	if err != nil {
+		t.Fatalf("构造 KCP 服务端失败: %v", err)
+	}
+	udpSrv, err := serverutil.UDPServer(cfg.GetServer().GetUdp())
+	if err != nil {
+		t.Fatalf("构造 UDP 服务端失败: %v", err)
+	}
+
+	set := newServerSet(cfg, httpSrv, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	if set.HTTP == nil || set.TCP == nil || set.WS == nil {
+		t.Fatalf("已声明协议应进启停组: %+v", set)
+	}
+	if set.KCP != nil || set.UDP != nil {
+		t.Fatalf("未声明协议不应进启停组: kcp=%v udp=%v", set.KCP, set.UDP)
 	}
 }

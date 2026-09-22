@@ -185,7 +185,7 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 | `log/` | 日志装配 |
 | `bootstrap/` | 配置加载 + 日志 + App 组装；`ModuleFor`/`ModuleForEmbedded` 提供 App 模块（进程/进程内两形态共用同一启停路径），`Boot` 以进程内形态启动依赖图并归集端点；回填 `runtime.id`（缺省主机名）与 `runtime.env`（缺省 `default`），并把注册失败升级为启动失败 |
 | `fxkit/` | 跨服务 fx 泛型提供器（含配置 → client 映射；注册中心构造统一走 `RegistryOptions`）|
-| `serverutil/` | 传输层装配辅助：`server.proto` 配置 → Server 构造与选项映射（`HTTPServer`/`GRPCServer`/`HTTPOptions`/`GRPCOptions`/`TLSConfig`）+ 统一 `/health`（`HealthHandler`）+ 端点归集/就绪探测（`Endpoints`/`WaitEndpoint`）|
+| `serverutil/` | 传输层装配辅助：`server.proto` 配置 → 六协议 Server 构造与选项映射（`HTTPServer`/`GRPCServer`/`TCPServer`/`WSServer`/`KCPServer`/`UDPServer` 及对应 `*Options`、`TLSConfig`）+ 统一 `/health`（`HealthHandler`）+ 端点归集/就绪探测（`Endpoints`/`WaitEndpoint`）|
 | `middleware/` | 中间件/过滤器默认链与注入点（服务端 tracing→logging→metrics、客户端 tracing、HTTP filters），业务用 `fx.Decorate` 追加 |
 | `observability/` | 链路追踪/指标初始化与 biz 层 span 辅助（StartSpan/EndSpan）|
 | `enumconv/` | proto 枚举 → Go 枚举映射辅助（未登记取值报错）|
@@ -209,9 +209,11 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 - 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的前缀**（如 `/atlas/services/it-<纳秒>`）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。
 - 实例键冲突（`registry.ErrInstanceConflict`）会让进程**启动失败退出**：同一实例 ID 的旧进程仍在运行、或异常退出后租约尚未过期（TTL 15s）都会命中，等租约过期后重启即可。**不要**改 ID 绕过——那正是要防的静默顶替。
 
-### 传输层启动参数（HTTP / gRPC）
+### 传输层启动参数（gRPC / HTTP / TCP / WebSocket / KCP / UDP）
 
-- 全部启动参数在 `protobuf/configs/server.proto` 罗列（两端各有 `network`/`addr`/`timeout`/`tls`，gRPC 另有 `stream_timeout`/`max_recv_msg_size`/`reflection`/`metadata`/`admin`，HTTP 另有 `path_prefix`/`strict_slash`/`max_request_body`）；配置 → 选项的映射只此一份：`pkg/serverutil` 的 `HTTPOptions`/`GRPCOptions`/`TLSConfig`，服务端构造走 `HTTPServer`/`GRPCServer`。
+- **六协议的启动参数全部在 `protobuf/configs/server.proto` 罗列**：gRPC（`stream_timeout`/`max_recv_msg_size`/`reflection`/`metadata`/`admin`）、HTTP（`path_prefix`/`strict_slash`/`max_request_body`）、TCP（`no_delay`/读写缓冲/`keep_alive`/`pool_size`/`idle_timeout`/`write_timeout`/`max_conns`/`max_body_size`/`tls`）、WebSocket（`path`/`pool_size`/`buffer_size`/`read_limit`/`subprotocols`/`tls` 等）、KCP（`idle_timeout`/`write_timeout`/`max_conns`）、UDP（`pool_size`/`idle_timeout`/`max_peers`）；两端共有 `network`/`addr`/`timeout`/`tls`（KCP/UDP 无 TLS）。函数值项（`WithCheckOrigin`/`WithCodec`/`WithMiddleware`）配置表达不了，不进配置面。
+- 配置 → 选项 → 构造只此一份：`pkg/serverutil` 的 `*Options` + `*Server`（`HTTPOptions`/`GRPCOptions`/`TCPOptions`/`WSOptions`/`KCPOptions`/`UDPOptions` 与对应构造器），服务侧只写「构造 + 注册 handler」。
+- **网关的接入协议按节启用**：`server.tcp`/`server.websocket`/`server.kcp`/`server.udp` 不配该节 = 该协议不启用（不监听端口、不注册 handler），模板按部署形态只暴露需要的通道。
 - **空值 = 交给底层默认**：字符串为空、数值为 0、`optional` 字段未设置，都不追加对应选项——避免「不配就变行为」与「配了等于没配」。`strict_slash` 因此必须是 `optional bool`（底层默认 true，proto3 的 bool 默认 false）；`network` 是 `optional Server.Network` 枚举（语义有限值不散落字符串，映射见 `pkg/serverutil.networkOf`）。
 - 时长字段一律字符串（`config.ParseDuration`，如 `30s`），解析失败在启动期报错；`registry.ttl` 同格式。
 - 服务端构造函数返回具体类型（`*atlashttp.Server` / `*atlasgrpc.Server`），fx 图必须用 `fx.As(new(transport.Server))` 才能按接口进 `servers` 组。

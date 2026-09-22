@@ -1,4 +1,4 @@
-# 传输层启动参数与构造对齐设计（HTTP / gRPC）
+# 传输层启动参数与构造对齐设计（gRPC / HTTP / TCP / WebSocket / KCP / UDP）
 
 - 日期：2026-09-21
 - 状态：已定稿（使用者确认：构造补齐全部启动参数 + 返回具体类型 + 统一 `/health` + 进程内形态改走 atlas.App；
@@ -102,6 +102,67 @@ message Server {
 
 `registry.proto` 的 `optional int32 ttl_seconds = 3` 改为 `string ttl = 3`（如 `15s`，空 = atlas 默认 15s）。
 
+第三轮补齐四个客户端接入协议（同一套约定：空/0/未设 = 交给底层默认，时长 string，函数值项不列）：
+
+```proto
+message Server {
+  message TCP {
+    string addr = 1;
+    optional bool no_delay = 2;   // 未设置 = 底层默认
+    int32 read_buffer = 3;        // 0 = 底层默认
+    int32 write_buffer = 4;
+    string keep_alive = 5;        // 空 = 底层默认
+    int32 pool_size = 6;
+    string idle_timeout = 7;      // 空 = 不限
+    string write_timeout = 8;
+    int32 max_conns = 9;          // 0 = 不限
+    int64 max_body_size = 10;
+    TLS tls = 11;
+  }
+  message WebSocket {
+    string addr = 1;
+    string path = 2;              // 空 = "/"
+    int32 pool_size = 3;
+    int32 read_buffer = 4;        // 与 write_buffer 必须成对配置
+    int32 write_buffer = 5;
+    string idle_timeout = 6;
+    string write_timeout = 7;
+    int64 read_limit = 8;
+    int32 max_conns = 9;
+    int64 max_body_size = 10;
+    repeated string subprotocols = 11;
+    TLS tls = 12;
+  }
+  message KCP {
+    string addr = 1;
+    string block_crypt = 2;         // 加密口令；空 = 不加密
+    int32 fec_data_shards = 3;      // 与 fec_parity_shards 必须成对
+    int32 fec_parity_shards = 4;
+    int32 mtu = 5;
+    int32 window_snd = 6;           // 与 window_rcv 必须成对
+    int32 window_rcv = 7;
+    bool fast_profile = 8;          // 预设；显式参数优先
+    bool lan_profile = 9;
+    int64 max_body_size = 10;
+    string idle_timeout = 11;
+    string write_timeout = 12;
+    int32 max_conns = 13;
+  }
+  message UDP {
+    string addr = 1;
+    int32 pool_size = 2;
+    int32 read_buffer = 3;
+    int64 max_body_size = 4;
+    string idle_timeout = 5;
+    int32 max_peers = 6;
+  }
+  GRPC grpc = 1; HTTP http = 2;
+  TCP tcp = 3; WebSocket websocket = 4; KCP kcp = 5; UDP udp = 6;
+}
+```
+
+网关侧语义：四个接入协议**不配该节 = 该协议不启用**（不监听端口、不注册 handler）。
+
 ## 4. 装配辅助（`pkg/serverutil`）
 
 | 函数 | 职责 |
@@ -112,6 +173,8 @@ message Server {
 | `GRPCServer(*configspb.Server_GRPC, Middlewares) (*atlasgrpc.Server, error)` | 同上（gRPC）；同一链同时挂一元与流式 |
 | `Network`（Go 枚举）+ `networkOf(*configspb.Server_Network) (string, error)` | proto 网络枚举 → `net.Listen` 网络名；未设置返回空串（用底层默认），未登记取值报错 |
 | `TLSConfig(*configspb.Server_TLS) (*tls.Config, error)` | `enabled=false` 或 nil → 返回 nil（不启用）；否则读证书/私钥；`ca_file` + `client_auth=true` → `ClientCAs` + `RequireAndVerifyClientCert`；**配了 `ca_file` 但未强制时 → `VerifyClientCertIfGiven`**（给了客户端证书就校验、不给也放行——若置 `NoClientCert`，配的 CA 会被完全忽略，正是要避免的「配了等于没配」）；文件缺失或解析失败报错；`MinVersion` 固定 TLS 1.2（不提供配置项避免误配）|
+| `TCPOptions`/`WSOptions`/`KCPOptions`/`UDPOptions` 与 `TCPServer`/`WSServer`/`KCPServer`/`UDPServer` | 四协议的同构映射与构造：空值不覆盖；时长经 `durationOptions` 批量解析（空 = 默认，非法/非正报错）、数值经 `intOptions`（0 = 默认，**负数报错**——静默忽略等于「配了不生效」）、底层「一个选项吃两个值」的成对项经 `pairOption`（都未配 = 不覆盖，只配一侧 = 配置错误，KCP 的 FEC/窗口）；WS 读写缓冲底层按侧独立生效，故只配一侧合法；预设（KCP fast/lan profile）先挂、显式参数随后追加（同项以显式值为准）；TCP/WS 的 TLS 复用 `TLSConfig`（KCP/UDP 无 TLS 能力）|
+| `netServer` | 四协议服务端构造骨架：配置节缺失 = 该协议未启用 → 返回 `nil`（不是错误），由装配层按「nil = 未启用」决定不进启停组；`ActiveServers` 统一在消费侧过滤组内 nil（nil 进 atlas.App 会对着空服务端调 Start 而 panic）|
 | `HealthHandler(service string) http.HandlerFunc` | 统一健康检查：`Content-Type: application/json` + `{"status":"ok","service":"<name>"}` |
 | ~~`ServeAsync`~~ | 第二轮已删除（两形态改由 atlas.App 启停，见 §6）|
 
@@ -189,6 +252,9 @@ fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`g
 - `serverutil.HTTPServer` / `GRPCServer` 增加 `Middlewares` / `Filters` 参数。
 - `repo.NewMatchQueueGRPC` / `newMatchQueueClient` 增加 `serverutil.ClientMiddlewares` 参数。
 - 网关 `newServerSet` 首参类型变化（内部函数）。
+- **网关四协议配置迁移**：`services/gateway/internal/conf/conf.proto` 的 `Bootstrap.Net` 与顶层
+  `tcp`/`websocket`/`kcp`/`udp` 字段删除，配置改到 `server.tcp`/`server.websocket`/`server.kcp`/`server.udp`
+  （语义不变：不配该节 = 该协议不启用）。
 - 第二轮另有：删除 `pkg/serverutil.ServeAsync` 与网关 `embed_servers` 组、`scripts/e2e` 去掉手工注册。
 
 ## 8. 验证计划
@@ -227,3 +293,38 @@ TLS 文件缺失报错、`HealthHandler` 输出。
 - 评审修正：`Instance.Stop` 改为等到服务端真正停止（`App.Stop` 只触发停机，`server.Stop` 跑在 Run 的 errgroup 里，
   不等会出现「Stop 返回了但端口还没关」，实测 6 次 1 次失败）；scheme 字面量收敛为 `serverutil.Scheme*` 常量；
   删除与 `transport.Endpointer` 同形的本包类型；atlas `Run()` 抽出 `startServers`/`watchSignals`（74 → 40 行，符合 ≤50 行规范）。
+
+### 8.3 第三轮实施结果（TCP / WebSocket / KCP / UDP 配置面）
+
+- 单测：`pkg/serverutil` 新增六项——四协议空值不追加选项（含 nil 配置节）、时长合法/非法、
+  WS 读写缓冲必须成对、TCP/WS 的 TLS 映射、四协议构造器可用、**协议未配置时仍能构造**
+  （服务端构造要求非空地址，故用占位地址 `0.0.0.0:0`）；`pkg/bootstrap` 新增
+  `TestBootToleratesDisabledServers`（值组里的 nil 不阻断启停）。
+- 服务器（10.10.9.36）实测：
+  - **协议裁剪生效**：只配 `server.tcp` + `server.websocket` 的实例仅监听 19601/19602/19680，
+    KCP/UDP 无监听（`ss -lntup` 核对）。
+  - **参数真的用起来**：`server.websocket.path: /ws` → `/` 返回 404、`/ws` 返回 400（非握手）；
+    `server.tcp.max_conns: 1` → 并发开 3 条连接仅保留 1 条 ESTABLISHED。
+  - 常驻四服务（四协议全开）监听 tcp 9001 / ws 9002 / kcp udp 9003 / udp udp 9004；
+    `test/e2e` 12/12 PASS；`scripts/e2e -mode dual` 闭环通过；Prometheus 5/5 targets up。
+- **实施期发现并修复的既有 bug**：协议未启用时 `serverSet` 仍往 fx 值组塞 `nil`，
+  `atlas.App` 会对着空服务端调 `Start` 而 panic——**任何裁剪掉某协议的部署形态都起不来**。
+  fx 值组不允许 `optional` 字段（`value groups cannot be optional`），故在消费侧过滤：
+  `pkg/bootstrap.activeServers`（进 App 前剔除 nil）+ `serverutil.Endpoints`（归集端点时跳过 nil）。
+  该 bug 在改动前就存在（旧 `serverSet` 同形），本次由「只配两个协议」的验证配置暴露。
+
+- **独立评审修正**（两轴评审后逐条处理）：
+  - **补齐漏项**：KCP 补 `block_crypt`/`fec_data_shards`/`fec_parity_shards`/`mtu`/`window_snd`/`window_rcv`/
+    `fast_profile`/`lan_profile`/`max_body_size`，UDP 补 `read_buffer`/`max_body_size`
+    （上一轮侦察只匹配了返回 `ServerOption` 的构造器，漏掉返回 `SharedOption` 的那一类）。
+  - **WS 读写缓冲不再强制成对**：atlas 的 `withBufferSize` 对读写两侧各自 `>0` 才覆盖，
+    自造的成对约束与「空/0/未设 = 交给底层默认」冲突。
+  - **负数报错**：数值字段为负此前被 `>0` 静默跳过（配了等于没配），改由 `intOptions` 统一校验。
+  - **协议启用判定收口**：`services/gateway/internal/conf` 新增 `TCPEnabled()`/`WebSocketEnabled()`/
+    `KCPEnabled()`/`UDPEnabled()`，装配层（进启停组）与 server 层（注册 handler）共用，
+    原先两处各写一遍 `GetServer().GetXxx() != nil`。
+  - **nil 过滤统一**：`serverutil.ActiveServers` 一处实现，`bootstrap.New` 与 `Endpoints` 共用。
+  - **取消占位地址**：配置节缺失时构造器直接返回 `(nil, nil)`（原先为「未启用也构造出占位服务端」，
+    属投机性设计，且与本包 `HTTPOptions`/`GRPCOptions` 的空值语义不一致）。
+  - 新增单测：`TestNetOptionsIntValidation`、`TestWSOptionsBuffer`、`TestKCPOptionsPairsAndPresets`、
+    `TestWSServerAppliesPath`（path 参数真的落到端点）、`TestNewServerSetTrimsDisabledProtocols`（协议裁剪回归）。

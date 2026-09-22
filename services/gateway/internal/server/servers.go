@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
@@ -11,56 +12,25 @@ import (
 	wst "github.com/huangyuCN/atlas/transport/websocket"
 )
 
-// NewTCPServer 构造 TCP 业务通道服务端。
+// NewTCPServer 构造 TCP 业务通道服务端（启动参数全部来自 server.tcp 配置）。
 func NewTCPServer(cfg *conf.Bootstrap) (*tcpt.Server, error) {
-	addr := "0.0.0.0:0"
-	if n := cfg.GetTcp(); n != nil && n.GetAddr() != "" {
-		addr = n.GetAddr()
-	}
-	srv, err := tcpt.NewServer(tcpt.WithAddress(addr))
-	if err != nil {
-		return nil, fmt.Errorf("server: 构造 TCP 服务端失败: %w", err)
-	}
-	return srv, nil
+	return serverutil.TCPServer(cfg.GetServer().GetTcp())
 }
 
-// NewWSServer 构造 WebSocket 服务端（单通道形态同时承载业务与战斗协议）。
+// NewWSServer 构造 WebSocket 服务端（单通道形态同时承载业务与战斗协议；
+// 启动参数全部来自 server.websocket 配置）。
 func NewWSServer(cfg *conf.Bootstrap) (*wst.Server, error) {
-	addr := "0.0.0.0:0"
-	if n := cfg.GetWebsocket(); n != nil && n.GetAddr() != "" {
-		addr = n.GetAddr()
-	}
-	srv, err := wst.NewServer(wst.WithAddress(addr))
-	if err != nil {
-		return nil, fmt.Errorf("server: 构造 WebSocket 服务端失败: %w", err)
-	}
-	return srv, nil
+	return serverutil.WSServer(cfg.GetServer().GetWebsocket())
 }
 
-// NewKCPServer 构造 KCP 战斗通道服务端。
+// NewKCPServer 构造 KCP 战斗通道服务端（启动参数全部来自 server.kcp 配置）。
 func NewKCPServer(cfg *conf.Bootstrap) (*kcpt.Server, error) {
-	addr := "0.0.0.0:0"
-	if n := cfg.GetKcp(); n != nil && n.GetAddr() != "" {
-		addr = n.GetAddr()
-	}
-	srv, err := kcpt.NewServer(kcpt.WithAddress(addr))
-	if err != nil {
-		return nil, fmt.Errorf("server: 构造 KCP 服务端失败: %w", err)
-	}
-	return srv, nil
+	return serverutil.KCPServer(cfg.GetServer().GetKcp())
 }
 
-// NewUDPServer 构造 UDP 战斗通道服务端。
+// NewUDPServer 构造 UDP 战斗通道服务端（启动参数全部来自 server.udp 配置）。
 func NewUDPServer(cfg *conf.Bootstrap) (*udpt.Server, error) {
-	addr := "0.0.0.0:0"
-	if n := cfg.GetUdp(); n != nil && n.GetAddr() != "" {
-		addr = n.GetAddr()
-	}
-	srv, err := udpt.NewServer(udpt.WithAddress(addr))
-	if err != nil {
-		return nil, fmt.Errorf("server: 构造 UDP 服务端失败: %w", err)
-	}
-	return srv, nil
+	return serverutil.UDPServer(cfg.GetServer().GetUdp())
 }
 
 // RegisterGatewayHandlers 将会话生命周期与透传引擎注册到各协议 Server：
@@ -72,7 +42,7 @@ func NewUDPServer(cfg *conf.Bootstrap) (*udpt.Server, error) {
 func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server, g *Gateway) error {
 	// 会话接口统一打点装饰（自留接口与透传共用 gateway_requests_total）。
 	sess := newMeteredSession(g, g.meter)
-	if cfg.GetTcp() != nil {
+	if cfg.TCPEnabled() {
 		if err := gatewayv1.RegisterSessionTCPServer(tcpSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 TCP 会话协议失败: %w", err)
 		}
@@ -80,7 +50,7 @@ func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *ws
 			return fmt.Errorf("server: 注册 TCP 透传路由失败: %w", err)
 		}
 	}
-	if cfg.GetWebsocket() != nil {
+	if cfg.WebSocketEnabled() {
 		if err := gatewayv1.RegisterSessionWSServer(wsSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 WS 会话协议失败: %w", err)
 		}
@@ -88,7 +58,7 @@ func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *ws
 			return fmt.Errorf("server: 注册 WS 透传路由失败: %w", err)
 		}
 	}
-	if cfg.GetKcp() != nil {
+	if cfg.KCPEnabled() {
 		if err := gatewayv1.RegisterSessionKCPServer(kcpSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 KCP 会话协议失败: %w", err)
 		}
@@ -96,7 +66,7 @@ func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *ws
 			return fmt.Errorf("server: 注册 KCP 透传路由失败: %w", err)
 		}
 	}
-	if cfg.GetUdp() != nil {
+	if cfg.UDPEnabled() {
 		if err := gatewayv1.RegisterSessionUDPServer(udpSrv, sess); err != nil {
 			return fmt.Errorf("server: 注册 UDP 会话协议失败: %w", err)
 		}

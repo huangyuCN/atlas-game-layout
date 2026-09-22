@@ -85,9 +85,15 @@ func (Server_Network) EnumDescriptor() ([]byte, []int) {
 }
 
 type Server struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Grpc          *Server_GRPC           `protobuf:"bytes,1,opt,name=grpc,proto3" json:"grpc,omitempty"`
-	Http          *Server_HTTP           `protobuf:"bytes,2,opt,name=http,proto3" json:"http,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Grpc  *Server_GRPC           `protobuf:"bytes,1,opt,name=grpc,proto3" json:"grpc,omitempty"`
+	Http  *Server_HTTP           `protobuf:"bytes,2,opt,name=http,proto3" json:"http,omitempty"`
+	// tcp/websocket/kcp/udp 是客户端接入通道：不配该节 = 该协议不启用
+	// （网关只启动与注册已声明的协议）。
+	Tcp           *Server_TCP       `protobuf:"bytes,3,opt,name=tcp,proto3" json:"tcp,omitempty"`
+	Websocket     *Server_WebSocket `protobuf:"bytes,4,opt,name=websocket,proto3" json:"websocket,omitempty"`
+	Kcp           *Server_KCP       `protobuf:"bytes,5,opt,name=kcp,proto3" json:"kcp,omitempty"`
+	Udp           *Server_UDP       `protobuf:"bytes,6,opt,name=udp,proto3" json:"udp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -132,6 +138,34 @@ func (x *Server) GetGrpc() *Server_GRPC {
 func (x *Server) GetHttp() *Server_HTTP {
 	if x != nil {
 		return x.Http
+	}
+	return nil
+}
+
+func (x *Server) GetTcp() *Server_TCP {
+	if x != nil {
+		return x.Tcp
+	}
+	return nil
+}
+
+func (x *Server) GetWebsocket() *Server_WebSocket {
+	if x != nil {
+		return x.Websocket
+	}
+	return nil
+}
+
+func (x *Server) GetKcp() *Server_KCP {
+	if x != nil {
+		return x.Kcp
+	}
+	return nil
+}
+
+func (x *Server) GetUdp() *Server_UDP {
+	if x != nil {
+		return x.Udp
 	}
 	return nil
 }
@@ -434,14 +468,544 @@ func (x *Server_HTTP) GetTls() *Server_TLS {
 	return nil
 }
 
+// TCP 是 TCP 业务通道启动参数（客户端长连接接入）。
+type Server_TCP struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// addr 是监听地址 host:port；空 = 随机端口。
+	Addr string `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
+	// no_delay 是否关闭 Nagle 算法（TCP_NODELAY）；未设置 = 底层默认。
+	NoDelay *bool `protobuf:"varint,2,opt,name=no_delay,json=noDelay,proto3,oneof" json:"no_delay,omitempty"`
+	// read_buffer 是读缓冲字节数；0 = 底层默认。
+	ReadBuffer int32 `protobuf:"varint,3,opt,name=read_buffer,json=readBuffer,proto3" json:"read_buffer,omitempty"`
+	// write_buffer 是写缓冲字节数；0 = 底层默认。
+	WriteBuffer int32 `protobuf:"varint,4,opt,name=write_buffer,json=writeBuffer,proto3" json:"write_buffer,omitempty"`
+	// keep_alive 是 TCP keepalive 间隔（如 30s）；空 = 底层默认。
+	KeepAlive string `protobuf:"bytes,5,opt,name=keep_alive,json=keepAlive,proto3" json:"keep_alive,omitempty"`
+	// pool_size 是读写缓冲池大小；0 = 底层默认。
+	PoolSize int32 `protobuf:"varint,6,opt,name=pool_size,json=poolSize,proto3" json:"pool_size,omitempty"`
+	// idle_timeout 是连接空闲超时（如 60s）；空 = 不限。
+	IdleTimeout string `protobuf:"bytes,7,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
+	// write_timeout 是单次写超时；空 = 不限。
+	WriteTimeout string `protobuf:"bytes,8,opt,name=write_timeout,json=writeTimeout,proto3" json:"write_timeout,omitempty"`
+	// max_conns 是最大并发连接数；0 = 不限。
+	MaxConns int32 `protobuf:"varint,9,opt,name=max_conns,json=maxConns,proto3" json:"max_conns,omitempty"`
+	// max_body_size 是单帧最大字节数；0 = 底层默认。
+	MaxBodySize int64 `protobuf:"varint,10,opt,name=max_body_size,json=maxBodySize,proto3" json:"max_body_size,omitempty"`
+	// tls 是 TLS 配置；不配 = 明文。
+	Tls           *Server_TLS `protobuf:"bytes,11,opt,name=tls,proto3" json:"tls,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Server_TCP) Reset() {
+	*x = Server_TCP{}
+	mi := &file_protobuf_configs_server_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Server_TCP) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Server_TCP) ProtoMessage() {}
+
+func (x *Server_TCP) ProtoReflect() protoreflect.Message {
+	mi := &file_protobuf_configs_server_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Server_TCP.ProtoReflect.Descriptor instead.
+func (*Server_TCP) Descriptor() ([]byte, []int) {
+	return file_protobuf_configs_server_proto_rawDescGZIP(), []int{0, 3}
+}
+
+func (x *Server_TCP) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *Server_TCP) GetNoDelay() bool {
+	if x != nil && x.NoDelay != nil {
+		return *x.NoDelay
+	}
+	return false
+}
+
+func (x *Server_TCP) GetReadBuffer() int32 {
+	if x != nil {
+		return x.ReadBuffer
+	}
+	return 0
+}
+
+func (x *Server_TCP) GetWriteBuffer() int32 {
+	if x != nil {
+		return x.WriteBuffer
+	}
+	return 0
+}
+
+func (x *Server_TCP) GetKeepAlive() string {
+	if x != nil {
+		return x.KeepAlive
+	}
+	return ""
+}
+
+func (x *Server_TCP) GetPoolSize() int32 {
+	if x != nil {
+		return x.PoolSize
+	}
+	return 0
+}
+
+func (x *Server_TCP) GetIdleTimeout() string {
+	if x != nil {
+		return x.IdleTimeout
+	}
+	return ""
+}
+
+func (x *Server_TCP) GetWriteTimeout() string {
+	if x != nil {
+		return x.WriteTimeout
+	}
+	return ""
+}
+
+func (x *Server_TCP) GetMaxConns() int32 {
+	if x != nil {
+		return x.MaxConns
+	}
+	return 0
+}
+
+func (x *Server_TCP) GetMaxBodySize() int64 {
+	if x != nil {
+		return x.MaxBodySize
+	}
+	return 0
+}
+
+func (x *Server_TCP) GetTls() *Server_TLS {
+	if x != nil {
+		return x.Tls
+	}
+	return nil
+}
+
+// WebSocket 是 WebSocket 单通道启动参数（业务与战斗共用一条连接）。
+type Server_WebSocket struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// addr 是监听地址 host:port；空 = 随机端口。
+	Addr string `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
+	// path 是 WS 挂载路径（如 /ws）；空 = "/"。
+	Path string `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	// pool_size 是读写缓冲池大小；0 = 底层默认。
+	PoolSize int32 `protobuf:"varint,3,opt,name=pool_size,json=poolSize,proto3" json:"pool_size,omitempty"`
+	// read_buffer 是读缓冲字节数（与 write_buffer 成对，对应底层 BufferSize）；0 = 底层默认。
+	ReadBuffer int32 `protobuf:"varint,4,opt,name=read_buffer,json=readBuffer,proto3" json:"read_buffer,omitempty"`
+	// write_buffer 是写缓冲字节数；0 = 底层默认。
+	WriteBuffer int32 `protobuf:"varint,5,opt,name=write_buffer,json=writeBuffer,proto3" json:"write_buffer,omitempty"`
+	// idle_timeout 是连接空闲超时；空 = 不限。
+	IdleTimeout string `protobuf:"bytes,6,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
+	// write_timeout 是单次写超时；空 = 不限。
+	WriteTimeout string `protobuf:"bytes,7,opt,name=write_timeout,json=writeTimeout,proto3" json:"write_timeout,omitempty"`
+	// read_limit 是单条消息读上限（字节）；0 = 底层默认。
+	ReadLimit int64 `protobuf:"varint,8,opt,name=read_limit,json=readLimit,proto3" json:"read_limit,omitempty"`
+	// max_conns 是最大并发连接数；0 = 不限。
+	MaxConns int32 `protobuf:"varint,9,opt,name=max_conns,json=maxConns,proto3" json:"max_conns,omitempty"`
+	// max_body_size 是单帧最大字节数；0 = 底层默认。
+	MaxBodySize int64 `protobuf:"varint,10,opt,name=max_body_size,json=maxBodySize,proto3" json:"max_body_size,omitempty"`
+	// subprotocols 是协商的子协议列表；空 = 不限定。
+	Subprotocols []string `protobuf:"bytes,11,rep,name=subprotocols,proto3" json:"subprotocols,omitempty"`
+	// tls 是 TLS 配置；不配 = 明文。
+	Tls           *Server_TLS `protobuf:"bytes,12,opt,name=tls,proto3" json:"tls,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Server_WebSocket) Reset() {
+	*x = Server_WebSocket{}
+	mi := &file_protobuf_configs_server_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Server_WebSocket) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Server_WebSocket) ProtoMessage() {}
+
+func (x *Server_WebSocket) ProtoReflect() protoreflect.Message {
+	mi := &file_protobuf_configs_server_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Server_WebSocket.ProtoReflect.Descriptor instead.
+func (*Server_WebSocket) Descriptor() ([]byte, []int) {
+	return file_protobuf_configs_server_proto_rawDescGZIP(), []int{0, 4}
+}
+
+func (x *Server_WebSocket) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *Server_WebSocket) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *Server_WebSocket) GetPoolSize() int32 {
+	if x != nil {
+		return x.PoolSize
+	}
+	return 0
+}
+
+func (x *Server_WebSocket) GetReadBuffer() int32 {
+	if x != nil {
+		return x.ReadBuffer
+	}
+	return 0
+}
+
+func (x *Server_WebSocket) GetWriteBuffer() int32 {
+	if x != nil {
+		return x.WriteBuffer
+	}
+	return 0
+}
+
+func (x *Server_WebSocket) GetIdleTimeout() string {
+	if x != nil {
+		return x.IdleTimeout
+	}
+	return ""
+}
+
+func (x *Server_WebSocket) GetWriteTimeout() string {
+	if x != nil {
+		return x.WriteTimeout
+	}
+	return ""
+}
+
+func (x *Server_WebSocket) GetReadLimit() int64 {
+	if x != nil {
+		return x.ReadLimit
+	}
+	return 0
+}
+
+func (x *Server_WebSocket) GetMaxConns() int32 {
+	if x != nil {
+		return x.MaxConns
+	}
+	return 0
+}
+
+func (x *Server_WebSocket) GetMaxBodySize() int64 {
+	if x != nil {
+		return x.MaxBodySize
+	}
+	return 0
+}
+
+func (x *Server_WebSocket) GetSubprotocols() []string {
+	if x != nil {
+		return x.Subprotocols
+	}
+	return nil
+}
+
+func (x *Server_WebSocket) GetTls() *Server_TLS {
+	if x != nil {
+		return x.Tls
+	}
+	return nil
+}
+
+// KCP 是 KCP 战斗通道启动参数（可靠 UDP）。
+type Server_KCP struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// addr 是监听地址 host:port；空 = 随机端口。
+	Addr string `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
+	// block_crypt 是加密口令（字节数不足底层最小长度会启动失败）；空 = 不加密。
+	BlockCrypt string `protobuf:"bytes,2,opt,name=block_crypt,json=blockCrypt,proto3" json:"block_crypt,omitempty"`
+	// fec_data_shards 是 FEC 数据分片数（与 fec_parity_shards 必须成对配置）。
+	FecDataShards int32 `protobuf:"varint,3,opt,name=fec_data_shards,json=fecDataShards,proto3" json:"fec_data_shards,omitempty"`
+	// fec_parity_shards 是 FEC 校验分片数。
+	FecParityShards int32 `protobuf:"varint,4,opt,name=fec_parity_shards,json=fecParityShards,proto3" json:"fec_parity_shards,omitempty"`
+	// mtu 是最大传输单元（字节）；0 = 底层默认。
+	Mtu int32 `protobuf:"varint,5,opt,name=mtu,proto3" json:"mtu,omitempty"`
+	// window_snd 是发送窗口大小（与 window_rcv 必须成对配置）。
+	WindowSnd int32 `protobuf:"varint,6,opt,name=window_snd,json=windowSnd,proto3" json:"window_snd,omitempty"`
+	// window_rcv 是接收窗口大小。
+	WindowRcv int32 `protobuf:"varint,7,opt,name=window_rcv,json=windowRcv,proto3" json:"window_rcv,omitempty"`
+	// fast_profile 启用低延迟预设（nodelay/interval/resend/nc）；显式参数优先于预设。
+	FastProfile bool `protobuf:"varint,8,opt,name=fast_profile,json=fastProfile,proto3" json:"fast_profile,omitempty"`
+	// lan_profile 启用局域网预设；显式参数优先于预设。
+	LanProfile bool `protobuf:"varint,9,opt,name=lan_profile,json=lanProfile,proto3" json:"lan_profile,omitempty"`
+	// max_body_size 是单帧最大字节数；0 = 底层默认。
+	MaxBodySize int64 `protobuf:"varint,10,opt,name=max_body_size,json=maxBodySize,proto3" json:"max_body_size,omitempty"`
+	// idle_timeout 是连接空闲超时；空 = 不限。
+	IdleTimeout string `protobuf:"bytes,11,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
+	// write_timeout 是单次写超时；空 = 不限。
+	WriteTimeout string `protobuf:"bytes,12,opt,name=write_timeout,json=writeTimeout,proto3" json:"write_timeout,omitempty"`
+	// max_conns 是最大并发连接数；0 = 不限。
+	MaxConns      int32 `protobuf:"varint,13,opt,name=max_conns,json=maxConns,proto3" json:"max_conns,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Server_KCP) Reset() {
+	*x = Server_KCP{}
+	mi := &file_protobuf_configs_server_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Server_KCP) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Server_KCP) ProtoMessage() {}
+
+func (x *Server_KCP) ProtoReflect() protoreflect.Message {
+	mi := &file_protobuf_configs_server_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Server_KCP.ProtoReflect.Descriptor instead.
+func (*Server_KCP) Descriptor() ([]byte, []int) {
+	return file_protobuf_configs_server_proto_rawDescGZIP(), []int{0, 5}
+}
+
+func (x *Server_KCP) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *Server_KCP) GetBlockCrypt() string {
+	if x != nil {
+		return x.BlockCrypt
+	}
+	return ""
+}
+
+func (x *Server_KCP) GetFecDataShards() int32 {
+	if x != nil {
+		return x.FecDataShards
+	}
+	return 0
+}
+
+func (x *Server_KCP) GetFecParityShards() int32 {
+	if x != nil {
+		return x.FecParityShards
+	}
+	return 0
+}
+
+func (x *Server_KCP) GetMtu() int32 {
+	if x != nil {
+		return x.Mtu
+	}
+	return 0
+}
+
+func (x *Server_KCP) GetWindowSnd() int32 {
+	if x != nil {
+		return x.WindowSnd
+	}
+	return 0
+}
+
+func (x *Server_KCP) GetWindowRcv() int32 {
+	if x != nil {
+		return x.WindowRcv
+	}
+	return 0
+}
+
+func (x *Server_KCP) GetFastProfile() bool {
+	if x != nil {
+		return x.FastProfile
+	}
+	return false
+}
+
+func (x *Server_KCP) GetLanProfile() bool {
+	if x != nil {
+		return x.LanProfile
+	}
+	return false
+}
+
+func (x *Server_KCP) GetMaxBodySize() int64 {
+	if x != nil {
+		return x.MaxBodySize
+	}
+	return 0
+}
+
+func (x *Server_KCP) GetIdleTimeout() string {
+	if x != nil {
+		return x.IdleTimeout
+	}
+	return ""
+}
+
+func (x *Server_KCP) GetWriteTimeout() string {
+	if x != nil {
+		return x.WriteTimeout
+	}
+	return ""
+}
+
+func (x *Server_KCP) GetMaxConns() int32 {
+	if x != nil {
+		return x.MaxConns
+	}
+	return 0
+}
+
+// UDP 是 UDP 战斗通道启动参数（不可靠、低延迟）。
+type Server_UDP struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// addr 是监听地址 host:port；空 = 随机端口。
+	Addr string `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
+	// pool_size 是读写缓冲池大小；0 = 底层默认。
+	PoolSize int32 `protobuf:"varint,2,opt,name=pool_size,json=poolSize,proto3" json:"pool_size,omitempty"`
+	// read_buffer 是单包读缓冲字节数；0 = 底层默认。
+	ReadBuffer int32 `protobuf:"varint,3,opt,name=read_buffer,json=readBuffer,proto3" json:"read_buffer,omitempty"`
+	// max_body_size 是单包最大字节数；0 = 底层默认。
+	MaxBodySize int64 `protobuf:"varint,4,opt,name=max_body_size,json=maxBodySize,proto3" json:"max_body_size,omitempty"`
+	// idle_timeout 是对端空闲超时；空 = 不限。
+	IdleTimeout string `protobuf:"bytes,5,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
+	// max_peers 是最大对端数；0 = 不限。
+	MaxPeers      int32 `protobuf:"varint,6,opt,name=max_peers,json=maxPeers,proto3" json:"max_peers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Server_UDP) Reset() {
+	*x = Server_UDP{}
+	mi := &file_protobuf_configs_server_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Server_UDP) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Server_UDP) ProtoMessage() {}
+
+func (x *Server_UDP) ProtoReflect() protoreflect.Message {
+	mi := &file_protobuf_configs_server_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Server_UDP.ProtoReflect.Descriptor instead.
+func (*Server_UDP) Descriptor() ([]byte, []int) {
+	return file_protobuf_configs_server_proto_rawDescGZIP(), []int{0, 6}
+}
+
+func (x *Server_UDP) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *Server_UDP) GetPoolSize() int32 {
+	if x != nil {
+		return x.PoolSize
+	}
+	return 0
+}
+
+func (x *Server_UDP) GetReadBuffer() int32 {
+	if x != nil {
+		return x.ReadBuffer
+	}
+	return 0
+}
+
+func (x *Server_UDP) GetMaxBodySize() int64 {
+	if x != nil {
+		return x.MaxBodySize
+	}
+	return 0
+}
+
+func (x *Server_UDP) GetIdleTimeout() string {
+	if x != nil {
+		return x.IdleTimeout
+	}
+	return ""
+}
+
+func (x *Server_UDP) GetMaxPeers() int32 {
+	if x != nil {
+		return x.MaxPeers
+	}
+	return 0
+}
+
 var File_protobuf_configs_server_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_server_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotobuf/configs/server.proto\x12\ratlas.configs\"\xd2\a\n" +
+	"\x1dprotobuf/configs/server.proto\x12\ratlas.configs\"\x93\x14\n" +
 	"\x06Server\x12.\n" +
 	"\x04grpc\x18\x01 \x01(\v2\x1a.atlas.configs.Server.GRPCR\x04grpc\x12.\n" +
-	"\x04http\x18\x02 \x01(\v2\x1a.atlas.configs.Server.HTTPR\x04http\x1a\x91\x01\n" +
+	"\x04http\x18\x02 \x01(\v2\x1a.atlas.configs.Server.HTTPR\x04http\x12+\n" +
+	"\x03tcp\x18\x03 \x01(\v2\x19.atlas.configs.Server.TCPR\x03tcp\x12=\n" +
+	"\twebsocket\x18\x04 \x01(\v2\x1f.atlas.configs.Server.WebSocketR\twebsocket\x12+\n" +
+	"\x03kcp\x18\x05 \x01(\v2\x19.atlas.configs.Server.KCPR\x03kcp\x12+\n" +
+	"\x03udp\x18\x06 \x01(\v2\x19.atlas.configs.Server.UDPR\x03udp\x1a\x91\x01\n" +
 	"\x03TLS\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1b\n" +
 	"\tcert_file\x18\x02 \x01(\tR\bcertFile\x12\x19\n" +
@@ -474,7 +1038,66 @@ const file_protobuf_configs_server_proto_rawDesc = "" +
 	"\x03tls\x18\a \x01(\v2\x19.atlas.configs.Server.TLSR\x03tlsB\n" +
 	"\n" +
 	"\b_networkB\x0f\n" +
-	"\r_strict_slash\"P\n" +
+	"\r_strict_slash\x1a\xfc\x02\n" +
+	"\x03TCP\x12\x12\n" +
+	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x1e\n" +
+	"\bno_delay\x18\x02 \x01(\bH\x00R\anoDelay\x88\x01\x01\x12\x1f\n" +
+	"\vread_buffer\x18\x03 \x01(\x05R\n" +
+	"readBuffer\x12!\n" +
+	"\fwrite_buffer\x18\x04 \x01(\x05R\vwriteBuffer\x12\x1d\n" +
+	"\n" +
+	"keep_alive\x18\x05 \x01(\tR\tkeepAlive\x12\x1b\n" +
+	"\tpool_size\x18\x06 \x01(\x05R\bpoolSize\x12!\n" +
+	"\fidle_timeout\x18\a \x01(\tR\vidleTimeout\x12#\n" +
+	"\rwrite_timeout\x18\b \x01(\tR\fwriteTimeout\x12\x1b\n" +
+	"\tmax_conns\x18\t \x01(\x05R\bmaxConns\x12\"\n" +
+	"\rmax_body_size\x18\n" +
+	" \x01(\x03R\vmaxBodySize\x12+\n" +
+	"\x03tls\x18\v \x01(\v2\x19.atlas.configs.Server.TLSR\x03tlsB\v\n" +
+	"\t_no_delay\x1a\x8d\x03\n" +
+	"\tWebSocket\x12\x12\n" +
+	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1b\n" +
+	"\tpool_size\x18\x03 \x01(\x05R\bpoolSize\x12\x1f\n" +
+	"\vread_buffer\x18\x04 \x01(\x05R\n" +
+	"readBuffer\x12!\n" +
+	"\fwrite_buffer\x18\x05 \x01(\x05R\vwriteBuffer\x12!\n" +
+	"\fidle_timeout\x18\x06 \x01(\tR\vidleTimeout\x12#\n" +
+	"\rwrite_timeout\x18\a \x01(\tR\fwriteTimeout\x12\x1d\n" +
+	"\n" +
+	"read_limit\x18\b \x01(\x03R\treadLimit\x12\x1b\n" +
+	"\tmax_conns\x18\t \x01(\x05R\bmaxConns\x12\"\n" +
+	"\rmax_body_size\x18\n" +
+	" \x01(\x03R\vmaxBodySize\x12\"\n" +
+	"\fsubprotocols\x18\v \x03(\tR\fsubprotocols\x12+\n" +
+	"\x03tls\x18\f \x01(\v2\x19.atlas.configs.Server.TLSR\x03tls\x1a\xab\x03\n" +
+	"\x03KCP\x12\x12\n" +
+	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x1f\n" +
+	"\vblock_crypt\x18\x02 \x01(\tR\n" +
+	"blockCrypt\x12&\n" +
+	"\x0ffec_data_shards\x18\x03 \x01(\x05R\rfecDataShards\x12*\n" +
+	"\x11fec_parity_shards\x18\x04 \x01(\x05R\x0ffecParityShards\x12\x10\n" +
+	"\x03mtu\x18\x05 \x01(\x05R\x03mtu\x12\x1d\n" +
+	"\n" +
+	"window_snd\x18\x06 \x01(\x05R\twindowSnd\x12\x1d\n" +
+	"\n" +
+	"window_rcv\x18\a \x01(\x05R\twindowRcv\x12!\n" +
+	"\ffast_profile\x18\b \x01(\bR\vfastProfile\x12\x1f\n" +
+	"\vlan_profile\x18\t \x01(\bR\n" +
+	"lanProfile\x12\"\n" +
+	"\rmax_body_size\x18\n" +
+	" \x01(\x03R\vmaxBodySize\x12!\n" +
+	"\fidle_timeout\x18\v \x01(\tR\vidleTimeout\x12#\n" +
+	"\rwrite_timeout\x18\f \x01(\tR\fwriteTimeout\x12\x1b\n" +
+	"\tmax_conns\x18\r \x01(\x05R\bmaxConns\x1a\xbb\x01\n" +
+	"\x03UDP\x12\x12\n" +
+	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x1b\n" +
+	"\tpool_size\x18\x02 \x01(\x05R\bpoolSize\x12\x1f\n" +
+	"\vread_buffer\x18\x03 \x01(\x05R\n" +
+	"readBuffer\x12\"\n" +
+	"\rmax_body_size\x18\x04 \x01(\x03R\vmaxBodySize\x12!\n" +
+	"\fidle_timeout\x18\x05 \x01(\tR\vidleTimeout\x12\x1b\n" +
+	"\tmax_peers\x18\x06 \x01(\x05R\bmaxPeers\"P\n" +
 	"\aNetwork\x12\x0f\n" +
 	"\vNETWORK_TCP\x10\x00\x12\x10\n" +
 	"\fNETWORK_TCP4\x10\x01\x12\x10\n" +
@@ -494,26 +1117,36 @@ func file_protobuf_configs_server_proto_rawDescGZIP() []byte {
 }
 
 var file_protobuf_configs_server_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protobuf_configs_server_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_protobuf_configs_server_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_protobuf_configs_server_proto_goTypes = []any{
-	(Server_Network)(0), // 0: atlas.configs.Server.Network
-	(*Server)(nil),      // 1: atlas.configs.Server
-	(*Server_TLS)(nil),  // 2: atlas.configs.Server.TLS
-	(*Server_GRPC)(nil), // 3: atlas.configs.Server.GRPC
-	(*Server_HTTP)(nil), // 4: atlas.configs.Server.HTTP
+	(Server_Network)(0),      // 0: atlas.configs.Server.Network
+	(*Server)(nil),           // 1: atlas.configs.Server
+	(*Server_TLS)(nil),       // 2: atlas.configs.Server.TLS
+	(*Server_GRPC)(nil),      // 3: atlas.configs.Server.GRPC
+	(*Server_HTTP)(nil),      // 4: atlas.configs.Server.HTTP
+	(*Server_TCP)(nil),       // 5: atlas.configs.Server.TCP
+	(*Server_WebSocket)(nil), // 6: atlas.configs.Server.WebSocket
+	(*Server_KCP)(nil),       // 7: atlas.configs.Server.KCP
+	(*Server_UDP)(nil),       // 8: atlas.configs.Server.UDP
 }
 var file_protobuf_configs_server_proto_depIdxs = []int32{
-	3, // 0: atlas.configs.Server.grpc:type_name -> atlas.configs.Server.GRPC
-	4, // 1: atlas.configs.Server.http:type_name -> atlas.configs.Server.HTTP
-	0, // 2: atlas.configs.Server.GRPC.network:type_name -> atlas.configs.Server.Network
-	2, // 3: atlas.configs.Server.GRPC.tls:type_name -> atlas.configs.Server.TLS
-	0, // 4: atlas.configs.Server.HTTP.network:type_name -> atlas.configs.Server.Network
-	2, // 5: atlas.configs.Server.HTTP.tls:type_name -> atlas.configs.Server.TLS
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	3,  // 0: atlas.configs.Server.grpc:type_name -> atlas.configs.Server.GRPC
+	4,  // 1: atlas.configs.Server.http:type_name -> atlas.configs.Server.HTTP
+	5,  // 2: atlas.configs.Server.tcp:type_name -> atlas.configs.Server.TCP
+	6,  // 3: atlas.configs.Server.websocket:type_name -> atlas.configs.Server.WebSocket
+	7,  // 4: atlas.configs.Server.kcp:type_name -> atlas.configs.Server.KCP
+	8,  // 5: atlas.configs.Server.udp:type_name -> atlas.configs.Server.UDP
+	0,  // 6: atlas.configs.Server.GRPC.network:type_name -> atlas.configs.Server.Network
+	2,  // 7: atlas.configs.Server.GRPC.tls:type_name -> atlas.configs.Server.TLS
+	0,  // 8: atlas.configs.Server.HTTP.network:type_name -> atlas.configs.Server.Network
+	2,  // 9: atlas.configs.Server.HTTP.tls:type_name -> atlas.configs.Server.TLS
+	2,  // 10: atlas.configs.Server.TCP.tls:type_name -> atlas.configs.Server.TLS
+	2,  // 11: atlas.configs.Server.WebSocket.tls:type_name -> atlas.configs.Server.TLS
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_protobuf_configs_server_proto_init() }
@@ -523,13 +1156,14 @@ func file_protobuf_configs_server_proto_init() {
 	}
 	file_protobuf_configs_server_proto_msgTypes[2].OneofWrappers = []any{}
 	file_protobuf_configs_server_proto_msgTypes[3].OneofWrappers = []any{}
+	file_protobuf_configs_server_proto_msgTypes[4].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protobuf_configs_server_proto_rawDesc), len(file_protobuf_configs_server_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

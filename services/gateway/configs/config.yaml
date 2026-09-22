@@ -22,6 +22,54 @@ server:
     #   key_file: configs/tls/server.key
     #   ca_file: configs/tls/ca.crt   # 配了即校验客户端证书（client_auth=true 时强制要求）
     #   client_auth: false
+  # 四协议接入通道：不配该节 = 该协议不启用（不监听端口、不注册 handler），
+  # 模板按部署形态只暴露需要的通道。除 addr 外的参数均为注释示例（不配 = 底层默认）。
+  tcp:
+    addr: 0.0.0.0:9001
+    # no_delay: true              # 关闭 Nagle 算法（TCP_NODELAY）
+    # read_buffer: 4096           # 读缓冲字节数
+    # write_buffer: 4096          # 写缓冲字节数
+    # keep_alive: 30s             # TCP keepalive 间隔
+    # pool_size: 4096             # 读写缓冲池大小
+    # idle_timeout: 60s           # 连接空闲超时（不配 = 不限）
+    # write_timeout: 10s          # 单次写超时（不配 = 不限）
+    # max_conns: 10000            # 最大并发连接数（不配 = 不限）
+    # max_body_size: 1048576      # 单帧最大字节数
+    # tls:                        # TLS 字段同 http.tls（Server.TLS 共用）
+  websocket:
+    addr: 0.0.0.0:9002
+    # path: /ws                   # 挂载路径（不配 = "/"）
+    # pool_size: 4096             # 读写缓冲池大小
+    # read_buffer: 4096           # 读缓冲字节数（与 write_buffer 各自独立生效）
+    # write_buffer: 4096
+    # idle_timeout: 60s           # 连接空闲超时（不配 = 不限）
+    # write_timeout: 10s          # 单次写超时（不配 = 不限）
+    # read_limit: 1048576         # 单条消息读上限（字节）
+    # max_conns: 10000            # 最大并发连接数（不配 = 不限）
+    # max_body_size: 1048576      # 单帧最大字节数
+    # subprotocols: [atlas]       # 协商的子协议列表（不配 = 不限定）
+    # tls:                        # TLS 字段同 http.tls（Server.TLS 共用）
+  kcp:
+    addr: 0.0.0.0:9003
+    # fast_profile: true          # 低延迟预设（nodelay/interval/resend/nc）；显式参数优先
+    # lan_profile: true           # 局域网预设；显式参数优先
+    # block_crypt: 0123456789abcdef0123456789abcdef   # 加密口令（长度不足会启动失败）
+    # fec_data_shards: 10         # FEC 数据分片（与 fec_parity_shards 必须成对）
+    # fec_parity_shards: 3
+    # window_snd: 128             # 发送窗口（与 window_rcv 必须成对）
+    # window_rcv: 128
+    # mtu: 1400                   # 最大传输单元（字节）
+    # max_body_size: 1048576      # 单帧最大字节数
+    # idle_timeout: 60s           # 连接空闲超时（不配 = 不限）
+    # write_timeout: 10s          # 单次写超时（不配 = 不限）
+    # max_conns: 10000            # 最大并发连接数（不配 = 不限）
+  udp:
+    addr: 0.0.0.0:9004
+    # pool_size: 4096             # 读写缓冲池大小
+    # read_buffer: 4096           # 单包读缓冲字节数
+    # max_body_size: 1048576      # 单包最大字节数
+    # idle_timeout: 60s           # 对端空闲超时（不配 = 不限）
+    # max_peers: 10000            # 最大对端数（不配 = 不限）
 data:
   redis:
     # mode 缺省即 single（单点）；哨兵/集群形态与字段见 protobuf/configs/data.proto
@@ -33,17 +81,6 @@ log:
   level: info
   format: text
   file: logs/gateway.log
-# 业务四协议按需启用：删除对应节即裁掉该协议（不监听端口、不注册 handler），
-# 模板按部署形态只暴露需要的通道。
-tcp:
-  addr: 0.0.0.0:9001
-websocket:
-  addr: 0.0.0.0:9002
-kcp:
-  addr: 0.0.0.0:9003
-udp:
-  addr: 0.0.0.0:9004
-
 # 可观测性：OTLP 链路导出端点（必须带 scheme：grpc/grpcs/http/https；空或不配 = noop 不导出）
 # 与 Prometheus 抓取端点（prometheus 服务经 host.docker.internal 抓取；空或不配 = noop）。
 # 采样：sampler 缺省跟随父级、根 span 按 sample_ratio 抽取（sample_ratio 缺省 1.0）。

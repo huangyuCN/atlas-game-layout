@@ -55,3 +55,21 @@ type noEndpointServer struct{}
 func (noEndpointServer) Start(context.Context) error { return nil }
 
 func (noEndpointServer) Stop(context.Context) error { return nil }
+
+// TestEndpointsSkipsDisabled 验证未启用的协议（值为 nil）被跳过而非报错：
+// 装配层按配置节裁剪协议时，nil 仍留在 fx 值组里。
+func TestEndpointsSkipsDisabled(t *testing.T) {
+	httpSrv, err := atlashttp.NewServer(atlashttp.WithAddress("127.0.0.1:0"))
+	if err != nil {
+		t.Fatalf("构造 http 服务端失败: %v", err)
+	}
+	t.Cleanup(func() { _ = httpSrv.Stop(context.Background()) })
+
+	eps, err := Endpoints([]transport.Server{nil, httpSrv, nil})
+	if err != nil {
+		t.Fatalf("Endpoints() 错误 = %v", err)
+	}
+	if len(eps) != 1 || eps["http"] == nil {
+		t.Fatalf("应只归集已启用的 http 端点，实际 %v", eps)
+	}
+}
