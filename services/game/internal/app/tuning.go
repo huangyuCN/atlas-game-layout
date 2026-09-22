@@ -1,7 +1,7 @@
 // Package app 是 game 服务的唯一装配之家：
 // Module 列出全部组件清单（infra → data → biz → actor → server 分层），
 // 进程形态（cmd/main + atlas App 驱动启停）与进程内形态
-// （assemble + serverutil.ServeAsync 驱动启停）共用同一张依赖图。
+// （assemble 经 bootstrap.Boot 驱动启停）共用同一张依赖图。
 package app
 
 import "time"

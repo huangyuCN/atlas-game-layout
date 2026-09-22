@@ -125,5 +125,5 @@ fx.Decorate(func(m serverutil.Middlewares) serverutil.Middlewares { return appen
 
 ## 7. 遗留
 
-- 第二轮（进程内形态改走 atlas.App 生命周期）仍未做，`pkg/serverutil.ServeAsync` 暂留。
+- 第二轮（进程内形态改走 atlas.App 生命周期）已完成：`pkg/serverutil.ServeAsync` 与网关 `embed_servers` 组已删除，两形态共用 `bootstrap.ModuleFor`/`ModuleForEmbedded` + `Boot`；详见 `2026-09-21-server-startup-config-design.md` §6。
 - 按 selector 的路由级中间件、HTTP 中间件对裸处理器的覆盖策略（是否需要）留待有实际需求时再定。

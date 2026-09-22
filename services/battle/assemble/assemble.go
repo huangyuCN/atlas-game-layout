@@ -1,28 +1,20 @@
 // Package assemble 提供 battle 服务的进程内（嵌入式）装配入口：
-// 与生产形态共用 internal/app 的同一张 fx 依赖图，仅驱动方式不同
-// （进程形态由 atlas.App 管信号与启停；本形态以 fx 编程式 Start/Stop
-// + serverutil.ServeAsync 驱动），供集成测试与嵌入式部署复用，
-// 装配逻辑只此一份、不再手工重复接线。
+// 与进程形态共用 internal/app 的同一张 fx 依赖图与同一套启停路径
+// （bootstrap.Boot → atlas.App：启动服务端、注册实例、注销与停机），
+// 仅不注册进程信号——宿主/测试进程的信号不能被本实例拦下。
+// 供集成测试与嵌入式部署复用。
 package assemble
 
 import (
 	"context"
-	"fmt"
-	"github.com/huangyuCN/atlas/metrics"
-	"time"
 
-	"github.com/huangyuCN/atlas-game-layout/lib/version"
 	"github.com/huangyuCN/atlas-game-layout/pkg/actor"
-	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
-	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
+	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	battleactor "github.com/huangyuCN/atlas-game-layout/services/battle/internal/actor"
 	battleapp "github.com/huangyuCN/atlas-game-layout/services/battle/internal/app"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
-	"github.com/huangyuCN/atlas/registry"
-	"github.com/huangyuCN/atlas/transport"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/fx"
 )
 
@@ -78,63 +70,29 @@ type Battle struct {
 	stop    func(ctx context.Context) error
 }
 
-// graphHandles 从依赖图回捞句柄所需组件（含 servers 值组）。
+// graphHandles 从依赖图回捞句柄所需组件。
 type graphHandles struct {
 	fx.In
 
+	bootstrap.Servers
 	Runtime *actor.Runtime
-	Etcd    *clientv3.Client
-	Servers []transport.Server `group:"servers"`
 }
 
-// New 装配并启动 battle 服务：映射配置 → 启动 fx 依赖图（含 actor 运行时）
-// → 后台起传输层 → 注册服务实例。实例 ID 必须 == actor NodeID
-// （matcher 懒激活按服务实例选 battle 节点的硬约束）。
+// New 装配并启动 battle 服务：映射配置 → bootstrap.Boot 启动依赖图（含 actor 运行时），
+// 由 atlas.App 统一启动服务端并注册实例（返回时注册已完成）。
+// 实例 ID 必须 == actor NodeID（matcher 懒激活按服务实例选 battle 节点的硬约束）。
 func New(ctx context.Context, o Options) (*Battle, error) {
 	var h graphHandles
-	cfg := newBootstrap(o)
-	root := fx.New(
-		fx.NopLogger,
-		fx.Provide(func() metrics.Collector { return metrics.Noop() }), // 嵌入式形态默认 noop（观测由 bootstrap 生产形态接线）
-		fx.Supply(cfg),
-		overrideBattleConfig(o.BattleCfg),
-		battleapp.Module,
-		fx.Populate(&h),
-	)
-	if err := root.Err(); err != nil {
-		return nil, fmt.Errorf("assemble: 依赖图校验失败: %w", err)
-	}
-	if err := root.Start(ctx); err != nil {
-		return nil, fmt.Errorf("assemble: 启动组件失败: %w", err)
-	}
-
-	urls, stopServers, err := startServers(h.Servers)
+	inst, urls, err := bootstrap.Boot(ctx, newBootstrap(o),
+		fx.Options(battleapp.Module, overrideBattleConfig(o.BattleCfg)), &h, serverutil.SchemeGRPC)
 	if err != nil {
-		_ = root.Stop(context.Background())
 		return nil, err
 	}
-	reg, err := registerInstance(ctx, cfg, o.NodeID, h.Etcd, urls.grpc)
-	if err != nil {
-		_ = stopServers(context.Background())
-		_ = root.Stop(context.Background())
-		return nil, err
-	}
-
-	b := &Battle{Runtime: h.Runtime, GRPCURL: urls.grpc}
-	b.stop = func(ctx context.Context) error {
-		firstErr := reg.Deregister(ctx, instanceOf(o.NodeID, urls.grpc))
-		if err := stopServers(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		if err := root.Stop(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		return firstErr
-	}
-	return b, nil
+	return &Battle{Runtime: h.Runtime, GRPCURL: urls[serverutil.SchemeGRPC].Host, stop: inst.Stop}, nil
 }
 
-// Stop 停止 battle 服务并释放全部资源（注销实例 → 停服务器 → 组件逆序回收）。
+// Stop 停止 battle 服务并释放全部资源
+// （注销实例 → 停服务端 → 组件逆序回收，均由 atlas.App 驱动）。
 func (b *Battle) Stop(ctx context.Context) error {
 	if b.stop == nil {
 		return nil
@@ -151,62 +109,6 @@ func overrideBattleConfig(override *BattleConfig) fx.Option {
 		}
 		return base
 	})
-}
-
-// serverURLs 是传输层的就绪端点（host:port，按 scheme 归集）。
-type serverURLs struct {
-	grpc string
-	http string
-}
-
-// startServers 以进程内形态后台启动全部传输层并按 scheme 分派端点
-// （fx 值组不保证提供顺序，不能依赖下标）。
-func startServers(servers []transport.Server) (serverURLs, func(context.Context) error, error) {
-	eps, stop, err := serverutil.ServeAsync(5*time.Second, servers...)
-	if err != nil {
-		return serverURLs{}, nil, fmt.Errorf("assemble: 启动传输层: %w", err)
-	}
-	var urls serverURLs
-	for _, ep := range eps {
-		switch ep.Scheme {
-		case "grpc":
-			urls.grpc = ep.Host
-		case "http":
-			urls.http = ep.Host
-		}
-	}
-	if urls.grpc == "" {
-		_ = stop(context.Background())
-		return serverURLs{}, nil, fmt.Errorf("assemble: 未找到 gRPC 端点: %v", eps)
-	}
-	return urls, stop, nil
-}
-
-// registerInstance 构造注册中心并注册服务实例
-// （构造选项由同一份配置派生，与 actor 发现端共用键前缀）。
-func registerInstance(ctx context.Context, cfg *conf.Bootstrap, nodeID string, ec *clientv3.Client, grpcHost string) (registry.Registrar, error) {
-	opts, err := fxkit.RegistryOptions(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("assemble: %w", err)
-	}
-	reg, err := pkgregistry.NewEtcd(ec, opts)
-	if err != nil {
-		return nil, fmt.Errorf("assemble: 构造注册中心: %w", err)
-	}
-	if err := reg.Register(ctx, instanceOf(nodeID, grpcHost)); err != nil {
-		return nil, fmt.Errorf("assemble: 注册服务实例: %w", err)
-	}
-	return reg, nil
-}
-
-// instanceOf 构造注册实例（etcd 注册端点带 grpc:// scheme，供发现方解析拨号）。
-func instanceOf(nodeID, grpcHost string) *registry.ServiceInstance {
-	return &registry.ServiceInstance{
-		ID:        nodeID,
-		Name:      "battle",
-		Version:   version.Version, // 注册中心上报版本：构建期注入（lib/version）
-		Endpoints: []string{"grpc://" + grpcHost},
-	}
 }
 
 // newBootstrap 把进程内装配参数映射为服务配置：

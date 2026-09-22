@@ -3,7 +3,7 @@
 // 启动参数来自 server.grpc / server.http 配置（字段见 protobuf/configs/server.proto）；
 // 中间件与过滤器由 pkg/middleware 经 fx 注入（业务可用 fx.Decorate 追加）；
 // 依赖装配见 internal/app；服务启停归属驱动方
-// （进程形态 atlas.App / 进程内形态 serverutil.ServeAsync）。
+// （进程形态与进程内形态均由 atlas.App 驱动启停）。
 package server
 
 import (

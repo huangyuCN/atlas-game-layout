@@ -119,7 +119,7 @@ services/<svc>/
 **铁律**：
 - `internal/{conf,infra,biz,data,server,actor,session}` 只做各自职责，**不含装配逻辑**；
 - 所有依赖图（fx 提供者、端口、实例化顺序）**只写在 assemble/app**；
-- 进程形态（`atlas.App`）与嵌入式形态（fx 编程式启动）**共用同一张依赖图**（app 与 assemble 同源）；
+- 进程形态（`atlas.App`）与嵌入式形态（bootstrap.Boot → atlas.App 驱动）**共用同一张依赖图**（app 与 assemble 同源）；
 - 新增依赖/组件 → 只在 assemble.go 声明，不改各 internal 子包间的直接构造。
 
 ## actor 方法组织约定
@@ -183,9 +183,9 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 | `registry/` | 服务注册/发现装配（键前缀派生 `NamespaceOf`：显式配置优先，否则按 `runtime.env` 隔离）|
 | `config/` | 配置加载 |
 | `log/` | 日志装配 |
-| `bootstrap/` | 配置加载 + 日志 + App 组装（进程形态样板）；回填 `runtime.id`（缺省主机名）与 `runtime.env`（缺省 `default`），并把注册失败升级为启动失败 |
+| `bootstrap/` | 配置加载 + 日志 + App 组装；`ModuleFor`/`ModuleForEmbedded` 提供 App 模块（进程/进程内两形态共用同一启停路径），`Boot` 以进程内形态启动依赖图并归集端点；回填 `runtime.id`（缺省主机名）与 `runtime.env`（缺省 `default`），并把注册失败升级为启动失败 |
 | `fxkit/` | 跨服务 fx 泛型提供器（含配置 → client 映射；注册中心构造统一走 `RegistryOptions`）|
-| `serverutil/` | 传输层装配辅助：`server.proto` 配置 → Server 构造与选项映射（`HTTPServer`/`GRPCServer`/`HTTPOptions`/`GRPCOptions`/`TLSConfig`）+ 统一 `/health`（`HealthHandler`）；`ServeAsync` 为进程内启停辅助（第二轮生命周期统一后移除）|
+| `serverutil/` | 传输层装配辅助：`server.proto` 配置 → Server 构造与选项映射（`HTTPServer`/`GRPCServer`/`HTTPOptions`/`GRPCOptions`/`TLSConfig`）+ 统一 `/health`（`HealthHandler`）+ 端点归集/就绪探测（`Endpoints`/`WaitEndpoint`）|
 | `middleware/` | 中间件/过滤器默认链与注入点（服务端 tracing→logging→metrics、客户端 tracing、HTTP filters），业务用 `fx.Decorate` 追加 |
 | `observability/` | 链路追踪/指标初始化与 biz 层 span 辅助（StartSpan/EndSpan）|
 | `enumconv/` | proto 枚举 → Go 枚举映射辅助（未登记取值报错）|
@@ -204,6 +204,7 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 | 实例 ID | `runtime.id` 显式配置优先，否则取主机名（`bootstrap.AssembleLoaded` 回填）| 注册实例 ID、actor NodeID、指标 `service_instance_id` **必须同源**；留空会让 Atlas 为注册另生成 UUID，与 actor NodeID 不一致 |
 | 服务名 | `runtime.name` | 同前缀下不同服务天然隔离 |
 
+- **两种驱动形态同一套启停路径**：进程形态（`cmd/main` → `bootstrap.Assemble` → `ModuleFor`）与进程内形态（`services/*/assemble` → `bootstrap.Boot` → `ModuleForEmbedded`）都由 `atlas.App` 启动服务端、注册实例、注销与停机；进程内形态只是不注册进程信号（`Options.DisableSignal`），避免劫持宿主/测试进程的信号。
 - 注册端与发现端**共用同一条构造路径**（`pkg/fxkit.RegistryOptions` → `pkg/registry.NewEtcd`，返回对象同时实现 Registrar 与 Discovery）；前缀不一致会表现为「注册成功却发现不到」。
 - 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的前缀**（如 `/atlas/services/it-<纳秒>`）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。
 - 实例键冲突（`registry.ErrInstanceConflict`）会让进程**启动失败退出**：同一实例 ID 的旧进程仍在运行、或异常退出后租约尚未过期（TTL 15s）都会命中，等租约过期后重启即可。**不要**改 ID 绕过——那正是要防的静默顶替。

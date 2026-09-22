@@ -28,6 +28,9 @@ type Options struct {
 	ID string
 	// Version 是服务版本。
 	Version string
+	// DisableSignal 为 true 时不注册信号处理：进程内/嵌入式形态（services/*/assemble）
+	// 与宿主/测试进程共用信号，不能把 SIGTERM 拦成自己的优雅停机。
+	DisableSignal bool
 }
 
 // Params 是 fx 注入的依赖：各服务提供的 Server 与注册器/日志器。
@@ -39,12 +42,14 @@ type Params struct {
 	Logger    atlaslog.Logger    `optional:"true"`
 }
 
-// StartSignal 传递 App 启动结果：服务注册完成时得到 nil，启动失败时得到错误。
+// StartSignal 传递 App 启动结果与退出完成：服务注册完成时得到 nil，启动失败时得到错误；
+// App.Run 返回（服务端已停完、资源已回收）后 stopped 关闭。
 // 由 New 产出、RegisterLifecycle 消费，把「注册失败」升级为进程启动失败——
 // 否则实例会带着「端口已监听但注册中心里没有」的半死状态继续运行
 // （实例键冲突即属此类，见 atlas registry.ErrInstanceConflict）。
 type StartSignal struct {
-	ch chan error
+	ch      chan error
+	stopped chan struct{}
 }
 
 // notify 非阻塞上报启动结果（缓冲 1：先到者胜，重复上报忽略）。
@@ -52,6 +57,15 @@ func (s StartSignal) notify(err error) {
 	select {
 	case s.ch <- err:
 	default:
+	}
+}
+
+// markStopped 标记 App.Run 已退出（幂等）。
+func (s StartSignal) markStopped() {
+	select {
+	case <-s.stopped:
+	default:
+		close(s.stopped)
 	}
 }
 
@@ -75,13 +89,16 @@ type Result struct {
 
 // New 组装 Atlas App：注入服务元数据、Server 列表与注册器。
 func New(p Params, o Options) (Result, error) {
-	start := StartSignal{ch: make(chan error, 1)}
-	opts := make([]atlas.Option, 0, 7)
+	start := StartSignal{ch: make(chan error, 1), stopped: make(chan struct{})}
+	opts := make([]atlas.Option, 0, 8)
 	// AfterStart 在服务注册成功之后执行：用它上报「已就绪」。
 	opts = append(opts, atlas.AfterStart(func(context.Context) error {
 		start.notify(nil)
 		return nil
 	}))
+	if o.DisableSignal {
+		opts = append(opts, atlas.Signal())
+	}
 	if o.Name != "" {
 		opts = append(opts, atlas.Name(o.Name))
 	}
@@ -120,6 +137,7 @@ func RegisterLifecycle(lc fx.Lifecycle, app *atlas.App, start StartSignal) {
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
 			go func() {
+				defer start.markStopped() // 标记 Run 已退出：Stop 等到它才返回
 				if err := app.Run(); err != nil {
 					atlaslog.Errorf("app run failed: %v", err)
 					start.notify(err)

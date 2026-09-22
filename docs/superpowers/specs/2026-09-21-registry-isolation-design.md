@@ -69,7 +69,7 @@ Atlas：
 | `pkg/bootstrap/assemble.go` | `fillRuntimeIdentity`（回填 `runtime.id`/`runtime.env`）|
 | `pkg/bootstrap/bootstrap.go` | `StartSignal`、`RegisterLifecycle` 等待启动结果 |
 | `services/*/internal/app/{graph,infra,data}.go` | 图内提供 `fxkit.NewEtcdDiscovery[*conf.Bootstrap]`；`NewActorRuntime`/`NewActorClient`/`newMatchQueueClient` 改为注入 `registry.Discovery`（不再各自 `Options{}`）|
-| `services/*/assemble/assemble.go` | `Options.Namespace`；`registerInstance` 走 `fxkit.RegistryOptions` |
+| `services/*/assemble/assemble.go` | `Options.Namespace`；`registerInstance` 走 `fxkit.RegistryOptions`（第二轮后该函数已删除，进程内形态改由 atlas.App 统一注册）|
 | `services/*/configs/config.yaml` | 删除写死的 `id`，改为注释说明缺省主机名；`env` 注释补「决定键前缀」 |
 | `test/e2e/env_test.go`、`scripts/e2e/main.go` | 本次运行独占前缀 |
 | `test/e2e/registry_test.go` | 新增：冲突快速失败、跨前缀同名同 ID 共存且互不可见 |
@@ -92,7 +92,7 @@ Atlas：
 - `pkg/registry.NewEtcd` 返回类型由 `registry.Registrar` 变为 `*etcdreg.Registry`；`NewEtcdDiscovery` 删除。
 - `pkg/fxkit.NewRegistrar` 由 `func(*clientv3.Client)` 变为泛型 `func[B RegistryConfig](B, *clientv3.Client)`；fx 图内需写 `fxkit.NewRegistrar[*conf.Bootstrap]`。
 - `services/*/internal/app` 的 `NewActorRuntime` / `NewActorClient` / `newMatchQueueClient` 参数由 `*clientv3.Client` 改为 `registry.Discovery`。
-- `services/*/assemble.Options` 新增 `Namespace`；`registerInstance` 增加 cfg 参数。
+- `services/*/assemble.Options` 新增 `Namespace`；`registerInstance` 增加 cfg 参数（第二轮已随生命周期统一删除）。
 - 键前缀默认值由 `/atlas/services` 变为 `/atlas/services/<env>`：升级后旧注册不会被新进程发现（滚动升级需整批切换）。
 - 配置文件删除 `runtime.id`，实例 ID 变为主机名（指标 `service_instance_id`、注册实例 ID、actor NodeID 同步变化）。
 

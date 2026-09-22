@@ -1,23 +1,20 @@
 // Package assemble 提供 matcher 服务的进程内（嵌入式）装配入口：
-// 与生产形态共用 internal/app 的同一张 fx 依赖图，仅驱动方式不同
-// （进程形态由 atlas.App 管信号与启停；本形态以 fx 编程式 Start/Stop
-// + serverutil.ServeAsync 驱动），供集成测试与嵌入式部署复用。
+// 与进程形态共用 internal/app 的同一张 fx 依赖图与同一套启停路径
+// （bootstrap.Boot → atlas.App：启动服务端、注册实例、注销与停机），
+// 仅不注册进程信号——宿主/测试进程的信号不能被本实例拦下。
+// 供集成测试与嵌入式部署复用。
 package assemble
 
 import (
 	"context"
-	"fmt"
-	"github.com/huangyuCN/atlas/metrics"
-	"net/url"
-	"time"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	matcherapp "github.com/huangyuCN/atlas-game-layout/services/matcher/internal/app"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
 	"github.com/huangyuCN/atlas/matchmaker"
-	"github.com/huangyuCN/atlas/transport"
 	"go.uber.org/fx"
 )
 
@@ -43,55 +40,28 @@ type Matcher struct {
 	stop    func(ctx context.Context) error
 }
 
-// graphHandles 从依赖图回捞句柄所需组件（含 servers 值组）。
+// graphHandles 从依赖图回捞句柄所需组件。
 type graphHandles struct {
 	fx.In
 
+	bootstrap.Servers
 	Service matchmaker.Service
-	Servers []transport.Server `group:"servers"`
 }
 
-// New 装配并启动 matcher 服务：映射配置 → 启动 fx 依赖图
-// （含撮合 tick 循环与 actor 客户端生命周期）→ 后台起传输层。
-// matcher 无自注册需求（battle 经服务发现被本服务调用，反向不需要）。
+// New 装配并启动 matcher 服务：映射配置 → bootstrap.Boot 启动依赖图
+// （含撮合 tick 循环与 actor 客户端生命周期），由 atlas.App 统一启动服务端并注册实例。
 func New(ctx context.Context, o Options) (*Matcher, error) {
 	var h graphHandles
-	root := fx.New(
-		fx.NopLogger,
-		fx.Provide(func() metrics.Collector { return metrics.Noop() }), // 嵌入式形态默认 noop（观测由 bootstrap 生产形态接线）
-		fx.Supply(newBootstrap(o)),
-		overrideSink(o.SinkOverride),
-		matcherapp.Module,
-		fx.Populate(&h),
-	)
-	if err := root.Err(); err != nil {
-		return nil, fmt.Errorf("assemble: 依赖图校验失败: %w", err)
-	}
-	if err := root.Start(ctx); err != nil {
-		return nil, fmt.Errorf("assemble: 启动组件失败: %w", err)
-	}
-
-	stopServers, err := startServers(h.Servers)
+	inst, urls, err := bootstrap.Boot(ctx, newBootstrap(o),
+		fx.Options(matcherapp.Module, overrideSink(o.SinkOverride)), &h, serverutil.SchemeGRPC)
 	if err != nil {
-		_ = root.Stop(context.Background())
 		return nil, err
 	}
-
-	m := &Matcher{GRPCURL: grpcHostOf(h.Servers), Service: h.Service}
-	m.stop = func(ctx context.Context) error {
-		// 先停服务器，再走 fx 根应用逆序回收（撮合循环/actor/外部资源）。
-		// 服务器已停时 stopServers 返回错误不应阻断资源回收。
-		sErr := stopServers(ctx)
-		rErr := root.Stop(ctx)
-		if sErr != nil {
-			return sErr
-		}
-		return rErr
-	}
-	return m, nil
+	return &Matcher{GRPCURL: urls[serverutil.SchemeGRPC].Host, Service: h.Service, stop: inst.Stop}, nil
 }
 
-// Stop 停止 matcher 服务并释放全部资源（停服务器 → 组件逆序回收）。
+// Stop 停止 matcher 服务并释放全部资源
+// （注销实例 → 停服务端 → 组件逆序回收，均由 atlas.App 驱动）。
 func (m *Matcher) Stop(ctx context.Context) error {
 	if m.stop == nil {
 		return nil
@@ -108,28 +78,6 @@ func overrideSink(override biz.MatchEventSink) fx.Option {
 		}
 		return base
 	})
-}
-
-// startServers 以进程内形态后台启动全部传输层（gRPC + HTTP 健康端）。
-func startServers(servers []transport.Server) (func(context.Context) error, error) {
-	_, stop, err := serverutil.ServeAsync(5*time.Second, servers...)
-	if err != nil {
-		return nil, fmt.Errorf("assemble: 启动传输层: %w", err)
-	}
-	return stop, nil
-}
-
-// grpcHostOf 从 servers 值组中找 gRPC 端点（fx 值组不保证提供顺序，
-// 不能依赖下标；缺端点说明图装配异常，返回空串由调用方观测）。
-func grpcHostOf(servers []transport.Server) string {
-	for _, srv := range servers {
-		if ep, ok := srv.(interface{ Endpoint() (*url.URL, error) }); ok {
-			if u, err := ep.Endpoint(); err == nil && u.Scheme == "grpc" {
-				return u.Host
-			}
-		}
-	}
-	return ""
 }
 
 // newBootstrap 把进程内装配参数映射为服务配置：

@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgetcd "github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
@@ -38,7 +37,6 @@ import (
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
 	gwassemble "github.com/huangyuCN/atlas-game-layout/services/gateway/assemble"
 	matcherassemble "github.com/huangyuCN/atlas-game-layout/services/matcher/assemble"
-	atlasregistry "github.com/huangyuCN/atlas/registry"
 	"go.opentelemetry.io/otel"
 )
 
@@ -133,41 +131,10 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 	}
 	stops = append(stops, m.Stop)
 
-	// 进程内形态没有 atlas.App 的自动注册，而 game 的撮合链路经服务发现
-	//（discovery:///matcher）寻址——e2e 装置承担生产 App.Run 的注册职责。
-	dereg, err := registerMatcher(ctx, mw.etcdEndpoints, e2eNamespace, m.GRPCURL)
-	if err != nil {
-		return rollback("matcher 注册", err)
-	}
-	stops = append(stops, dereg) // LIFO：先注销再停 matcher
+	// matcher 的实例由 atlas.App 自行注册（game 的撮合链路经服务发现寻址），
+	// 无需装置手工注册。
 
 	return &stack{gw: gw, stops: stops}, nil
-}
-
-// registerMatcher 把进程内 matcher 的 grpc endpoint 注册到 etcd，
-// 返回停止时执行的注销函数。namespace 必须与进程内各服务一致，
-// 否则 game 的服务发现找不到它。
-func registerMatcher(ctx context.Context, etcdEndpoints []string, namespace, grpcURL string) (func(context.Context) error, error) {
-	ec, err := pkgetcd.NewClient(pkgetcd.Options{Endpoints: etcdEndpoints})
-	if err != nil {
-		return nil, fmt.Errorf("e2e: 构造 etcd 客户端失败: %w", err)
-	}
-	reg, err := pkgregistry.NewEtcd(ec, pkgregistry.Options{Namespace: namespace})
-	if err != nil {
-		_ = ec.Close()
-		return nil, fmt.Errorf("e2e: 构造注册器失败: %w", err)
-	}
-	inst := &atlasregistry.ServiceInstance{
-		ID:        "matcher-e2e",
-		Name:      consts.ServiceMatcher,
-		Version:   "v1",
-		Metadata:  map[string]string{},
-		Endpoints: []string{"grpc://" + grpcURL + "?isSecure=false"},
-	}
-	if err := reg.Register(ctx, inst); err != nil {
-		return nil, fmt.Errorf("e2e: 注册 matcher 失败: %w", err)
-	}
-	return func(c context.Context) error { return reg.Deregister(c, inst) }, nil
 }
 
 // probeMiddlewares 探测四中间件连通性（不可用给出明确指引）。

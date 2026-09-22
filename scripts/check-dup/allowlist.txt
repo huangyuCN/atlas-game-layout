@@ -6,7 +6,6 @@ NewNatsConn
 NewRedisClient
 NewMongoClient
 NewActorRuntime
-registerInstance
 registerResources
 NewHTTPServer
 NewTCPServer

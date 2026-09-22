@@ -1,29 +1,20 @@
 // Package assemble 提供 gateway 服务的进程内（嵌入式）装配入口：
-// 与生产形态共用 internal/app 的同一张 fx 依赖图，仅驱动方式不同
-// （进程形态由 atlas.App 管信号与启停；本形态以 fx 编程式 Start/Stop
-// + serverutil.ServeAsync 驱动），供集成测试与嵌入式部署复用。
-//
-// 单通道形态差异：生产形态 WS Server 独立监听；嵌入式形态把
-// WS Handler 挂载在 httptest 的 /ws 路径下（与既有 e2e 约定一致），
-// 因此依赖图的 embed_servers 子组不包含 WS。
+// 与进程形态共用 internal/app 的同一张 fx 依赖图与同一套启停路径
+// （bootstrap.Boot → atlas.App：启动五协议服务端、注册实例、注销与停机），
+// 仅不注册进程信号——宿主/测试进程的信号不能被本实例拦下。
+// WS 与进程形态一致：由 WS Server 独立监听，端点取自身 Endpoint()
+// （WS Handler 对路径不敏感，客户端拨 ws://host:port 即可）。
 package assemble
 
 import (
 	"context"
-	"fmt"
-	"github.com/huangyuCN/atlas/metrics"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"time"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	gwapp "github.com/huangyuCN/atlas-game-layout/services/gateway/internal/app"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
-	"github.com/huangyuCN/atlas/transport"
-	wst "github.com/huangyuCN/atlas/transport/websocket"
 	"go.uber.org/fx"
 )
 
@@ -42,7 +33,7 @@ type Options struct {
 // Gateway 是装配完成的 gateway 实例句柄。
 type Gateway struct {
 	TCPURL  string              // 业务通道（tcp，host:port）
-	WSURL   string              // 单通道形态（ws://host:port/ws，业务+战斗共用）
+	WSURL   string              // 单通道形态（ws://host:port，业务+战斗共用）
 	KCPURL  string              // 战斗通道（kcp，host:port）
 	UDPURL  string              // 战斗通道（udp，host:port）
 	HTTPURL string              // 健康检查（http，host:port）
@@ -50,103 +41,42 @@ type Gateway struct {
 	stop    func(ctx context.Context) error
 }
 
-// graphHandles 从依赖图回捞句柄所需组件
-// （WSSrv 具体类型用于 WS 的 /ws 包装；embed_servers 为四台可独立启停的子组）。
+// graphHandles 从依赖图回捞句柄所需组件。
 type graphHandles struct {
 	fx.In
 
-	Actors  *actorclient.Client
-	WSSrv   *wst.Server
-	Servers []transport.Server `group:"embed_servers"`
+	bootstrap.Servers
+	Actors *actorclient.Client
 }
 
-// New 装配并启动一个 gateway 实例：映射配置 → 启动 fx 依赖图
-// （含推送订阅与会话清扫生命周期）→ 后台起四协议传输层 →
-// 以 /ws 路径包装 WS 单通道。
+// New 装配并启动一个 gateway 实例：映射配置 → bootstrap.Boot 启动依赖图
+// （含推送订阅、会话清扫与 actor 客户端），由 atlas.App 统一启动五协议服务端并注册实例。
 func New(ctx context.Context, o Options) (*Gateway, error) {
 	var h graphHandles
-	root := fx.New(
-		fx.NopLogger,
-		fx.Provide(func() metrics.Collector { return metrics.Noop() }), // 嵌入式形态默认 noop（观测由 bootstrap 生产形态接线）
-		fx.Supply(newBootstrap(o)),
-		gwapp.Module,
-		fx.Populate(&h),
-	)
-	if err := root.Err(); err != nil {
-		return nil, fmt.Errorf("assemble: 依赖图校验失败: %w", err)
-	}
-	if err := root.Start(ctx); err != nil {
-		return nil, fmt.Errorf("assemble: 启动组件失败: %w", err)
-	}
-
-	urls, stopServers, err := startServers(h.Servers)
+	inst, urls, err := bootstrap.Boot(ctx, newBootstrap(o), gwapp.Module, &h,
+		serverutil.SchemeTCP, serverutil.SchemeWS, serverutil.SchemeKCP,
+		serverutil.SchemeUDP, serverutil.SchemeHTTP)
 	if err != nil {
-		_ = root.Stop(context.Background())
 		return nil, err
 	}
-	wsHTTP, wsURL, err := wrapWSHandler(h.WSSrv)
-	if err != nil {
-		_ = stopServers(context.Background())
-		_ = root.Stop(context.Background())
-		return nil, err
-	}
-
-	g := &Gateway{
-		TCPURL:  urls["tcp"],
-		WSURL:   wsURL,
-		KCPURL:  urls["kcp"],
-		UDPURL:  urls["udp"],
-		HTTPURL: urls["http"],
+	return &Gateway{
+		TCPURL:  urls[serverutil.SchemeTCP].Host,
+		WSURL:   urls[serverutil.SchemeWS].String(),
+		KCPURL:  urls[serverutil.SchemeKCP].Host,
+		UDPURL:  urls[serverutil.SchemeUDP].Host,
+		HTTPURL: urls[serverutil.SchemeHTTP].Host,
 		Actors:  h.Actors,
-	}
-	g.stop = func(ctx context.Context) error {
-		wsHTTP.Close()
-		// 某个协议服务停止失败不应阻断后续清理：仍需停 actor/relay 并关闭外部资源。
-		sErr := stopServers(ctx)
-		rErr := root.Stop(ctx)
-		if sErr != nil {
-			return sErr
-		}
-		return rErr
-	}
-	return g, nil
+		stop:    inst.Stop,
+	}, nil
 }
 
-// Stop 停止 gateway 实例并释放全部资源（停 WS 包装 → 停四协议 → 组件逆序回收）。
+// Stop 停止 gateway 实例并释放全部资源
+// （注销实例 → 停五协议服务端 → 组件逆序回收，均由 atlas.App 驱动）。
 func (g *Gateway) Stop(ctx context.Context) error {
 	if g.stop == nil {
 		return nil
 	}
 	return g.stop(ctx)
-}
-
-// startServers 以进程内形态后台启动嵌入式传输层子组，
-// 并按 scheme 归集端点（fx 值组不保证提供顺序，不能依赖下标）。
-func startServers(servers []transport.Server) (map[string]string, func(context.Context) error, error) {
-	eps, stop, err := serverutil.ServeAsync(5*time.Second, servers...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("assemble: 启动传输层: %w", err)
-	}
-	urls := make(map[string]string, len(eps))
-	for _, ep := range eps {
-		urls[ep.Scheme] = ep.Host
-	}
-	for _, scheme := range []string{"tcp", "kcp", "udp", "http"} {
-		if urls[scheme] == "" {
-			_ = stop(context.Background())
-			return nil, nil, fmt.Errorf("assemble: 缺少 %s 端点: %v", scheme, eps)
-		}
-	}
-	return urls, stop, nil
-}
-
-// wrapWSHandler 把 WS Server 的 Handler 挂载到 httptest 的 /ws 路径
-// （单通道形态约定：客户端拨 ws://<host>/ws）。
-func wrapWSHandler(wsSrv *wst.Server) (*httptest.Server, string, error) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", wsSrv.Handler())
-	wsHTTP := httptest.NewServer(mux)
-	return wsHTTP, "ws" + strings.TrimPrefix(wsHTTP.URL, "http") + "/ws", nil
 }
 
 // newBootstrap 把进程内装配参数映射为服务配置：

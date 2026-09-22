@@ -1,7 +1,7 @@
 // Package app 是 gateway 服务的唯一装配之家：
 // Module 列出全部组件清单（infra → 会话 → actor 客户端 → server 分层），
 // 进程形态（cmd/main + atlas App 驱动启停）与进程内形态
-// （assemble + serverutil.ServeAsync 驱动启停）共用同一张依赖图。
+// （assemble 经 bootstrap.Boot 驱动启停）共用同一张依赖图。
 package app
 
 import (
@@ -33,11 +33,8 @@ import (
 // Module 是 gateway 服务的完整装配清单。
 // 依赖来源（*conf.Bootstrap / *clientv3.Client）由驱动方供给。
 //
-// 五协议 Server 有两种归宿：
-//   - group:"servers"：完整五台，供生产形态的 atlas.App 启停；
-//   - group:"embed_servers"：四台（不含 WS），供嵌入式形态启停——
-//     单通道形态下 WS 经 assemble 以「/ws 路径 + httptest」包装挂载，
-//     不能被独立 Start，故排除在嵌入式子组之外。
+// 五协议 Server 一律进 group:"servers"，两种形态（进程形态 cmd/main、
+// 进程内形态 services/gateway/assemble）都由 atlas.App 启停与注册。
 var Module = fx.Module("gateway",
 	// 中间件/过滤器默认链（业务可用 fx.Decorate 追加自己的）。
 	middleware.Module,
@@ -68,7 +65,7 @@ var Module = fx.Module("gateway",
 	),
 )
 
-// serverSet 把五协议 Server 汇入两个 servers 组：
+// serverSet 把五协议 Server 汇入 servers 组（供 atlas.App 统一启停）：
 // 具体类型同时直供 newGateway 装配（fx 组注解会把结果移出类型空间，
 // 故用聚合器双路提供；组值统一为 transport.Server 接口形态）。
 type serverSet struct {
@@ -79,11 +76,6 @@ type serverSet struct {
 	WS   transport.Server `group:"servers"`
 	KCP  transport.Server `group:"servers"`
 	UDP  transport.Server `group:"servers"`
-
-	HTTPEmbed transport.Server `group:"embed_servers"`
-	TCPEmbed  transport.Server `group:"embed_servers"`
-	KCPEmbed  transport.Server `group:"embed_servers"`
-	UDPEmbed  transport.Server `group:"embed_servers"`
 }
 
 // newServerSet 聚合五协议 Server 到 servers 组与嵌入式子组。
@@ -95,18 +87,18 @@ func newServerSet(
 	httpSrv *atlashttp.Server,
 	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
 ) serverSet {
-	set := serverSet{HTTP: httpSrv, HTTPEmbed: httpSrv}
+	set := serverSet{HTTP: httpSrv}
 	if cfg.GetTcp() != nil {
-		set.TCP, set.TCPEmbed = tcpSrv, tcpSrv
+		set.TCP = tcpSrv
 	}
 	if cfg.GetWebsocket() != nil {
 		set.WS = wsSrv
 	}
 	if cfg.GetKcp() != nil {
-		set.KCP, set.KCPEmbed = kcpSrv, kcpSrv
+		set.KCP = kcpSrv
 	}
 	if cfg.GetUdp() != nil {
-		set.UDP, set.UDPEmbed = udpSrv, udpSrv
+		set.UDP = udpSrv
 	}
 	return set
 }

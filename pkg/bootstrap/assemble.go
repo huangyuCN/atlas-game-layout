@@ -132,15 +132,24 @@ func fillRuntimeIdentity(runtime *configspb.Runtime) error {
 	return nil
 }
 
-// ModuleFor 按配置装配 App 模块：服务名/实例 ID 取自 runtime，版本与链路资源属性、
+// ModuleFor 按配置装配 App 模块（进程形态：注册信号处理，收到 SIGTERM 等做优雅停机）。
+func ModuleFor(like ConfigLike) fx.Option { return moduleFor(like, false) }
+
+// ModuleForEmbedded 同 ModuleFor，但不注册信号处理：进程内/嵌入式形态与宿主（或测试）
+// 进程共用信号，不能把 SIGTERM 拦成自己的优雅停机。其余启停路径完全一致——
+// 服务端启动、实例注册、注销与停机都由 atlas.App 统一驱动。
+func ModuleForEmbedded(like ConfigLike) fx.Option { return moduleFor(like, true) }
+
+// moduleFor 按配置装配 App 模块：服务名/实例 ID 取自 runtime，版本与链路资源属性、
 // 指标标签同源（runtime.version 优先，缺省构建注入值）——两处各取一份会让同一个进程
 // 在注册中心与链路里上报两个版本号。
-func ModuleFor(like ConfigLike) fx.Option {
+func moduleFor(like ConfigLike, disableSignal bool) fx.Option {
 	runtime := like.GetRuntime()
 	return Module(Options{
-		Name:    runtime.GetName(),
-		ID:      runtime.GetId(),
-		Version: serviceVersionOf(runtime),
+		Name:          runtime.GetName(),
+		ID:            runtime.GetId(),
+		Version:       serviceVersionOf(runtime),
+		DisableSignal: disableSignal,
 	})
 }
 

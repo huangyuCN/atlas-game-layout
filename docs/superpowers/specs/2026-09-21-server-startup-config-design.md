@@ -113,7 +113,7 @@ message Server {
 | `Network`（Go 枚举）+ `networkOf(*configspb.Server_Network) (string, error)` | proto 网络枚举 → `net.Listen` 网络名；未设置返回空串（用底层默认），未登记取值报错 |
 | `TLSConfig(*configspb.Server_TLS) (*tls.Config, error)` | `enabled=false` 或 nil → 返回 nil（不启用）；否则读证书/私钥；`ca_file` + `client_auth=true` → `ClientCAs` + `RequireAndVerifyClientCert`；**配了 `ca_file` 但未强制时 → `VerifyClientCertIfGiven`**（给了客户端证书就校验、不给也放行——若置 `NoClientCert`，配的 CA 会被完全忽略，正是要避免的「配了等于没配」）；文件缺失或解析失败报错；`MinVersion` 固定 TLS 1.2（不提供配置项避免误配）|
 | `HealthHandler(service string) http.HandlerFunc` | 统一健康检查：`Content-Type: application/json` + `{"status":"ok","service":"<name>"}` |
-| ~~`ServeAsync`~~ | 第二轮后无调用方，届时删除；本轮保留 |
+| ~~`ServeAsync`~~ | 第二轮已删除（两形态改由 atlas.App 启停，见 §6）|
 
 > 设计修正（实现期由 `make lint` 的 `check-dup` 驱动）：三个服务的 `NewGRPCServer` 只差一行注册调用，
 > 结构指纹一致被判重复。故把「映射选项 + 构造服务端」整体下沉为 `serverutil.HTTPServer`/`GRPCServer`，
@@ -148,7 +148,7 @@ fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`g
 `bootstrap.ModuleFor(like ConfigLike) fx.Option`：服务名/实例 ID 取自 `runtime`，版本取
 `runtime.version` 优先、缺省 `version.Version`；`AssembleLoaded` 改用它，四个 assemble 在第二轮改用它。
 
-## 6. 第二轮：进程内形态改走 atlas.App（本轮不实施）
+## 6. 第二轮：进程内形态改走 atlas.App（已实施）
 
 现状：`services/*/assemble` 用 `fx.New` + `root.Start` + `serverutil.ServeAsync` + 手工 `registerInstance`
 + 手工 stop 闭包，是 atlas.App 之外的第二条启动路径；且 matcher/gateway 的进程内形态**根本不注册**。
@@ -162,8 +162,20 @@ fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`g
 | 网关 `embed_servers` 组 + `wrapWSHandler`（httptest 包装 `/ws`） | WS 服务端自起随机端口，`WSURL` 取其 `Endpoint()`（WS `Handler()` 对路径不敏感，已确认） |
 | `scripts/e2e` 的手工 `registerMatcher` | matcher 自行注册 |
 
-前置的 atlas 改动：`Signal()` 传空当前会 `signal.Notify(c)` → **监听全部信号**，
-进程内形态会劫持测试进程信号；改为「空 = 不注册信号处理」并补测试。
+前置的 atlas 改动（已做）：`Signal()` 传空当前会 `signal.Notify(c)` → **监听全部信号**，
+进程内形态会劫持测试进程信号；改为「空 = 不注册信号处理」并补 `TestSignalDisabled`。
+
+实施补充：
+- `pkg/bootstrap` 新增 `Boot(ctx, cfg, app, handles, require...)`：装配 fx（服务模块 + `ModuleForEmbedded`）
+  并启动，返回根 App 与 require 声明的 scheme → 就绪端点；缺端点即回收并报错。各服务的进程内 handles
+  内嵌 `bootstrap.Servers`（servers 值组回捞载体），句柄构造因此只剩服务特有字段。
+- `pkg/serverutil`：删除 `ServeAsync`，新增 `Endpoints`（按 scheme 归集端点）；`WaitEndpoint` 保留给测试
+  与自研嵌入式驱动。
+- 网关删 `embed_servers` 组与 `wrapWSHandler`（httptest 包装）：WS 与进程形态一致由 WS Server 独立监听，
+  `WSURL` 取其自身 `Endpoint()`（`ws://host:port/`，WS Server 默认 path 为 `/`；WS Handler 对路径不敏感）。
+- `scripts/e2e` 删掉手工 `registerMatcher`：matcher 由 atlas.App 自行注册。
+- 本地新增 `pkg/bootstrap` 两项用例：`TestBootStartsAndStopsGraph`（返回时端点已就绪、停机后监听关闭）、
+  `TestBootRequiresEndpoints`（缺端点报错并回收已启动服务端）。
 
 ## 7. 破坏性变更
 
@@ -204,3 +216,14 @@ TLS 文件缺失报错、`HealthHandler` 输出。
 - 四个 `config.yaml` 已按「全量罗列 + 注释默认值」展开（含 TLS 示例与其余可选项注释，四份措辞一致）。
 - 全量 `go test ./...` 45 包 ok / 0 FAIL；`make lint` 0 重复组。
 - 服务器验证见提交说明（reflection 生效、TLS 握手、mTLS、`test/e2e` 与 `scripts/e2e` 回归）。
+
+### 8.2 第二轮实施结果（进程内形态改走 atlas.App）
+
+- 单测：`pkg/bootstrap` 新增 `TestBootStartsAndStopsGraph`（Boot 返回时端点已就绪、Stop 后监听关闭）、
+  `TestBootRequiresEndpoints`（缺端点报错并回收已启动服务端）；`-count=60` 稳定通过。
+- 服务器（10.10.9.36）：`test/e2e` **12/12 PASS**（四服务全走 `bootstrap.Boot`，含冲突快速失败、WS/KCP/UDP 通道、
+  命名空间隔离）；`scripts/e2e -mode dual` 闭环通过（WS URL 为 `ws://127.0.0.1:<port>/`）；
+  常驻四服务停机后 etcd 键归零（注销由 atlas.App 完成）、重启 4 进程/4 键，Prometheus 5/5 targets up。
+- 评审修正：`Instance.Stop` 改为等到服务端真正停止（`App.Stop` 只触发停机，`server.Stop` 跑在 Run 的 errgroup 里，
+  不等会出现「Stop 返回了但端口还没关」，实测 6 次 1 次失败）；scheme 字面量收敛为 `serverutil.Scheme*` 常量；
+  删除与 `transport.Endpointer` 同形的本包类型；atlas `Run()` 抽出 `startServers`/`watchSignals`（74 → 40 行，符合 ≤50 行规范）。

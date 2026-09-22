@@ -1,8 +1,9 @@
-// Package serverutil 提供服务装配的共享辅助（可编程装配与测试装置共用）。
+// Package serverutil 提供传输层装配的共享辅助：端点归集与就绪探测。
+// 服务端启停不在此包——两种形态（进程形态 cmd/main、进程内形态 services/*/assemble）
+// 都由 atlas.App 驱动，见 pkg/bootstrap.ModuleFor。
 package serverutil
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"time"
@@ -10,14 +11,20 @@ import (
 	"github.com/huangyuCN/atlas/transport"
 )
 
-// Endpointer 是可就绪探测的服务端能力（对齐 transport.Endpointer，便于本包独立引用）。
-type Endpointer interface {
-	Endpoint() (*url.URL, error)
-}
+// 端点 scheme：与各传输层 Endpoint() 返回的 scheme 一致（即 urls 的 map 键）。
+// 注意 WS 的 scheme 是 "ws"，与 transport.KindWebSocket 的字符串 "websocket" 不同，
+// 故不直接复用 transport.Kind。
+const (
+	SchemeGRPC = "grpc"
+	SchemeHTTP = "http"
+	SchemeTCP  = "tcp"
+	SchemeWS   = "ws"
+	SchemeKCP  = "kcp"
+	SchemeUDP  = "udp"
+)
 
-// WaitEndpoint 轮询服务端端点直至监听就绪或超时
-// （Atlas 阻塞式 Server.Start 在后台启动时的就绪探测）。
-func WaitEndpoint(srv interface{ Endpoint() (*url.URL, error) }, timeout time.Duration) (*url.URL, error) {
+// WaitEndpoint 轮询服务端端点直至监听就绪或超时（后台启动阻塞式 Server 时的就绪探测）。
+func WaitEndpoint(srv transport.Endpointer, timeout time.Duration) (*url.URL, error) {
 	deadline := time.Now().Add(timeout)
 	for {
 		if ep, err := srv.Endpoint(); err == nil {
@@ -30,67 +37,25 @@ func WaitEndpoint(srv interface{ Endpoint() (*url.URL, error) }, timeout time.Du
 	}
 }
 
-// ServeAsync 以进程内形态启动一组阻塞式 Server（与生产路径同一批构造，
-// 改由本函数而非 atlas App 驱动启停）：
-//
-//   - 每个 Server 一个后台 goroutine 执行 Start（阻塞至显式 Stop，
-//     Atlas 传输层不会因 ctx 取消自行退出，回收必须经 Stop 完成）；
-//   - 逐个等待端点就绪，返回与入参同序的端点列表；
-//   - 任一端点在 timeout 内未就绪：取消并停止已尝试的服务端后报错。
-func ServeAsync(timeout time.Duration, servers ...transport.Server) ([]*url.URL, func(context.Context) error, error) {
-	sctx, cancel := context.WithCancel(context.Background())
-	eps := make([]*url.URL, len(servers))
-	type startResult struct {
-		err error
-	}
-	// startErrs[i] 在对应 Server 的 Start 返回时接收错误（端口占用等即时失败）。
-	startErrs := make([]chan startResult, len(servers))
-	for i := range startErrs {
-		startErrs[i] = make(chan startResult, 1)
-	}
+// Endpoints 按 scheme 归集已启动服务端的就绪端点，返回 scheme → 完整 URL
+// （fx 值组不保证提供顺序，不能依赖下标；WS 等带路径的协议需要完整 URL）。
+// 服务端必须实现 transport.Endpointer：拿不到端点意味着无法对外寻址，属装配错误，
+// 直接报错而不是静默跳过。
+func Endpoints(servers []transport.Server) (map[string]*url.URL, error) {
+	out := make(map[string]*url.URL, len(servers))
 	for i, srv := range servers {
-		endpoint, ok := srv.(Endpointer)
+		ep, ok := srv.(transport.Endpointer)
 		if !ok {
-			cancel()
-			return nil, nil, fmt.Errorf("serverutil: server[%d] 未实现 transport.Endpointer，无法就绪探测", i)
+			return nil, fmt.Errorf("serverutil: server[%d] 未实现 transport.Endpointer，无法归集端点", i)
 		}
-		go func(i int, srv transport.Server) {
-			startErrs[i] <- startResult{err: srv.Start(sctx)}
-		}(i, srv)
-		ep, err := WaitEndpoint(endpoint, timeout)
+		u, err := ep.Endpoint()
 		if err != nil {
-			cancel()
-			stopAll(context.Background(), servers[:i+1])
-			return nil, nil, fmt.Errorf("serverutil: %w", err)
+			return nil, fmt.Errorf("serverutil: server[%d] 查询端点失败: %w", i, err)
 		}
-		// 端点已就绪但 Start 可能已带错误退出（如端点探测间发生崩溃）：
-		// 非阻塞检查一次，避免把已失败的服务端误判为启动成功。
-		select {
-		case r := <-startErrs[i]:
-			if r.err != nil {
-				cancel()
-				stopAll(context.Background(), servers[:i+1])
-				return nil, nil, fmt.Errorf("serverutil: server[%d] 启动失败: %w", i, r.err)
-			}
-		default:
+		if u == nil {
+			return nil, fmt.Errorf("serverutil: server[%d] 未返回端点", i)
 		}
-		eps[i] = ep
+		out[u.Scheme] = u
 	}
-	stop := func(ctx context.Context) error {
-		err := stopAll(ctx, servers)
-		cancel()
-		return err
-	}
-	return eps, stop, nil
-}
-
-// stopAll 逐个停止服务端，返回首个错误（保证全部尝试完毕）。
-func stopAll(ctx context.Context, servers []transport.Server) error {
-	var firstErr error
-	for _, srv := range servers {
-		if err := srv.Stop(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return out, nil
 }
