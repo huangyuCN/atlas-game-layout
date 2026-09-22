@@ -11,8 +11,32 @@ registry:
 server:
   grpc:
     addr: 0.0.0.0:9300
+    timeout: 30s                  # 单次 RPC 超时；Atlas 默认 1s，本模板显式放宽到 30s
+    reflection: true              # 调试/测试开启；生产应关闭（会暴露服务清单）
+    # stream_timeout: 30s         # 流式 RPC 超时（不配 = 不限）
+    # max_recv_msg_size: 4194304  # 单条消息接收上限（字节，不配 = 4MB）
+    # metadata: true              # 注册 gRPC metadata 服务
+    # admin: true                 # 注册 gRPC admin（channelz）服务
+    # network: NETWORK_TCP4       # 网络类型：NETWORK_TCP(缺省)/NETWORK_TCP4/NETWORK_TCP6/NETWORK_UNIX
+    # tls:                        # TLS；不配 = 明文。字段见 protobuf/configs/server.proto
+    #   enabled: true
+    #   cert_file: configs/tls/server.crt
+    #   key_file: configs/tls/server.key
+    #   ca_file: configs/tls/ca.crt   # 配了即校验客户端证书（client_auth=true 时强制要求）
+    #   client_auth: false
   http:
     addr: 0.0.0.0:9380
+    timeout: 30s                  # 单次请求 handler 总执行时间（与 Atlas 默认 30s 相同，显式写出便于调整）
+    # path_prefix: /api           # 路由前缀（不配 = 无前缀）
+    # max_request_body: 1048576   # 请求体上限（字节，不配 = 1MB）
+    # strict_slash: true          # 严格斜杠（不配 = Atlas 默认 true）
+    # network: NETWORK_TCP4       # 网络类型：NETWORK_TCP(缺省)/NETWORK_TCP4/NETWORK_TCP6/NETWORK_UNIX
+    # tls:                        # TLS；不配 = 明文。字段见 protobuf/configs/server.proto
+    #   enabled: true
+    #   cert_file: configs/tls/server.crt
+    #   key_file: configs/tls/server.key
+    #   ca_file: configs/tls/ca.crt   # 配了即校验客户端证书（client_auth=true 时强制要求）
+    #   client_auth: false
 data:
   nats:
     url: nats://127.0.0.1:14222

@@ -7,8 +7,8 @@ package fxkit
 
 import (
 	"fmt"
-	"time"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
@@ -62,20 +62,17 @@ func NewEtcdClient[B WithRegistry](cfg B) (*clientv3.Client, error) {
 
 // RegistryOptions 把 registry 配置段与服务身份映射为注册器构造选项：
 // namespace 缺省按 runtime.env 隔离（多套部署共用同一 etcd 时不串台），
-// ttl_seconds 未配置时留零值交给底层默认值。
+// ttl 未配置时留零值交给底层默认值。
 func RegistryOptions[B RegistryConfig](cfg B) (pkgregistry.Options, error) {
 	r := cfg.GetRegistry()
-	opts := pkgregistry.Options{
+	ttl, err := config.ParseDuration(r.GetTtl())
+	if err != nil {
+		return pkgregistry.Options{}, fmt.Errorf("fxkit: registry.ttl 无效: %w", err)
+	}
+	return pkgregistry.Options{
 		Namespace: pkgregistry.NamespaceOf(r.GetNamespace(), cfg.GetRuntime().GetEnv()),
-	}
-	if r != nil && r.TtlSeconds != nil {
-		if ttl := r.GetTtlSeconds(); ttl > 0 {
-			opts.TTL = time.Duration(ttl) * time.Second
-		} else {
-			return pkgregistry.Options{}, fmt.Errorf("fxkit: registry.ttl_seconds 必须为正数，got %d", ttl)
-		}
-	}
-	return opts, nil
+		TTL:       ttl,
+	}, nil
 }
 
 // NewRegistrar 基于 etcd 客户端与注册配置装配 Atlas 注册器。

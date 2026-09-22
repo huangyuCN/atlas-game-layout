@@ -101,17 +101,15 @@ func TestRegistryOptionsNamespace(t *testing.T) {
 	}
 }
 
-// TestRegistryOptionsTTL 验证 ttl_seconds 映射：未配置交给底层默认值，非法值快速失败。
+// TestRegistryOptionsTTL 验证 ttl 映射：未配置交给底层默认值，非法值快速失败。
 func TestRegistryOptionsTTL(t *testing.T) {
-	ttl := func(v int32) *int32 { return &v }
-
-	for _, bad := range []int32{0, -1} {
-		if _, err := RegistryOptions(&fakeConf{reg: &configspb.Registry{TtlSeconds: ttl(bad)}}); err == nil {
-			t.Fatalf("ttl_seconds=%d 期望报错，实际为 nil", bad)
+	for _, bad := range []string{"0s", "-1s", "abc", "30"} {
+		if _, err := RegistryOptions(&fakeConf{reg: &configspb.Registry{Ttl: bad}}); err == nil {
+			t.Fatalf("ttl=%q 期望报错，实际为 nil", bad)
 		}
 	}
 
-	opts, err := RegistryOptions(&fakeConf{reg: &configspb.Registry{TtlSeconds: ttl(30)}})
+	opts, err := RegistryOptions(&fakeConf{reg: &configspb.Registry{Ttl: "30s"}})
 	if err != nil {
 		t.Fatalf("RegistryOptions() 错误 = %v", err)
 	}

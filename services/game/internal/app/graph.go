@@ -4,12 +4,14 @@ import (
 	"context"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
+	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/server"
+	"github.com/huangyuCN/atlas/transport"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/fx"
@@ -24,6 +26,8 @@ import (
 // fx.OnStop 逆序执行：registerResources 先注册，其 OnStop 最后运行——
 // 即先停 actor/relay/撮合循环，最后才关闭外部资源（Mongo/Redis/NATS/etcd）。
 var Module = fx.Module("game",
+	// 中间件/过滤器默认链（业务可用 fx.Decorate 追加自己的）。
+	middleware.Module,
 	fx.Provide(
 		DefaultTuning,
 		// ── infra：注册中心 + 外部客户端 + 集群运行时 ──
@@ -46,8 +50,9 @@ var Module = fx.Module("game",
 		newPlayerStateAccess,
 		handler.NewGameHandler,
 		// ── server：传输层构造（启停归属驱动方）──
-		fx.Annotate(server.NewHTTPServer, fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(server.NewGRPCServer, fx.ResultTags(`group:"servers"`)),
+		// fx.As：构造函数返回具体类型（便于直接调 Server 字段/方法），仍以 transport.Server 进组。
+		fx.Annotate(server.NewHTTPServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
+		fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
 	),
 	fx.Invoke(
 		registerResources,

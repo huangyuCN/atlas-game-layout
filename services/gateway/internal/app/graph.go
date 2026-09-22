@@ -11,6 +11,7 @@ import (
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
+	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
@@ -19,6 +20,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
+	atlashttp "github.com/huangyuCN/atlas/transport/http"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
@@ -37,6 +39,8 @@ import (
 //     单通道形态下 WS 经 assemble 以「/ws 路径 + httptest」包装挂载，
 //     不能被独立 Start，故排除在嵌入式子组之外。
 var Module = fx.Module("gateway",
+	// 中间件/过滤器默认链（业务可用 fx.Decorate 追加自己的）。
+	middleware.Module,
 	fx.Provide(
 		// ── infra：注册中心 + 外部客户端 ──
 		fxkit.NewEtcdClient[*conf.Bootstrap],
@@ -88,7 +92,7 @@ type serverSet struct {
 // 模板可按部署形态只暴露需要的协议；HTTP（管理面/健康检查）始终启用。
 func newServerSet(
 	cfg *conf.Bootstrap,
-	httpSrv transport.Server,
+	httpSrv *atlashttp.Server,
 	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
 ) serverSet {
 	set := serverSet{HTTP: httpSrv, HTTPEmbed: httpSrv}

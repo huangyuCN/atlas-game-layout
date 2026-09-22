@@ -9,6 +9,7 @@ import (
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/metricstest"
 	"github.com/huangyuCN/atlas/metrics"
+	"go.opentelemetry.io/otel"
 )
 
 // TestInitMetricsNoop 验证未配置抓取地址时返回 noop 采集器（零开销、无监听地址）。
@@ -63,6 +64,35 @@ func TestInitMetricsEndpoint(t *testing.T) {
 	want := `test_players_online{env="test",service="game",service_instance_id="game-1",service_version="v1.2.3"} 3`
 	if !strings.Contains(text, want) {
 		t.Fatalf("/metrics 缺服务身份标签\nwant 含 %s\n got %s", want, text)
+	}
+}
+
+// TestInitMetricsInstallsGlobalProvider 验证 InitMetrics 把采集器的 MeterProvider 装为全局：
+// OTel 原生埋点（如 pkg/middleware 的请求指标）才能落到同一个 /metrics 端点。
+func TestInitMetricsInstallsGlobalProvider(t *testing.T) {
+	m, err := InitMetrics("127.0.0.1:0", ServiceIdentity{Name: "game"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Shutdown(context.Background()) }()
+
+	counter, err := otel.Meter("test-scope").Int64Counter("native_counter_total")
+	if err != nil {
+		t.Fatalf("创建 instrument 失败: %v", err)
+	}
+	counter.Add(context.Background(), 7)
+
+	resp, err := http.Get("http://" + m.Addr + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "native_counter_total") {
+		t.Fatalf("/metrics 缺少 OTel 原生埋点（全局 provider 未装）:\n%s", body)
 	}
 }
 

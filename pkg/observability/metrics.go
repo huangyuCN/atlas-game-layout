@@ -11,6 +11,7 @@ import (
 	otelmetrics "github.com/huangyuCN/atlas/contrib/metrics/otel"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/metrics"
+	"go.opentelemetry.io/otel"
 )
 
 // metricsShutdownTimeout 是抓取端点与底层 MeterProvider 的收尾上限：
@@ -57,6 +58,11 @@ func InitMetrics(promAddr string, id ServiceIdentity) (*Metrics, error) {
 		_ = exp.Shutdown(context.Background())
 		return nil, fmt.Errorf("observability: 指标端点监听失败 (%s): %w", promAddr, err)
 	}
+	// 采集器的 MeterProvider 装为全局：OTel 原生埋点（如 pkg/middleware 的请求指标）
+	// 与本采集器共用同一套 instrument 与 /metrics 端点——不装的话 otel.Meter 取到
+	// 默认 provider，那些埋点会静默丢失（不报错、也没数据）。
+	prevProvider := otel.GetMeterProvider()
+	otel.SetMeterProvider(exp.MeterProvider())
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", exp.Handler())
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -76,6 +82,7 @@ func InitMetrics(promAddr string, id ServiceIdentity) (*Metrics, error) {
 			if err := srv.Shutdown(ctx); err != nil {
 				atlaslog.Warnf("observability: 指标端点关闭失败: %v", err)
 			}
+			otel.SetMeterProvider(prevProvider)
 			if err := exp.Shutdown(ctx); err != nil {
 				atlaslog.Warnf("observability: 指标 provider 关闭失败: %v", err)
 			}

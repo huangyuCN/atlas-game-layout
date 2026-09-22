@@ -30,8 +30,9 @@ type Registry struct {
 	// 同一 etcd 被多套部署共用时必须隔离：键为 <namespace>/<服务名>/<实例 ID>，
 	// 前缀相同且实例 ID 相同时，后注册者会覆盖前者的端点，注销时还会删掉对方的注册。
 	Namespace string `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	// ttl_seconds 是注册租约的存活秒数（缺省 15，心跳自动续租）。
-	TtlSeconds    *int32 `protobuf:"varint,3,opt,name=ttl_seconds,json=ttlSeconds,proto3,oneof" json:"ttl_seconds,omitempty"`
+	// ttl 是注册租约的存活时间（time.ParseDuration 字符串，如 15s；空 = 底层默认 15s），
+	// 心跳自动续租。
+	Ttl           string `protobuf:"bytes,3,opt,name=ttl,proto3" json:"ttl,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -80,11 +81,11 @@ func (x *Registry) GetNamespace() string {
 	return ""
 }
 
-func (x *Registry) GetTtlSeconds() int32 {
-	if x != nil && x.TtlSeconds != nil {
-		return *x.TtlSeconds
+func (x *Registry) GetTtl() string {
+	if x != nil {
+		return x.Ttl
 	}
-	return 0
+	return ""
 }
 
 type Registry_Etcd struct {
@@ -135,15 +136,13 @@ var File_protobuf_configs_registry_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_registry_proto_rawDesc = "" +
 	"\n" +
-	"\x1fprotobuf/configs/registry.proto\x12\ratlas.configs\"\xb6\x01\n" +
+	"\x1fprotobuf/configs/registry.proto\x12\ratlas.configs\"\x92\x01\n" +
 	"\bRegistry\x120\n" +
 	"\x04etcd\x18\x01 \x01(\v2\x1c.atlas.configs.Registry.EtcdR\x04etcd\x12\x1c\n" +
-	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12$\n" +
-	"\vttl_seconds\x18\x03 \x01(\x05H\x00R\n" +
-	"ttlSeconds\x88\x01\x01\x1a$\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x10\n" +
+	"\x03ttl\x18\x03 \x01(\tR\x03ttl\x1a$\n" +
 	"\x04Etcd\x12\x1c\n" +
-	"\tendpoints\x18\x01 \x03(\tR\tendpointsB\x0e\n" +
-	"\f_ttl_secondsBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
+	"\tendpoints\x18\x01 \x03(\tR\tendpointsBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
 
 var (
 	file_protobuf_configs_registry_proto_rawDescOnce sync.Once
@@ -176,7 +175,6 @@ func file_protobuf_configs_registry_proto_init() {
 	if File_protobuf_configs_registry_proto != nil {
 		return
 	}
-	file_protobuf_configs_registry_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

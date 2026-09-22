@@ -185,7 +185,8 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 | `log/` | 日志装配 |
 | `bootstrap/` | 配置加载 + 日志 + App 组装（进程形态样板）；回填 `runtime.id`（缺省主机名）与 `runtime.env`（缺省 `default`），并把注册失败升级为启动失败 |
 | `fxkit/` | 跨服务 fx 泛型提供器（含配置 → client 映射；注册中心构造统一走 `RegistryOptions`）|
-| `serverutil/` | 传输层 Server 装配辅助 |
+| `serverutil/` | 传输层装配辅助：`server.proto` 配置 → Server 构造与选项映射（`HTTPServer`/`GRPCServer`/`HTTPOptions`/`GRPCOptions`/`TLSConfig`）+ 统一 `/health`（`HealthHandler`）；`ServeAsync` 为进程内启停辅助（第二轮生命周期统一后移除）|
+| `middleware/` | 中间件/过滤器默认链与注入点（服务端 tracing→logging→metrics、客户端 tracing、HTTP filters），业务用 `fx.Decorate` 追加 |
 | `observability/` | 链路追踪/指标初始化与 biz 层 span 辅助（StartSpan/EndSpan）|
 | `enumconv/` | proto 枚举 → Go 枚举映射辅助（未登记取值报错）|
 | `metricstest/` `spanstest/` | 测试装置：指标记录器 / 内存 span 导出器 |
@@ -206,6 +207,29 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 - 注册端与发现端**共用同一条构造路径**（`pkg/fxkit.RegistryOptions` → `pkg/registry.NewEtcd`，返回对象同时实现 Registrar 与 Discovery）；前缀不一致会表现为「注册成功却发现不到」。
 - 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的前缀**（如 `/atlas/services/it-<纳秒>`）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。
 - 实例键冲突（`registry.ErrInstanceConflict`）会让进程**启动失败退出**：同一实例 ID 的旧进程仍在运行、或异常退出后租约尚未过期（TTL 15s）都会命中，等租约过期后重启即可。**不要**改 ID 绕过——那正是要防的静默顶替。
+
+### 传输层启动参数（HTTP / gRPC）
+
+- 全部启动参数在 `protobuf/configs/server.proto` 罗列（两端各有 `network`/`addr`/`timeout`/`tls`，gRPC 另有 `stream_timeout`/`max_recv_msg_size`/`reflection`/`metadata`/`admin`，HTTP 另有 `path_prefix`/`strict_slash`/`max_request_body`）；配置 → 选项的映射只此一份：`pkg/serverutil` 的 `HTTPOptions`/`GRPCOptions`/`TLSConfig`，服务端构造走 `HTTPServer`/`GRPCServer`。
+- **空值 = 交给底层默认**：字符串为空、数值为 0、`optional` 字段未设置，都不追加对应选项——避免「不配就变行为」与「配了等于没配」。`strict_slash` 因此必须是 `optional bool`（底层默认 true，proto3 的 bool 默认 false）；`network` 是 `optional Server.Network` 枚举（语义有限值不散落字符串，映射见 `pkg/serverutil.networkOf`）。
+- 时长字段一律字符串（`config.ParseDuration`，如 `30s`），解析失败在启动期报错；`registry.ttl` 同格式。
+- 服务端构造函数返回具体类型（`*atlashttp.Server` / `*atlasgrpc.Server`），fx 图必须用 `fx.As(new(transport.Server))` 才能按接口进 `servers` 组。
+- 健康检查统一走 `serverutil.HealthHandler`，响应固定为 `{"status":"ok","service":"<name>"}`。
+
+### 中间件与过滤器装配（函数值，配置表达不了）
+
+中间件/过滤器是函数值，proto 装不下，装配点在代码层——但默认链与注入点收口在 `pkg/middleware`：
+
+| 类型 | 位置 | 应用点 |
+|------|------|--------|
+| `serverutil.Middlewares` | `pkg/middleware.Server()` 提供默认链：`tracing.Server` → `logging.Server` → `metrics.Server` | gRPC：服务端拦截器**自动**逐请求应用；HTTP：**handler 内显式 `ctx.Middleware(...)`** 包住业务调用（protoc 生成代码已如此） |
+| `serverutil.ClientMiddlewares` | `pkg/middleware.Client()`：`tracing.Client` | gRPC 拨号时挂载（`atlasgrpc.WithMiddleware`），注入 `traceparent` |
+| `serverutil.Filters` | `pkg/middleware.Filters()` 默认空 | HTTP 全局 stdlib 包装（CORS/gzip/pprof），**裸处理器也生效** |
+
+- **不要挂 `recovery`**：HTTP/gRPC 服务端已内置 panic 恢复与超时，重复挂载会双重恢复、双重打点。
+- 裸 `HandleFunc` 处理器（如 `/health`）**不经过中间件链**：探针不记日志、不打点是有意为之；手写管理接口要可观测就照生成代码的写法用 `Route(...)` + `ctx.Middleware(...)`（见 `services/matcher/internal/server` 的规则查询）。
+- 业务追加中间件不改各服务构造代码：`fx.Decorate(func(m serverutil.Middlewares) serverutil.Middlewares { return append(m, myMw) })`；过滤器同理装饰 `serverutil.Filters`。
+- 跨服务链路需要两端都挂：服务端 `tracing.Server`（extract）+ 客户端 `tracing.Client`（inject）；只挂一端会得到「每个服务各自一个 root span」。
 
 ## deploy / scripts / test — 运行与验证
 

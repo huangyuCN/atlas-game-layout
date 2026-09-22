@@ -55,6 +55,10 @@ const (
 	TracerNameActor = "atlas-actor"
 	// TracerNameBiz 是 biz 层业务 span 的 scope 名（pkg/observability.StartSpan）。
 	TracerNameBiz = "atlas-biz"
+	// TracerNameTransport 是传输层中间件 span 的 scope 名（pkg/middleware 默认链）。
+	TracerNameTransport = "atlas-transport"
+	// MeterNameTransport 是传输层中间件指标的 scope 名（otel_scope_name 标签）。
+	MeterNameTransport = "atlas-transport"
 )
 
 // MatchStartedTopic 返回成局事件主题：atlas.event.match.started。

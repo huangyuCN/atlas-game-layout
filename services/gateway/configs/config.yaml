@@ -11,6 +11,17 @@ registry:
 server:
   http:
     addr: 0.0.0.0:10080
+    timeout: 30s                  # 单次请求 handler 总执行时间（与 Atlas 默认 30s 相同，显式写出便于调整）
+    # path_prefix: /api           # 路由前缀（不配 = 无前缀）
+    # max_request_body: 1048576   # 请求体上限（字节，不配 = 1MB）
+    # strict_slash: true          # 严格斜杠（不配 = Atlas 默认 true）
+    # network: NETWORK_TCP4       # 网络类型：NETWORK_TCP(缺省)/NETWORK_TCP4/NETWORK_TCP6/NETWORK_UNIX
+    # tls:                        # TLS；不配 = 明文。字段见 protobuf/configs/server.proto
+    #   enabled: true
+    #   cert_file: configs/tls/server.crt
+    #   key_file: configs/tls/server.key
+    #   ca_file: configs/tls/ca.crt   # 配了即校验客户端证书（client_auth=true 时强制要求）
+    #   client_auth: false
 data:
   redis:
     # mode 缺省即 single（单点）；哨兵/集群形态与字段见 protobuf/configs/data.proto

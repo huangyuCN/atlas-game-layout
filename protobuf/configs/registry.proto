@@ -14,6 +14,7 @@ message Registry {
   // 同一 etcd 被多套部署共用时必须隔离：键为 <namespace>/<服务名>/<实例 ID>，
   // 前缀相同且实例 ID 相同时，后注册者会覆盖前者的端点，注销时还会删掉对方的注册。
   string namespace = 2;
-  // ttl_seconds 是注册租约的存活秒数（缺省 15，心跳自动续租）。
-  optional int32 ttl_seconds = 3;
+  // ttl 是注册租约的存活时间（time.ParseDuration 字符串，如 15s；空 = 底层默认 15s），
+  // 心跳自动续租。
+  string ttl = 3;
 }

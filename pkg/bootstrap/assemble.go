@@ -101,7 +101,7 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 			lc.Append(fx.Hook{OnStop: shutdownTrace})
 			lc.Append(fx.Hook{OnStop: m.Shutdown})
 		}),
-		Module(Options{Name: runtime.GetName(), ID: runtime.GetId(), Version: version.Version}),
+		ModuleFor(like),
 	}
 	opts = append(opts, extra...)
 	return opts, nil
@@ -132,18 +132,34 @@ func fillRuntimeIdentity(runtime *configspb.Runtime) error {
 	return nil
 }
 
+// ModuleFor 按配置装配 App 模块：服务名/实例 ID 取自 runtime，版本与链路资源属性、
+// 指标标签同源（runtime.version 优先，缺省构建注入值）——两处各取一份会让同一个进程
+// 在注册中心与链路里上报两个版本号。
+func ModuleFor(like ConfigLike) fx.Option {
+	runtime := like.GetRuntime()
+	return Module(Options{
+		Name:    runtime.GetName(),
+		ID:      runtime.GetId(),
+		Version: serviceVersionOf(runtime),
+	})
+}
+
+// serviceVersionOf 解析服务版本：runtime.version 优先，缺省构建注入值（lib/version）。
+func serviceVersionOf(runtime *configspb.Runtime) string {
+	if v := runtime.GetVersion(); v != "" {
+		return v
+	}
+	return version.Version
+}
+
 // serviceIdentityOf 从 runtime 配置提取服务身份（链路资源属性与指标常量标签共用）：
-// 版本缺省取构建注入值（lib/version），配置 runtime.version 可覆盖。
+// 版本与 ModuleFor 同源（serviceVersionOf）。
 func serviceIdentityOf(like ConfigLike) observability.ServiceIdentity {
 	runtime := like.GetRuntime()
-	ver := runtime.GetVersion()
-	if ver == "" {
-		ver = version.Version
-	}
 	return observability.ServiceIdentity{
 		Name:    runtime.GetName(),
 		ID:      runtime.GetId(),
-		Version: ver,
+		Version: serviceVersionOf(runtime),
 		Env:     runtime.GetEnv(),
 	}
 }

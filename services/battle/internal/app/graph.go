@@ -9,6 +9,7 @@ import (
 
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
+	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/actor"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
@@ -18,6 +19,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/infra"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/server"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
+	"github.com/huangyuCN/atlas/transport"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/fx"
@@ -28,6 +30,8 @@ import (
 // battleactor.Config 由 DefaultConfig 提供默认值，
 // 嵌入式形态可用 fx.Decorate 覆盖（见 assemble）。
 var Module = fx.Module("battle",
+	// 中间件/过滤器默认链（业务可用 fx.Decorate 追加自己的）。
+	middleware.Module,
 	fx.Provide(
 		actor.DefaultConfig,
 		// ── infra：注册中心 + 外部客户端 + 集群运行时 + 帧广播 ──
@@ -48,8 +52,9 @@ var Module = fx.Module("battle",
 		publisherOf,
 		handler.NewBattleHandler,
 		// ── server：传输层构造（启停归属驱动方）──
-		fx.Annotate(server.NewHTTPServer, fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(server.NewGRPCServer, fx.ResultTags(`group:"servers"`)),
+		// fx.As：构造函数返回具体类型（便于直接调 Server 字段/方法），仍以 transport.Server 进组。
+		fx.Annotate(server.NewHTTPServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
+		fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
 	),
 	fx.Invoke(
 		registerResources,

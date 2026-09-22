@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/huangyuCN/atlas"
+	"github.com/huangyuCN/atlas-game-layout/lib/version"
+	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/huangyuCN/atlas/transport"
 	"go.uber.org/fx"
@@ -177,5 +179,39 @@ func TestRegisterLifecycleWaitsReady(t *testing.T) {
 	}
 	if err := app.Stop(context.Background()); err != nil {
 		t.Fatalf("fx.Stop() 错误 = %v", err)
+	}
+}
+
+// TestModuleForVersionSource 验证 App 版本与链路资源属性/指标标签同源：
+// runtime.version 优先，缺省回退构建注入值（lib/version）——两处各取一份会让同一进程
+// 在注册中心与链路里上报两个版本号。
+func TestModuleForVersionSource(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{"配置优先", "v9.9.9", "v9.9.9"},
+		{"缺省回退构建注入值", "", version.Version},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := &testBootstrap{Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1", Version: c.configured}}
+			srv := newMockServer()
+			var app *atlas.App
+			root := fx.New(
+				fx.NopLogger,
+				fx.Supply(cfg),
+				fx.Provide(fx.Annotate(func() transport.Server { return srv }, fx.ResultTags(`group:"servers"`))),
+				ModuleFor(cfg),
+				fx.Populate(&app),
+			)
+			if err := root.Err(); err != nil {
+				t.Fatalf("依赖图校验失败: %v", err)
+			}
+			if app.Version() != c.want {
+				t.Fatalf("App 版本 = %q，期望 %q", app.Version(), c.want)
+			}
+		})
 	}
 }

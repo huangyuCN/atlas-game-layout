@@ -1,4 +1,8 @@
-// 公共配置：传输层监听地址（grpc 服务间调用、http 健康/管理）。
+// 公共配置：传输层启动参数（gRPC 服务间调用、HTTP 健康/管理）。
+//
+// 空值约定：字符串为空、数值为 0、optional 字段未设置，一律表示「交给底层默认值，不覆盖」——
+// 避免「不配就变行为」与「配了等于没配」。时长字段统一为字符串（time.ParseDuration，如 30s/1m），
+// 解析失败在启动期直接报错。
 syntax = "proto3";
 
 package atlas.configs;
@@ -6,11 +10,65 @@ package atlas.configs;
 option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
 
 message Server {
+  // TLS 是传输层 TLS 配置（HTTP/gRPC 共用；enabled=false 时忽略其余字段）。
+  message TLS {
+    // enabled 为 true 时启用 TLS。
+    bool enabled = 1;
+    // cert_file 是服务端证书链路径（PEM）。
+    string cert_file = 2;
+    // key_file 是服务端私钥路径（PEM）。
+    string key_file = 3;
+    // ca_file 是客户端 CA 证书路径（PEM）；client_auth=true 时用于校验客户端。
+    string ca_file = 4;
+    // client_auth 为 true 时要求并校验客户端证书（mTLS）。
+    bool client_auth = 5;
+  }
+  // Network 是监听网络类型（语义有限值，故用枚举而非散落字符串）。
+  enum Network {
+    // NETWORK_TCP 是 TCP（缺省，IPv4/IPv6 均可）。
+    NETWORK_TCP = 0;
+    // NETWORK_TCP4 是仅 IPv4 的 TCP。
+    NETWORK_TCP4 = 1;
+    // NETWORK_TCP6 是仅 IPv6 的 TCP。
+    NETWORK_TCP6 = 2;
+    // NETWORK_UNIX 是 Unix 域套接字（addr 写套接字路径）。
+    NETWORK_UNIX = 3;
+  }
   message GRPC {
-    string addr = 1;
+    // network 是网络类型；未设置 = 底层默认 tcp。
+    optional Network network = 1;
+    // addr 是监听地址 host:port；空 = 随机端口。
+    string addr = 2;
+    // timeout 是单次 RPC 超时（如 1s）；空 = 底层默认。
+    string timeout = 3;
+    // stream_timeout 是流式 RPC 超时；空或 0 = 不限制。
+    string stream_timeout = 4;
+    // max_recv_msg_size 是单条消息接收上限（字节）；0 = 底层默认。
+    int32 max_recv_msg_size = 5;
+    // reflection 是否开启 gRPC reflection（底层默认关闭；仅调试/测试环境建议开启）。
+    bool reflection = 6;
+    // metadata 是否注册 metadata 服务。
+    bool metadata = 7;
+    // admin 是否注册 admin 服务。
+    bool admin = 8;
+    // tls 是 TLS 配置；不配 = 明文。
+    TLS tls = 9;
   }
   message HTTP {
-    string addr = 1;
+    // network 是网络类型；未设置 = 底层默认 tcp。
+    optional Network network = 1;
+    // addr 是监听地址 host:port；空 = 随机端口。
+    string addr = 2;
+    // timeout 是单次请求 handler 的总执行时间（如 30s）；空 = 底层默认。
+    string timeout = 3;
+    // path_prefix 是路由前缀；空 = 无前缀。
+    string path_prefix = 4;
+    // strict_slash 是否严格斜杠（底层默认 true）；未设置时保持底层默认。
+    optional bool strict_slash = 5;
+    // max_request_body 是请求体上限（字节）；0 = 底层默认。
+    int64 max_request_body = 6;
+    // tls 是 TLS 配置；不配 = 明文。
+    TLS tls = 7;
   }
   GRPC grpc = 1;
   HTTP http = 2;

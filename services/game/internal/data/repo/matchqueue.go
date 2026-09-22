@@ -9,6 +9,7 @@ import (
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
 	"github.com/huangyuCN/atlas/registry"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
@@ -23,11 +24,13 @@ type MatchQueueGRPC struct {
 }
 
 // NewMatchQueueGRPC 构造 matcher gRPC 客户端（服务发现寻址）；
-// 发现器由装配层按注册配置提供，与注册端共用同一键前缀。
-func NewMatchQueueGRPC(ctx context.Context, discovery registry.Discovery) (*MatchQueueGRPC, error) {
+// 发现器与客户端中间件由装配层提供——后者注入 traceparent，使 game→matcher 落在同一条链路。
+func NewMatchQueueGRPC(ctx context.Context, discovery registry.Discovery,
+	mws serverutil.ClientMiddlewares) (*MatchQueueGRPC, error) {
 	conn, err := atlasgrpc.DialInsecure(ctx,
 		atlasgrpc.WithDiscovery(discovery),
 		atlasgrpc.WithEndpoint(discoveryTarget),
+		atlasgrpc.WithMiddleware(mws...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("repo: 连接 matcher 服务失败: %w", err)
