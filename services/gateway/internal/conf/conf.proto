@@ -13,6 +13,7 @@ import "protobuf/configs/server.proto";
 import "protobuf/configs/data.proto";
 import "protobuf/configs/log.proto";
 import "protobuf/configs/observability.proto";
+import "protobuf/configs/session.proto";
 
 message Bootstrap {
   atlas.configs.Runtime runtime = 1;
@@ -20,6 +21,8 @@ message Bootstrap {
   atlas.configs.Server server = 3;
   atlas.configs.Data data = 4;
   atlas.configs.Log log = 5;
+  // session 是会话租期（路由 TTL 与过期清扫周期；不配 = 默认 30s / ttl 的一半）。
+  atlas.configs.Session session = 6;
   // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
   atlas.configs.Observability observability = 14;
 }

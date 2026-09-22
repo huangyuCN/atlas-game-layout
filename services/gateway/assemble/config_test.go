@@ -18,4 +18,7 @@ func TestServiceConfigLoads(t *testing.T) {
 	if cfg.GetRuntime().GetName() != "gateway" {
 		t.Fatalf("runtime.name = %q, 期望 gateway", cfg.GetRuntime().GetName())
 	}
+	if cfg.GetSession().GetTtl() != "30s" {
+		t.Fatalf("session.ttl = %q, 期望 30s", cfg.GetSession().GetTtl())
+	}
 }

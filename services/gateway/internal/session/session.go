@@ -68,11 +68,12 @@ type Session struct {
 // Manager 是分布式会话管理器：本地连接表 + redis 路由表。
 // 所有方法并发安全；心跳清扫由 Start/SweepOnce 驱动。
 type Manager struct {
-	store      Store
-	instanceID string
-	ttl        time.Duration
-	sweptHook  func(swept []SweptSession) // 过期清扫联动钩子（nil = 不联动）
-	meter      metrics.Collector          // 可选指标采集器（nil = 不打点）
+	store         Store
+	instanceID    string
+	ttl           time.Duration              // 生效会话租期（路由 TTL 与心跳续租周期，见 Options）
+	sweepInterval time.Duration              // 生效过期清扫周期（Start 的 ticker）
+	sweptHook     func(swept []SweptSession) // 过期清扫联动钩子（nil = 不联动）
+	meter         metrics.Collector          // 可选指标采集器（nil = 不打点）
 
 	mu    sync.RWMutex
 	local map[string]*Session // playerID → 本地会话
@@ -80,15 +81,17 @@ type Manager struct {
 	toks  map[string]string   // 会话凭据 → playerID（帧会话槽反查玩家身份；Bind 时登记）
 }
 
-// NewManager 构造会话管理器。
-func NewManager(store Store, instanceID string, ttl time.Duration) *Manager {
+// NewManager 构造会话管理器（opts 零值即默认租期与清扫周期，见 Options）。
+func NewManager(store Store, instanceID string, opts Options) *Manager {
+	ttl, sweepInterval := opts.resolve()
 	return &Manager{
-		store:      store,
-		instanceID: instanceID,
-		ttl:        ttl,
-		local:      make(map[string]*Session),
-		refs:       make(map[string]string),
-		toks:       make(map[string]string),
+		store:         store,
+		instanceID:    instanceID,
+		ttl:           ttl,
+		sweepInterval: sweepInterval,
+		local:         make(map[string]*Session),
+		refs:          make(map[string]string),
+		toks:          make(map[string]string),
 	}
 }
 
@@ -429,14 +432,10 @@ func (m *Manager) SetSweptHook(fn func(swept []SweptSession)) {
 	m.sweptHook = fn
 }
 
-// Start 启动后台心跳清扫循环；ctx 取消时退出。
+// Start 启动后台心跳清扫循环（周期为生效清扫周期，见 Options）；ctx 取消时退出。
 func (m *Manager) Start(ctx context.Context) {
-	interval := m.ttl / 2
-	if interval < time.Millisecond {
-		interval = time.Millisecond
-	}
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(m.sweepInterval)
 		defer ticker.Stop()
 		for {
 			select {

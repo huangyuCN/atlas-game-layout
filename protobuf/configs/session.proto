@@ -1,0 +1,18 @@
+// 公共配置：会话租期（gateway 会话路由 TTL 与过期清扫周期）。
+// 会话租期决定三件事：redis 路由表 TTL（跨实例寻址窗口）、心跳续租周期、
+// 心跳超时判定阈值；清扫周期决定过期会话被清理（并联动玩家下线）的时延。
+syntax = "proto3";
+
+package atlas.configs;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
+
+message Session {
+  // ttl 是会话路由租期（redis 路由 TTL 与心跳续租周期，time.ParseDuration 字符串，
+  // 如 30s；空 = 默认 30s）。取值应 ≥ 客户端会话心跳周期的 3 倍（允许连丢两次仍不掉线）：
+  // 客户端心跳由 SDK 决定（默认 30s，本仓集成脚本设为 10s），用 SDK 默认心跳时 ttl 应 ≥90s。
+  string ttl = 1;
+  // sweep_interval 是过期会话清扫周期（如 15s；空 = ttl 的一半）。
+  // 调大 = 过期会话（及联动下线通知）多留一会儿，redis/调用开销更低；调小 = 发现更快。
+  string sweep_interval = 2;
+}

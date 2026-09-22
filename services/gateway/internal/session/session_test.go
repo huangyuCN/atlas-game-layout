@@ -11,13 +11,20 @@ import (
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 )
 
-// newTestManager 起 miniredis 并构造 Manager（ttl 默认 30s）。
+// newTestManager 起 miniredis 并构造 Manager（租期与清扫周期全默认）。
 func newTestManager(t *testing.T, instanceID string) *Manager {
-	return newTestManagerWithTTL(t, instanceID, 30*time.Second)
+	m, _ := newTestEnv(t, instanceID, Options{})
+	return m
 }
 
 // newTestManagerWithTTL 同上，但指定会话 TTL（过期清扫用例）。
 func newTestManagerWithTTL(t *testing.T, instanceID string, ttl time.Duration) *Manager {
+	m, _ := newTestEnv(t, instanceID, Options{TTL: ttl})
+	return m
+}
+
+// newTestEnv 起 miniredis 并构造 Manager（一并返回 miniredis，供断言路由键剩余 TTL）。
+func newTestEnv(t *testing.T, instanceID string, opts Options) (*Manager, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{mr.Addr()}})
@@ -25,7 +32,32 @@ func newTestManagerWithTTL(t *testing.T, instanceID string, ttl time.Duration) *
 		t.Fatalf("NewClient: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	return NewManager(NewRedisStore(cli), instanceID, ttl)
+	return NewManager(NewRedisStore(cli), instanceID, opts), mr
+}
+
+// TestOptionsResolve 验证租期/清扫周期的默认回落与下限保护。
+func TestOptionsResolve(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      Options
+		wantTTL   time.Duration
+		wantSweep time.Duration
+	}{
+		{"零值取默认", Options{}, DefaultTTL, DefaultTTL / 2},
+		{"只配租期则清扫取一半", Options{TTL: 90 * time.Second}, 90 * time.Second, 45 * time.Second},
+		{"两者都配原样生效", Options{TTL: 90 * time.Second, SweepInterval: 5 * time.Second}, 90 * time.Second, 5 * time.Second},
+		{"负租期回落默认", Options{TTL: -time.Second}, DefaultTTL, DefaultTTL / 2},
+		{"负清扫周期按租期一半", Options{TTL: time.Minute, SweepInterval: -time.Second}, time.Minute, 30 * time.Second},
+		{"极小租期清扫不低于 1ms", Options{TTL: time.Microsecond}, time.Microsecond, time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ttl, sweep := tt.opts.resolve()
+			if ttl != tt.wantTTL || sweep != tt.wantSweep {
+				t.Fatalf("resolve() = (%v, %v), want (%v, %v)", ttl, sweep, tt.wantTTL, tt.wantSweep)
+			}
+		})
+	}
 }
 
 // fakeConn 是会话视角的测试连接。
@@ -171,6 +203,28 @@ func TestHeartbeatRefreshesTTL(t *testing.T) {
 	}
 }
 
+// TestHeartbeatAppliesConfiguredTTL 验证 Bind 与 Heartbeat 两跳都用配置租期（而非内置默认 30s）：
+// 先把路由 TTL 压到 5s，只有心跳真的按配置租期续租，才能回到 ≈90s。
+func TestHeartbeatAppliesConfiguredTTL(t *testing.T) {
+	ctx := context.Background()
+	m, mr := newTestEnv(t, "gw-1", Options{TTL: 90 * time.Second})
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if ttl := mr.TTL("atlas:gw:p-1"); ttl <= 80*time.Second || ttl > 90*time.Second {
+		t.Fatalf("Bind 后路由 TTL = %v, 期望 ≈90s（配置租期）", ttl)
+	}
+	if err := m.store.Expire(ctx, "p-1", 5*time.Second); err != nil {
+		t.Fatalf("压短路由 TTL: %v", err)
+	}
+	if !m.Heartbeat(ctx, "p-1", "token-1") {
+		t.Fatal("Heartbeat 应成功")
+	}
+	if ttl := mr.TTL("atlas:gw:p-1"); ttl <= 80*time.Second || ttl > 90*time.Second {
+		t.Fatalf("心跳后路由 TTL = %v, 期望 ≈90s（心跳按配置租期续租）", ttl)
+	}
+}
+
 // TestValidateToken 验证令牌校验的三种状态。
 func TestValidateToken(t *testing.T) {
 	ctx := context.Background()
@@ -305,6 +359,31 @@ func TestSweepSkipsFreshSessions(t *testing.T) {
 	if _, ok := m.LocalSession("p-1"); !ok {
 		t.Fatal("未过期会话被误删")
 	}
+}
+
+// TestStartHonorsSweepInterval 验证清扫循环用的是配置周期而非 ttl/2 推导值：
+// ttl=2s（推导清扫 1s）配 sweep_interval=10ms 时，过期会话必须在 400ms 内被清掉。
+func TestStartHonorsSweepInterval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m, _ := newTestEnv(t, "gw-1", Options{TTL: 2 * time.Second, SweepInterval: 10 * time.Millisecond})
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	// 直接把本地心跳拨到过期（免等 2s）：清扫只以本地 LastHeartbeat 判定。
+	m.mu.Lock()
+	m.local["p-1"].LastHeartbeat = time.Now().Add(-time.Minute)
+	m.mu.Unlock()
+
+	m.Start(ctx)
+	deadline := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if m.Count() == 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("清扫未在 400ms 内执行（Count=%d）：配置的 sweep_interval 未生效", m.Count())
 }
 
 // TestRouteLegacyValueCompatibility 验证 M2 旧版纯实例 ID 字符串可解析。

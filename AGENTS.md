@@ -234,6 +234,21 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 - 业务追加中间件不改各服务构造代码：`fx.Decorate(func(m serverutil.Middlewares) serverutil.Middlewares { return append(m, myMw) })`；过滤器同理装饰 `serverutil.Filters`。
 - 跨服务链路需要两端都挂：服务端 `tracing.Server`（extract）+ 客户端 `tracing.Client`（inject）；只挂一端会得到「每个服务各自一个 root span」。
 
+## protobuf/configs — 公共配置面
+
+各服务 `Bootstrap` 引用的公共配置消息：`runtime`（身份）、`registry`（注册中心）、`server`（六协议传输）、
+`session`（gateway 会话租期）、`data`（redis/nats/mongo）、`log`、`observability`。通用约定：
+时长一律 `string`（`pkg/config.ParseDuration` 解析，如 `30s`）、空值 = 不覆盖底层默认、
+非法/非正值启动期报错、默认值下沉到实现包（不在装配层散落）。
+
+### 会话租期（gateway 会话 TTL / 过期清扫）
+
+- **参数在 `protobuf/configs/session.proto`**（`atlas.configs.Session`，仅 gateway `Bootstrap.session` 引用）：`ttl` 是会话路由租期，`sweep_interval` 是过期会话清扫周期。
+- 生效链路只有一条：`config.yaml → conf.Bootstrap.session → app.sessionOptionsOf → session.Options → Manager`。`ttl` 同时决定 redis 路由 TTL（`Bind`）、心跳续租（`Heartbeat`）与过期判定阈值（`SweepOnce`）；`sweep_interval` 决定清扫 ticker（`Start`）。
+- **默认值下沉在 session 包**：`session.DefaultTTL`、清扫缺省取生效 `ttl` 的一半、生效清扫周期下限 1ms（`time.NewTicker` 对非正值 panic）。装配层只做「解析 + 透传零值」。
+- **租期与客户端心跳的关系**：生效租期应 ≥ 客户端会话心跳周期的 3 倍（允许连丢两次仍不掉线）。心跳周期由客户端 SDK 决定（`sdkclient.WithSessionHeartbeatInterval`，**默认 30s**；本仓集成脚本显式设为 10s）——模板 `ttl: 30s` 对应 10s 心跳；客户端若用 SDK 默认心跳，须把 `ttl` 配到 ≥90s，否则活跃会话会被误判过期清扫并触发下线联动。
+- `session.Options` 用具名结构体而不是两个相邻的 `time.Duration` 形参：调用侧写反顺序编译器不会报错，具名字段消除这一类事故；`sweep_interval > ttl` 是合法运维选择（过期会话多留一会儿），不做关系校验。
+
 ## deploy / scripts / test — 运行与验证
 
 | 目录 | 职责 |

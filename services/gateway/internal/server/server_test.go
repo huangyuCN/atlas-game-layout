@@ -106,7 +106,7 @@ func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Co
 	tcpSrv, wsSrv, kcpSrv, udpSrv := newTransportServers(t)
 	push, kcpPush := new(fakePusher), new(fakePusher)
 
-	sess := session.NewManager(session.NewRedisStore(cli), id, 30*time.Second)
+	sess := session.NewManager(session.NewRedisStore(cli), id, session.Options{TTL: 30 * time.Second})
 	mock := newMockActorRuntime()
 	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), meter, nc,
 		push, new(fakePusher), kcpPush, udpSrv)

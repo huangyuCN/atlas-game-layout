@@ -70,6 +70,13 @@ server:
     # max_body_size: 1048576      # 单包最大字节数
     # idle_timeout: 60s           # 对端空闲超时（不配 = 不限）
     # max_peers: 10000            # 最大对端数（不配 = 不限）
+# 会话租期：redis 路由 TTL + 心跳续租周期，同时决定心跳超时判定阈值
+# （下调 = 断线发现更快，代价是 redis 心跳写更频繁）。
+# 取值应 ≥ 客户端会话心跳周期的 3 倍（允许连丢两次仍不掉线）：模板集成客户端心跳 10s，
+# 故 30s 合适；若客户端用 SDK 默认心跳（30s），请把 ttl 调到 ≥90s。
+session:
+  ttl: 30s
+  # sweep_interval: 15s         # 过期会话清扫周期（不配 = ttl 的一半）
 data:
   redis:
     # mode 缺省即 single（单点）；哨兵/集群形态与字段见 protobuf/configs/data.proto

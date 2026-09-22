@@ -2,10 +2,10 @@ package app
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
+	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
@@ -15,9 +15,6 @@ import (
 	"github.com/huangyuCN/atlas/registry"
 	natsgo "github.com/nats-io/nats.go"
 )
-
-// sessionTTL 是会话路由的默认租期（心跳续租周期，与 game 会话租期对齐）。
-const sessionTTL = 30 * time.Second
 
 // NewNatsConn 装配 NATS 连接（推送订阅 + gateway 控制通道）。
 func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
@@ -36,15 +33,33 @@ func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 	return conn, nil
 }
 
+// sessionOptionsOf 把会话租期配置映射为管理器参数：空值透传零值
+// （默认值由 session 包兜底，见 session.DefaultTTL），非法值启动期报错。
+func sessionOptionsOf(cfg *conf.Bootstrap) (session.Options, error) {
+	ttl, err := config.ParseDuration(cfg.GetSession().GetTtl())
+	if err != nil {
+		return session.Options{}, fmt.Errorf("app: session.ttl 无效: %w", err)
+	}
+	sweep, err := config.ParseDuration(cfg.GetSession().GetSweepInterval())
+	if err != nil {
+		return session.Options{}, fmt.Errorf("app: session.sweep_interval 无效: %w", err)
+	}
+	return session.Options{TTL: ttl, SweepInterval: sweep}, nil
+}
+
 // newSessionManager 装配分布式会话管理器（并注入指标采集器）。
-func newSessionManager(cfg *conf.Bootstrap, cli *pkredis.Client, meter metrics.Collector) *session.Manager {
+func newSessionManager(cfg *conf.Bootstrap, cli *pkredis.Client, meter metrics.Collector) (*session.Manager, error) {
+	opts, err := sessionOptionsOf(cfg)
+	if err != nil {
+		return nil, err
+	}
 	instanceID := ""
 	if r := cfg.GetRuntime(); r != nil {
 		instanceID = r.GetId()
 	}
-	m := session.NewManager(session.NewRedisStore(cli), instanceID, sessionTTL)
+	m := session.NewManager(session.NewRedisStore(cli), instanceID, opts)
 	m.SetMeter(meter)
-	return m
+	return m, nil
 }
 
 // NewActorClient 装配远程 actor 客户端背后的集群运行时
