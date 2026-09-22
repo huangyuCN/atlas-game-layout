@@ -2,12 +2,14 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/huangyuCN/atlas"
+	"github.com/huangyuCN/atlas/registry"
 	"github.com/huangyuCN/atlas/transport"
 	"go.uber.org/fx"
 )
@@ -89,6 +91,7 @@ func TestRegisterLifecycle(t *testing.T) {
 
 	app := fx.New(
 		fx.Provide(func() *atlas.App { return res.App }),
+		fx.Supply(res.Start),
 		fx.Invoke(RegisterLifecycle),
 	)
 	startCtx, cancel := context.WithCancel(context.Background())
@@ -109,5 +112,70 @@ func TestRegisterLifecycle(t *testing.T) {
 	case <-srv.stopCh:
 	case <-time.After(5 * time.Second):
 		t.Fatal("server.Stop 未被调用（等待超时）")
+	}
+}
+
+// failingRegistrar 是注册必然失败的测试替身。
+type failingRegistrar struct {
+	err error
+}
+
+func (f *failingRegistrar) Register(context.Context, *registry.ServiceInstance) error {
+	return f.err
+}
+
+func (f *failingRegistrar) Deregister(context.Context, *registry.ServiceInstance) error { return nil }
+
+// TestRegisterLifecycleFailsOnRegisterError 验证注册失败升级为启动失败：
+// 否则实例会带着「端口已监听但注册中心里没有」的半死状态继续运行。
+func TestRegisterLifecycleFailsOnRegisterError(t *testing.T) {
+	srv := newMockServer()
+	res, err := New(Params{
+		Servers:   []transport.Server{srv},
+		Registrar: &failingRegistrar{err: registry.ErrInstanceConflict},
+	}, Options{Name: "demo"})
+	if err != nil {
+		t.Fatalf("New() 错误 = %v", err)
+	}
+
+	app := fx.New(
+		fx.Provide(func() *atlas.App { return res.App }),
+		fx.Supply(res.Start),
+		fx.Invoke(RegisterLifecycle),
+	)
+	err = app.Start(context.Background())
+	if err == nil {
+		t.Fatal("注册失败应导致启动失败，实际为 nil")
+	}
+	if !errors.Is(err, registry.ErrInstanceConflict) {
+		t.Fatalf("启动错误应包裹 ErrInstanceConflict，实际 %v", err)
+	}
+}
+
+// TestRegisterLifecycleWaitsReady 验证 Start 在服务注册完成后才返回：
+// 启动结果信号未到不得提前返回（否则注册失败会被当成启动成功）。
+func TestRegisterLifecycleWaitsReady(t *testing.T) {
+	srv := newMockServer()
+	res, err := New(Params{Servers: []transport.Server{srv}}, Options{Name: "demo"})
+	if err != nil {
+		t.Fatalf("New() 错误 = %v", err)
+	}
+
+	app := fx.New(
+		fx.Provide(func() *atlas.App { return res.App }),
+		fx.Supply(res.Start),
+		fx.Invoke(RegisterLifecycle),
+	)
+	if err := app.Start(context.Background()); err != nil {
+		t.Fatalf("fx.Start() 错误 = %v", err)
+	}
+	// Start 返回时 App 已完成注册（本用例无注册器，等价于已就绪）。
+	select {
+	case <-srv.started:
+	default:
+		t.Fatal("Start 返回时 server 尚未启动：就绪信号未生效")
+	}
+	if err := app.Stop(context.Background()); err != nil {
+		t.Fatalf("fx.Stop() 错误 = %v", err)
 	}
 }

@@ -89,6 +89,7 @@ func TestE2EMatcherQueue(t *testing.T) {
 		NatsURL:       itNatsURL,
 		RedisAddrs:    []string{itRedisAddr},
 		SinkOverride:  sink,
+		Namespace:     itNamespace,
 	})
 	if err != nil {
 		t.Fatalf("matcher 装配: %v", err)

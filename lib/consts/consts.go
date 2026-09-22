@@ -9,6 +9,12 @@ const (
 	ServiceBattle  = "battle"
 )
 
+// 运行环境（注册中心键前缀按环境隔离，见 pkg/registry.NamespaceOf）。
+const (
+	// EnvDefault 是 runtime.env 未配置时的缺省环境名。
+	EnvDefault = "default"
+)
+
 // Actor 类型名（集群懒激活的 group 名，PID 形如 <Type>:<Key>）。
 const (
 	ActorTypePlayer = "player"

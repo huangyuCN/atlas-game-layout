@@ -169,6 +169,7 @@ func startMatcherForBattle(t *testing.T, ctx context.Context) *matcherassemble.M
 		EtcdEndpoints: []string{itEtcdEndpoints},
 		NatsURL:       itNatsURL,
 		RedisAddrs:    []string{itRedisAddr},
+		Namespace:     itNamespace,
 	})
 	if err != nil {
 		t.Fatalf("matcher 装配: %v", err)

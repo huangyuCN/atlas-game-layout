@@ -33,6 +33,10 @@ type Options struct {
 	EtcdEndpoints []string
 	NatsURL       string
 	RedisAddrs    []string
+	// Namespace 是注册中心键前缀（可选）：嵌入式/测试形态用它把实例与常驻进程隔离，
+	// 并避免上一次运行残留的实例键（租约未过期）导致注册冲突；
+	// 缺省按 runtime.env 派生（/atlas/services/<env>）。
+	Namespace string
 }
 
 // Gateway 是装配完成的 gateway 实例句柄。
@@ -154,7 +158,8 @@ func newBootstrap(o Options) *conf.Bootstrap {
 	return &conf.Bootstrap{
 		Runtime: &configspb.Runtime{Name: "gateway", Id: "gw-" + o.ID},
 		Registry: &configspb.Registry{
-			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+			Etcd:      &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+			Namespace: o.Namespace,
 		},
 		Server: &configspb.Server{
 			Grpc: &configspb.Server_GRPC{Addr: randomPort},

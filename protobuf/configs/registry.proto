@@ -10,4 +10,10 @@ message Registry {
     repeated string endpoints = 1;
   }
   Etcd etcd = 1;
+  // namespace 是注册中心键前缀；缺省按环境隔离（/atlas/services/<runtime.env>）。
+  // 同一 etcd 被多套部署共用时必须隔离：键为 <namespace>/<服务名>/<实例 ID>，
+  // 前缀相同且实例 ID 相同时，后注册者会覆盖前者的端点，注销时还会删掉对方的注册。
+  string namespace = 2;
+  // ttl_seconds 是注册租约的存活秒数（缺省 15，心跳自动续租）。
+  optional int32 ttl_seconds = 3;
 }

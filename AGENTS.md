@@ -180,11 +180,11 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 |--------|------|
 | `actor/` | actor 集群接入装配 |
 | `redis/` `nats/` `mongo/` `etcd/` | 中间件 client 装配（fx 提供者）|
-| `registry/` | 服务注册/发现装配 |
+| `registry/` | 服务注册/发现装配（键前缀派生 `NamespaceOf`：显式配置优先，否则按 `runtime.env` 隔离）|
 | `config/` | 配置加载 |
 | `log/` | 日志装配 |
-| `bootstrap/` | 配置加载 + 日志 + App 组装（进程形态样板）|
-| `fxkit/` | 跨服务 fx 泛型提供器（含配置 → client 映射）|
+| `bootstrap/` | 配置加载 + 日志 + App 组装（进程形态样板）；回填 `runtime.id`（缺省主机名）与 `runtime.env`（缺省 `default`），并把注册失败升级为启动失败 |
+| `fxkit/` | 跨服务 fx 泛型提供器（含配置 → client 映射；注册中心构造统一走 `RegistryOptions`）|
 | `serverutil/` | 传输层 Server 装配辅助 |
 | `observability/` | 链路追踪/指标初始化与 biz 层 span 辅助（StartSpan/EndSpan）|
 | `enumconv/` | proto 枚举 → Go 枚举映射辅助（未登记取值报错）|
@@ -192,6 +192,20 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 
 > 依赖分层：`lib/` < `pkg/` < `services/*/internal/*` < `assemble`。
 > `pkg/` 可依赖 Atlas 与 cow（装配层允许）；`lib/` 不依赖框架。
+
+### 注册中心身份与隔离（改装配/配置时必须遵守）
+
+实例键为 `<键前缀>/<服务名>/<实例 ID>`（Atlas `contrib/registry/etcd`），三者取值规则：
+
+| 维度 | 取值 | 为什么 |
+|------|------|--------|
+| 键前缀 | `registry.namespace` 显式配置优先，否则 `/atlas/services/<runtime.env>`（`env` 缺省 `default`）| 多套部署共用同一 etcd 时必须靠它隔离：前缀与实例 ID 都相同会让后注册者覆盖前者的端点，且前者注销时删掉后者的注册 |
+| 实例 ID | `runtime.id` 显式配置优先，否则取主机名（`bootstrap.AssembleLoaded` 回填）| 注册实例 ID、actor NodeID、指标 `service_instance_id` **必须同源**；留空会让 Atlas 为注册另生成 UUID，与 actor NodeID 不一致 |
+| 服务名 | `runtime.name` | 同前缀下不同服务天然隔离 |
+
+- 注册端与发现端**共用同一条构造路径**（`pkg/fxkit.RegistryOptions` → `pkg/registry.NewEtcd`，返回对象同时实现 Registrar 与 Discovery）；前缀不一致会表现为「注册成功却发现不到」。
+- 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的前缀**（如 `/atlas/services/it-<纳秒>`）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。
+- 实例键冲突（`registry.ErrInstanceConflict`）会让进程**启动失败退出**：同一实例 ID 的旧进程仍在运行、或异常退出后租约尚未过期（TTL 15s）都会命中，等租约过期后重启即可。**不要**改 ID 绕过——那正是要防的静默顶替。
 
 ## deploy / scripts / test — 运行与验证
 

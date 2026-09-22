@@ -30,6 +30,10 @@ type Options struct {
 	// SinkOverride 是成局观察方的测试注入点
 	//（nil 时用默认组合：nats 发布 + actor 开局调用，见 internal/app newSink）。
 	SinkOverride biz.MatchEventSink
+	// Namespace 是注册中心键前缀（可选）：嵌入式/测试形态用它把实例与常驻进程隔离，
+	// 并避免上一次运行残留的实例键（租约未过期）导致注册冲突；
+	// 缺省按 runtime.env 派生（/atlas/services/<env>）。
+	Namespace string
 }
 
 // Matcher 是装配完成的 matcher 服务句柄。
@@ -136,7 +140,8 @@ func newBootstrap(o Options) *conf.Bootstrap {
 	return &conf.Bootstrap{
 		Runtime: &configspb.Runtime{Name: "matcher", Id: o.NodeID},
 		Registry: &configspb.Registry{
-			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+			Etcd:      &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+			Namespace: o.Namespace,
 		},
 		Server: &configspb.Server{
 			Grpc: &configspb.Server_GRPC{Addr: randomPort},

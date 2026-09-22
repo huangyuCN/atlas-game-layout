@@ -1,8 +1,9 @@
 runtime:
   name: gateway
-  id: gateway-1
+  # id 缺省取主机名：注册实例 ID、actor NodeID 与指标 service_instance_id 三处同源，
+  # 且同名服务多副本部署在不同主机时天然唯一（同主机多副本才需在此显式配唯一 id）。
   # version 缺省取构建注入版本（lib/version，Makefile/CI 经 -ldflags 写入）；需要时在此覆盖
-  env: test        # 进链路资源 deployment.environment.name
+  env: test        # 进链路资源 deployment.environment.name，并决定注册中心键前缀 /atlas/services/<env>
 registry:
   etcd:
     endpoints:

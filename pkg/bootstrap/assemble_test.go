@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 )
 
@@ -105,5 +106,42 @@ func TestAssembleMissingFile(t *testing.T) {
 	var cfg testBootstrap
 	if _, err := Assemble("demo", &cfg); err == nil {
 		t.Fatal("Assemble() 期望配置加载错误，实际为 nil")
+	}
+}
+
+// TestAssembleLoadedFillsIdentity 验证 runtime 身份缺省值回填：
+// id 取主机名（注册实例 ID、actor NodeID、指标 service_instance_id 三处同源，
+// 缺省留空会让三处不一致），env 取 default（注册中心键前缀按它隔离）。
+func TestAssembleLoadedFillsIdentity(t *testing.T) {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		t.Skip("无法获取主机名")
+	}
+	cfg := &testBootstrap{
+		Runtime: &configspb.Runtime{Name: "demo"},
+		lg:      &configspb.Log{Level: "error"},
+	}
+	if _, err := AssembleLoaded(cfg); err != nil {
+		t.Fatalf("AssembleLoaded() 错误 = %v", err)
+	}
+	if cfg.GetId() != host {
+		t.Fatalf("runtime.id 应回填主机名 %q，实际 %q", host, cfg.GetId())
+	}
+	if cfg.GetEnv() != consts.EnvDefault {
+		t.Fatalf("runtime.env 应回填 %q，实际 %q", consts.EnvDefault, cfg.GetEnv())
+	}
+}
+
+// TestAssembleLoadedKeepsIdentity 验证已显式配置的身份不被回填覆盖。
+func TestAssembleLoadedKeepsIdentity(t *testing.T) {
+	cfg := &testBootstrap{
+		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1", Env: "prod"},
+		lg:      &configspb.Log{Level: "error"},
+	}
+	if _, err := AssembleLoaded(cfg); err != nil {
+		t.Fatalf("AssembleLoaded() 错误 = %v", err)
+	}
+	if cfg.GetId() != "demo-1" || cfg.GetEnv() != "prod" {
+		t.Fatalf("显式身份被覆盖: id=%q env=%q", cfg.GetId(), cfg.GetEnv())
 	}
 }

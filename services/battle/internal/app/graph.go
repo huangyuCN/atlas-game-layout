@@ -32,7 +32,9 @@ var Module = fx.Module("battle",
 		actor.DefaultConfig,
 		// ── infra：注册中心 + 外部客户端 + 集群运行时 + 帧广播 ──
 		fxkit.NewEtcdClient[*conf.Bootstrap],
-		fxkit.NewRegistrar, // → registry.Registrar，供 atlas.App 服务注册
+		fxkit.NewRegistrar[*conf.Bootstrap], // → registry.Registrar，供 atlas.App 服务注册
+		// → registry.Discovery：actor 集群选节点与 gRPC 客户端寻址共用（键前缀与注册端同源）
+		fxkit.NewEtcdDiscovery[*conf.Bootstrap],
 		NewNatsConn,
 		NewMongoClient,
 		NewActorRuntime,

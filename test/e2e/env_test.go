@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	battleassemble "github.com/huangyuCN/atlas-game-layout/services/battle/assemble"
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
 	gwassemble "github.com/huangyuCN/atlas-game-layout/services/gateway/assemble"
@@ -27,6 +29,10 @@ const (
 	itMongoURI      = "mongodb://127.0.0.1:27018"
 	itMongoDB       = "game_it"
 )
+
+// itNamespace 是本次测试运行独占的注册中心键前缀：与常驻进程（按 runtime.env 派生）
+// 隔离，也不会命中上一次运行残留的实例键（租约未过期）导致注册冲突。
+var itNamespace = fmt.Sprintf("%s/it-%d", pkgregistry.NamespacePrefix, time.Now().UnixNano())
 
 // probeCore 探测基础中间件（etcd/redis/nats）；不可用返回 skip 原因。
 func probeCore(t *testing.T) string {
@@ -84,6 +90,7 @@ func newGame(t *testing.T) *gameassemble.Game {
 		RedisAddrs:    []string{itRedisAddr},
 		MongoURI:      itMongoURI,
 		MongoDB:       itMongoDB,
+		Namespace:     itNamespace,
 	})
 	if err != nil {
 		t.Fatalf("game 装配: %v", err)
@@ -100,6 +107,7 @@ func newGateway(t *testing.T, id string) *gwassemble.Gateway {
 		EtcdEndpoints: []string{itEtcdEndpoints},
 		NatsURL:       itNatsURL,
 		RedisAddrs:    []string{itRedisAddr},
+		Namespace:     itNamespace,
 	})
 	if err != nil {
 		t.Fatalf("gateway 装配: %v", err)
@@ -118,6 +126,7 @@ func newBattle(t *testing.T, cfg *battleassemble.BattleConfig) *battleassemble.B
 		MongoURI:      itMongoURI,
 		MongoDB:       itMongoDB,
 		BattleCfg:     cfg,
+		Namespace:     itNamespace,
 	})
 	if err != nil {
 		t.Fatalf("battle 装配: %v", err)

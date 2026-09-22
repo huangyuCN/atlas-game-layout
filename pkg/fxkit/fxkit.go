@@ -7,12 +7,14 @@ package fxkit
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	etcdreg "github.com/huangyuCN/atlas/contrib/registry/etcd"
 	"github.com/huangyuCN/atlas/registry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -21,6 +23,18 @@ import (
 // （各服务生成的 *Bootstrap 自动满足）。
 type WithRegistry interface {
 	GetRegistry() *configspb.Registry
+}
+
+// WithRuntime 是提取服务运行时身份所需的最小接口
+// （各服务生成的 *Bootstrap 自动满足）。
+type WithRuntime interface {
+	GetRuntime() *configspb.Runtime
+}
+
+// RegistryConfig 是装配注册中心所需的最小配置接口：注册中心配置段 + 服务身份。
+type RegistryConfig interface {
+	WithRegistry
+	WithRuntime
 }
 
 // EtcdEndpoints 提取 registry.etcd.endpoints（缺失时返回 nil）。
@@ -46,11 +60,54 @@ func NewEtcdClient[B WithRegistry](cfg B) (*clientv3.Client, error) {
 	return cli, nil
 }
 
-// NewRegistrar 基于 etcd 客户端装配 Atlas 注册器（Registrar + Discovery 同一实现）。
-func NewRegistrar(ec *clientv3.Client) (registry.Registrar, error) {
-	reg, err := pkgregistry.NewEtcd(ec, pkgregistry.Options{})
+// RegistryOptions 把 registry 配置段与服务身份映射为注册器构造选项：
+// namespace 缺省按 runtime.env 隔离（多套部署共用同一 etcd 时不串台），
+// ttl_seconds 未配置时留零值交给底层默认值。
+func RegistryOptions[B RegistryConfig](cfg B) (pkgregistry.Options, error) {
+	r := cfg.GetRegistry()
+	opts := pkgregistry.Options{
+		Namespace: pkgregistry.NamespaceOf(r.GetNamespace(), cfg.GetRuntime().GetEnv()),
+	}
+	if r != nil && r.TtlSeconds != nil {
+		if ttl := r.GetTtlSeconds(); ttl > 0 {
+			opts.TTL = time.Duration(ttl) * time.Second
+		} else {
+			return pkgregistry.Options{}, fmt.Errorf("fxkit: registry.ttl_seconds 必须为正数，got %d", ttl)
+		}
+	}
+	return opts, nil
+}
+
+// NewRegistrar 基于 etcd 客户端与注册配置装配 Atlas 注册器。
+func NewRegistrar[B RegistryConfig](cfg B, ec *clientv3.Client) (registry.Registrar, error) {
+	reg, err := newEtcdRegistry(cfg, ec)
 	if err != nil {
-		return nil, fmt.Errorf("fxkit: 构造注册器失败: %w", err)
+		return nil, err
+	}
+	return reg, nil
+}
+
+// NewEtcdDiscovery 基于 etcd 客户端与注册配置装配服务发现（actor 集群懒激活选节点用）：
+// 与 NewRegistrar 共用同一条构造路径，键前缀因此必然一致——前缀不一致会表现为
+// 「注册成功却发现不到」。
+func NewEtcdDiscovery[B RegistryConfig](cfg B, ec *clientv3.Client) (registry.Discovery, error) {
+	reg, err := newEtcdRegistry(cfg, ec)
+	if err != nil {
+		return nil, err
+	}
+	return reg, nil
+}
+
+// newEtcdRegistry 按注册配置构造 etcd 注册中心
+// （同一对象同时实现 registry.Registrar 与 registry.Discovery）。
+func newEtcdRegistry[B RegistryConfig](cfg B, ec *clientv3.Client) (*etcdreg.Registry, error) {
+	opts, err := RegistryOptions(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("fxkit: %w", err)
+	}
+	reg, err := pkgregistry.NewEtcd(ec, opts)
+	if err != nil {
+		return nil, fmt.Errorf("fxkit: 构造注册中心失败: %w", err)
 	}
 	return reg, nil
 }

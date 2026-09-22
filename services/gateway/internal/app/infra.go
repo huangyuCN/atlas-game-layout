@@ -8,13 +8,12 @@ import (
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
-	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/metrics"
+	"github.com/huangyuCN/atlas/registry"
 	natsgo "github.com/nats-io/nats.go"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // sessionTTL 是会话路由的默认租期（心跳续租周期，与 game 会话租期对齐）。
@@ -51,7 +50,7 @@ func newSessionManager(cfg *conf.Bootstrap, cli *pkredis.Client, meter metrics.C
 // NewActorClient 装配远程 actor 客户端背后的集群运行时
 // （Locator=etcd、NATS 传输；PlayerActor 懒激活在 game 节点执行，
 // 本节点注册「只发不接」副本以支持发送侧判定）。
-func NewActorClient(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Collector) (*actorclient.Client, error) {
+func NewActorClient(cfg *conf.Bootstrap, discovery registry.Discovery, meter metrics.Collector) (*actorclient.Client, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
@@ -59,10 +58,6 @@ func NewActorClient(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Coll
 	nodeID := ""
 	if r := cfg.GetRuntime(); r != nil {
 		nodeID = r.GetId()
-	}
-	discovery, err := pkgregistry.NewEtcdDiscovery(ec, pkgregistry.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("app: 构造服务发现失败: %w", err)
 	}
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,

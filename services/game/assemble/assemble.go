@@ -13,6 +13,7 @@ import (
 
 	"github.com/huangyuCN/atlas-game-layout/lib/version"
 	"github.com/huangyuCN/atlas-game-layout/pkg/actor"
+	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
@@ -32,6 +33,10 @@ type Options struct {
 	RedisAddrs    []string
 	MongoURI      string
 	MongoDB       string
+	// Namespace 是注册中心键前缀（可选）：嵌入式/测试形态用它把实例与常驻进程隔离，
+	// 并避免上一次运行残留的实例键（租约未过期）导致注册冲突；
+	// 缺省按 runtime.env 派生（/atlas/services/<env>）。
+	Namespace string
 }
 
 // Game 是装配完成的 game 服务句柄。
@@ -56,10 +61,11 @@ type graphHandles struct {
 // （集群懒激活按服务实例选节点，见 cluster placement 的硬约束）。
 func New(ctx context.Context, o Options) (*Game, error) {
 	var h graphHandles
+	cfg := newBootstrap(o)
 	root := fx.New(
 		fx.NopLogger,
 		fx.Provide(func() metrics.Collector { return metrics.Noop() }), // 嵌入式形态默认 noop（观测由 bootstrap 生产形态接线）
-		fx.Supply(newBootstrap(o)),
+		fx.Supply(cfg),
 		gameapp.Module,
 		fx.Populate(&h),
 	)
@@ -76,7 +82,7 @@ func New(ctx context.Context, o Options) (*Game, error) {
 		_ = root.Stop(context.Background())
 		return nil, err
 	}
-	reg, err := registerInstance(ctx, o.NodeID, h.Etcd, urls)
+	reg, err := registerInstance(ctx, cfg, o.NodeID, h.Etcd, urls)
 	if err != nil {
 		_ = stopServers(context.Background())
 		_ = root.Stop(context.Background())
@@ -134,9 +140,14 @@ func startServers(servers []transport.Server) (serverURLs, func(context.Context)
 	return urls, stop, nil
 }
 
-// registerInstance 构造注册中心并注册服务实例。
-func registerInstance(ctx context.Context, nodeID string, ec *clientv3.Client, urls serverURLs) (registry.Registrar, error) {
-	reg, err := pkgregistry.NewEtcd(ec, pkgregistry.Options{})
+// registerInstance 构造注册中心并注册服务实例
+// （构造选项由同一份配置派生，与 actor 发现端共用键前缀）。
+func registerInstance(ctx context.Context, cfg *conf.Bootstrap, nodeID string, ec *clientv3.Client, urls serverURLs) (registry.Registrar, error) {
+	opts, err := fxkit.RegistryOptions(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("assemble: %w", err)
+	}
+	reg, err := pkgregistry.NewEtcd(ec, opts)
 	if err != nil {
 		return nil, fmt.Errorf("assemble: 构造注册中心: %w", err)
 	}
@@ -164,7 +175,8 @@ func newBootstrap(o Options) *conf.Bootstrap {
 	return &conf.Bootstrap{
 		Runtime: &configspb.Runtime{Name: "game", Id: o.NodeID},
 		Registry: &configspb.Registry{
-			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+			Etcd:      &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
+			Namespace: o.Namespace,
 		},
 		Server: &configspb.Server{
 			Grpc: &configspb.Server_GRPC{Addr: randomPort},

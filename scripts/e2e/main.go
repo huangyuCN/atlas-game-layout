@@ -42,6 +42,10 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
+// e2eNamespace 是本次运行独占的注册中心键前缀：与常驻进程（按 runtime.env 派生）
+// 隔离，也不会命中上一次运行残留的实例键（租约未过期）导致注册冲突。
+var e2eNamespace = fmt.Sprintf("%s/e2e-%d", pkgregistry.NamespacePrefix, time.Now().UnixNano())
+
 // middlewareAddrs 是中间件地址集（默认与 deploy/docker-compose 端口约定一致）。
 type middlewareAddrs struct {
 	etcdEndpoints []string
@@ -94,6 +98,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 	game, err := gameassemble.New(ctx, gameassemble.Options{
 		NodeID: "game-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL,
 		RedisAddrs: []string{mw.redisAddr}, MongoURI: mw.mongoURI, MongoDB: mw.mongoDB,
+		Namespace: e2eNamespace,
 	})
 	if err != nil {
 		return rollback("game", err)
@@ -102,6 +107,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 
 	gw, err := gwassemble.New(ctx, gwassemble.Options{
 		ID: "e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddrs: []string{mw.redisAddr},
+		Namespace: e2eNamespace,
 	})
 	if err != nil {
 		return rollback("gateway", err)
@@ -111,6 +117,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 	bat, err := battleassemble.New(ctx, battleassemble.Options{
 		NodeID: "battle-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL,
 		MongoURI: mw.mongoURI, MongoDB: mw.mongoDB,
+		Namespace: e2eNamespace,
 	})
 	if err != nil {
 		return rollback("battle", err)
@@ -119,6 +126,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 
 	m, err := matcherassemble.New(ctx, matcherassemble.Options{
 		NodeID: "matcher-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddrs: []string{mw.redisAddr},
+		Namespace: e2eNamespace,
 	})
 	if err != nil {
 		return rollback("matcher", err)
@@ -127,7 +135,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 
 	// 进程内形态没有 atlas.App 的自动注册，而 game 的撮合链路经服务发现
 	//（discovery:///matcher）寻址——e2e 装置承担生产 App.Run 的注册职责。
-	dereg, err := registerMatcher(ctx, mw.etcdEndpoints, m.GRPCURL)
+	dereg, err := registerMatcher(ctx, mw.etcdEndpoints, e2eNamespace, m.GRPCURL)
 	if err != nil {
 		return rollback("matcher 注册", err)
 	}
@@ -137,13 +145,14 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 }
 
 // registerMatcher 把进程内 matcher 的 grpc endpoint 注册到 etcd，
-// 返回停止时执行的注销函数。
-func registerMatcher(ctx context.Context, etcdEndpoints []string, grpcURL string) (func(context.Context) error, error) {
+// 返回停止时执行的注销函数。namespace 必须与进程内各服务一致，
+// 否则 game 的服务发现找不到它。
+func registerMatcher(ctx context.Context, etcdEndpoints []string, namespace, grpcURL string) (func(context.Context) error, error) {
 	ec, err := pkgetcd.NewClient(pkgetcd.Options{Endpoints: etcdEndpoints})
 	if err != nil {
 		return nil, fmt.Errorf("e2e: 构造 etcd 客户端失败: %w", err)
 	}
-	reg, err := pkgregistry.NewEtcd(ec, pkgregistry.Options{})
+	reg, err := pkgregistry.NewEtcd(ec, pkgregistry.Options{Namespace: namespace})
 	if err != nil {
 		_ = ec.Close()
 		return nil, fmt.Errorf("e2e: 构造注册器失败: %w", err)

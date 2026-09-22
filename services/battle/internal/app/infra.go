@@ -8,13 +8,12 @@ import (
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
-	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/repo"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
 	"github.com/huangyuCN/atlas/metrics"
+	"github.com/huangyuCN/atlas/registry"
 	natsgo "github.com/nats-io/nats.go"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // NewNatsConn 装配 NATS 连接（帧广播 + 结算事件）。
@@ -56,7 +55,8 @@ func newResultRepo(cli *mongo.Client) repo.ResultRepo {
 
 // NewActorRuntime 装配 actor 集群运行时（战斗 actor 宿主，
 // Locator=etcd、传输=NATS、懒激活按服务发现选 battle 节点）。
-func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Collector) (*pkgactor.Runtime, error) {
+// 服务发现由装配层提供（fxkit.NewEtcdDiscovery），保证与注册端同一键前缀。
+func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter metrics.Collector) (*pkgactor.Runtime, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
@@ -64,10 +64,6 @@ func NewActorRuntime(cfg *conf.Bootstrap, ec *clientv3.Client, meter metrics.Col
 	nodeID := ""
 	if r := cfg.GetRuntime(); r != nil {
 		nodeID = r.GetId()
-	}
-	discovery, err := pkgregistry.NewEtcdDiscovery(ec, pkgregistry.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("app: 构造服务发现失败: %w", err)
 	}
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,

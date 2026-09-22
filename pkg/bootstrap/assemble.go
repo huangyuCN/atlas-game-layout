@@ -3,7 +3,9 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/lib/version"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
@@ -53,6 +55,9 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 	runtime := like.GetRuntime()
 	if runtime == nil || runtime.GetName() == "" {
 		return nil, fmt.Errorf("bootstrap: 配置缺少 runtime.name")
+	}
+	if err := fillRuntimeIdentity(runtime); err != nil {
+		return nil, err
 	}
 
 	logOpts := pkglog.Options{Service: runtime.GetName()}
@@ -104,6 +109,28 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 
 // defaultSampleRatio 是 sample_ratio 未配置时的默认采样率（全量采集）。
 const defaultSampleRatio = 1.0
+
+// fillRuntimeIdentity 原地回填 runtime 身份缺省值（下游全部消费方共用这一份）：
+// id 缺省取主机名——注册实例 ID、actor NodeID 与指标 service_instance_id 必须同源，
+// 留空会让三处各不相同（atlas App 会为注册实例另生成 UUID），且同名服务多副本
+// 部署在不同主机时主机名天然唯一（同主机多副本需各自配置端口与 id）；
+// env 缺省 default——注册中心键前缀按环境隔离，见 pkg/registry.NamespaceOf。
+func fillRuntimeIdentity(runtime *configspb.Runtime) error {
+	if runtime.GetId() == "" {
+		host, err := os.Hostname()
+		if err != nil {
+			return fmt.Errorf("bootstrap: runtime.id 未配置且获取主机名失败: %w", err)
+		}
+		if host == "" {
+			return fmt.Errorf("bootstrap: runtime.id 未配置且主机名为空")
+		}
+		runtime.Id = host
+	}
+	if runtime.GetEnv() == "" {
+		runtime.Env = consts.EnvDefault
+	}
+	return nil
+}
 
 // serviceIdentityOf 从 runtime 配置提取服务身份（链路资源属性与指标常量标签共用）：
 // 版本缺省取构建注入值（lib/version），配置 runtime.version 可覆盖。

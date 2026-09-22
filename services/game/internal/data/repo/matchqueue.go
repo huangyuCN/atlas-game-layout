@@ -9,10 +9,9 @@ import (
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
-	"github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
+	"github.com/huangyuCN/atlas/registry"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // discoveryTarget 是 matcher 服务的发现寻址目标（discovery scheme + 服务名）。
@@ -23,12 +22,9 @@ type MatchQueueGRPC struct {
 	cli matcherv1.MatcherClient
 }
 
-// NewMatchQueueGRPC 构造 matcher gRPC 客户端（服务发现寻址）。
-func NewMatchQueueGRPC(ctx context.Context, ec *clientv3.Client) (*MatchQueueGRPC, error) {
-	discovery, err := registry.NewEtcdDiscovery(ec, registry.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("repo: 构造服务发现失败: %w", err)
-	}
+// NewMatchQueueGRPC 构造 matcher gRPC 客户端（服务发现寻址）；
+// 发现器由装配层按注册配置提供，与注册端共用同一键前缀。
+func NewMatchQueueGRPC(ctx context.Context, discovery registry.Discovery) (*MatchQueueGRPC, error) {
 	conn, err := atlasgrpc.DialInsecure(ctx,
 		atlasgrpc.WithDiscovery(discovery),
 		atlasgrpc.WithEndpoint(discoveryTarget),
