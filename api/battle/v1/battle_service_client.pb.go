@@ -11,19 +11,20 @@ import (
 	client "github.com/huangyuCN/atlas-sdk-go/client"
 )
 
-// BattleServiceClient 是 BattleService 的强类型客户端 stub（atlas.route.v1 注解生成）：
-// 方法直接映射客户端可达 rpc；身份由会话携带（消息体不含 token/player_id）。
-type BattleServiceClient struct {
+// BattleServiceOpClient 是 BattleService 的业务 op 客户端 stub（atlas.route.v1 注解生成）：
+// 方法直接映射客户端可达 rpc，经会话通道发送；身份由会话携带（消息体不含 token/player_id）。
+// 与 gRPC 生成的 BattleServiceClient（连接级 client）不是一回事。
+type BattleServiceOpClient struct {
 	cli client.Invoker
 }
 
-// NewBattleServiceClient 以会话内核构造 client stub。
-func NewBattleServiceClient(cli client.Invoker) *BattleServiceClient {
-	return &BattleServiceClient{cli: cli}
+// NewBattleServiceOpClient 以会话内核构造 client stub。
+func NewBattleServiceOpClient(cli client.Invoker) *BattleServiceOpClient {
+	return &BattleServiceOpClient{cli: cli}
 }
 
 // JoinBattle 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *BattleServiceClient) JoinBattle(ctx context.Context, req *JoinBattleReq) (*JoinBattleReply, error) {
+func (c *BattleServiceOpClient) JoinBattle(ctx context.Context, req *JoinBattleReq) (*JoinBattleReply, error) {
 	var out JoinBattleReply
 	if err := c.cli.Invoke(ctx, `/battle.v1.BattleService/JoinBattle`, req, &out); err != nil {
 		return nil, err
@@ -32,12 +33,12 @@ func (c *BattleServiceClient) JoinBattle(ctx context.Context, req *JoinBattleReq
 }
 
 // SendFrameInput 单向调用（returns Empty，无回执）。
-func (c *BattleServiceClient) SendFrameInput(ctx context.Context, req *FrameInputReq) error {
+func (c *BattleServiceOpClient) SendFrameInput(ctx context.Context, req *FrameInputReq) error {
 	return c.cli.Invoke(ctx, `/battle.v1.BattleService/SendFrameInput`, req, nil)
 }
 
 // SyncFrames 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *BattleServiceClient) SyncFrames(ctx context.Context, req *SyncFramesReq) (*SyncFramesReply, error) {
+func (c *BattleServiceOpClient) SyncFrames(ctx context.Context, req *SyncFramesReq) (*SyncFramesReply, error) {
 	var out SyncFramesReply
 	if err := c.cli.Invoke(ctx, `/battle.v1.BattleService/SyncFrames`, req, &out); err != nil {
 		return nil, err

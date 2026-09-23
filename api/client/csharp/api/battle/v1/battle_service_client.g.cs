@@ -100,13 +100,14 @@ public sealed class BattleEndNotify
 
 }
 
-/// <summary>BattleService 的强类型客户端 stub：身份由会话承载，消息零身份字段。</summary>
-public sealed class BattleServiceClient
+/// <summary>BattleService 的业务 op 客户端 stub：身份由会话承载，消息零身份字段；
+/// 与 gRPC 生成的 BattleServiceClient（连接级 client）错开命名。</summary>
+public sealed class BattleServiceOpClient
 {
     private static readonly JsonSerializerOptions JsonOpts = new();
     private readonly IAtlasInvoker _inv;
 
-    public BattleServiceClient(IAtlasInvoker inv) => _inv = inv;
+    public BattleServiceOpClient(IAtlasInvoker inv) => _inv = inv;
 
     /// <summary>/battle.v1.BattleService/JoinBattle：请求-响应；业务拒绝返回业务错误（Reason 为主键）。</summary>
     public async Task<JoinBattleReply?> JoinBattleAsync(JoinBattleReq? req, CancellationToken cancellationToken = default)

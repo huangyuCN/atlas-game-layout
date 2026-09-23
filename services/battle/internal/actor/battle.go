@@ -1,7 +1,7 @@
 // Package actor 提供 battle 服务的 actor 装配：BattleActor（集群懒激活）承载
 // 一局战斗：内嵌 lockstep 会话（帧引擎）+ 帧广播下发 + 结算落库与事件。
 //
-// 分发由 protoc-gen-atlas-actor 生成的桩接管（battlev1.NewBattleServiceServer），
+// 分发由 protoc-gen-atlas-actor 生成的桩接管（battlev1.NewBattleServiceActorServer），
 // 客户端 op 与集群内部调用共用同一份 service 契约。发起者玩家身份不来自消息体，
 // 统一经投递 sender 注入（ActorContext.Sender，Gateway 侧组装）。
 //
@@ -116,7 +116,7 @@ func NewProps(p Props) core.Props {
 				cfg:        p.Cfg,
 				players:    make(map[string]struct{}),
 			}
-			return battlev1.NewBattleServiceServer(b, core.WithLocalTell(b.onFrameResult))
+			return battlev1.NewBattleServiceActorServer(b, core.WithLocalTell(b.onFrameResult))
 		},
 		SpawnMode:     core.SpawnAuto,
 		Tell:          pkgactor.DefaultTellChain(),

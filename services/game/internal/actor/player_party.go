@@ -1,5 +1,5 @@
 // Package actor 组队域业务方法：CreateParty/JoinParty/LeaveParty/GetParty/QueueParty
-// （实现 PlayerServiceServer 接口的组队部分）。名册权威在撮合域（引擎 redis Party）；
+// （实现 PlayerServiceActorServer 接口的组队部分）。名册权威在撮合域（引擎 redis Party）；
 // PlayerActor 只持「我所在的 partyID」在线态（纯在线会话语义：下线即离队，
 // 不持久化到聚合根，避免把撮合域状态引入玩家数据模型）；
 // 属性从聚合根权威填充（客户端不可伪造）。
@@ -31,7 +31,7 @@ func (p *PlayerActor) partySnapshot(info *matcherv1.PartyInfo) *gamev1.PartyRepl
 	return out
 }
 
-// CreateParty 实现 gamev1.PlayerServiceServer：建队（本玩家为队长，Ask）。
+// CreateParty 实现 gamev1.PlayerServiceActorServer：建队（本玩家为队长，Ask）。
 func (p *PlayerActor) CreateParty(ctx core.ActorContext, _ *gamev1.CreatePartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
@@ -55,7 +55,7 @@ func (p *PlayerActor) CreateParty(ctx core.ActorContext, _ *gamev1.CreatePartyRe
 	}, nil
 }
 
-// JoinParty 实现 gamev1.PlayerServiceServer：按 party_id 加入（Ask，容量原子校验）。
+// JoinParty 实现 gamev1.PlayerServiceActorServer：按 party_id 加入（Ask，容量原子校验）。
 func (p *PlayerActor) JoinParty(ctx core.ActorContext, req *gamev1.JoinPartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
@@ -77,7 +77,7 @@ func (p *PlayerActor) JoinParty(ctx core.ActorContext, req *gamev1.JoinPartyReq)
 	return p.partySnapshot(info), nil
 }
 
-// LeaveParty 实现 gamev1.PlayerServiceServer：离开队伍（Ask，幂等）。
+// LeaveParty 实现 gamev1.PlayerServiceActorServer：离开队伍（Ask，幂等）。
 // 不在队直接回执空快照；队长离开顺延、空队解散由撮合域保证。
 func (p *PlayerActor) LeaveParty(ctx core.ActorContext, _ *gamev1.LeavePartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
@@ -93,7 +93,7 @@ func (p *PlayerActor) LeaveParty(ctx core.ActorContext, _ *gamev1.LeavePartyReq)
 	return p.partySnapshot(nil), nil
 }
 
-// GetParty 实现 gamev1.PlayerServiceServer：名册快照（Ask，轮询兜底）。
+// GetParty 实现 gamev1.PlayerServiceActorServer：名册快照（Ask，轮询兜底）。
 func (p *PlayerActor) GetParty(ctx core.ActorContext, _ *gamev1.GetPartyReq) (*gamev1.PartyReply, error) {
 	if p.partyUnavailable() {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
@@ -108,7 +108,7 @@ func (p *PlayerActor) GetParty(ctx core.ActorContext, _ *gamev1.GetPartyReq) (*g
 	return p.partySnapshot(info), nil
 }
 
-// QueueParty 实现 gamev1.PlayerServiceServer：队长发整队入队（Ask）。
+// QueueParty 实现 gamev1.PlayerServiceActorServer：队长发整队入队（Ask）。
 // 1..N 人都可入队（不要求满员），等对面凑齐等量人数。
 func (p *PlayerActor) QueueParty(ctx core.ActorContext, req *gamev1.QueuePartyReq) (*gamev1.PartyQueueReply, error) {
 	if p.partyUnavailable() {

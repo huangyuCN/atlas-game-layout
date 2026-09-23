@@ -135,7 +135,7 @@ export interface PartyRosterNotify {
 
 export type LogoutReason = "LOGOUT_REASON_UNSPECIFIED" | "LOGOUT_REASON_LOGOUT" | "LOGOUT_REASON_LOGGED_IN_ELSEWHERE" | "LOGOUT_REASON_SESSION_EXPIRED";
 
-export class PlayerServiceClient {
+export class PlayerServiceOpClient {
   constructor(private readonly inv: Invoker) {}
 
   /** /game.v1.PlayerService/Register：请求-响应；业务拒绝抛 BusinessError（Reason 为主键）。 */

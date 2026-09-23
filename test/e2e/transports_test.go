@@ -46,7 +46,7 @@ func TestE2EWSAuth(t *testing.T) {
 	seedBattle(t, ctx, battleSvc, "b-1", sess.PlayerID())
 
 	// 战斗 op 经同一连接透传（连接绑定身份）。
-	battle := battlev1.NewBattleServiceClient(cli)
+	battle := battlev1.NewBattleServiceOpClient(cli)
 	join, err := battle.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("JoinBattle: %v", err)
@@ -71,7 +71,7 @@ func TestE2EKCPBattle(t *testing.T) {
 	seedBattle(t, ctx, battle, "b-1", playerID)
 
 	cli := dialBattleChannel(t, sdkclient.DialKCP, gw.KCPURL, token)
-	bcli := battlev1.NewBattleServiceClient(cli)
+	bcli := battlev1.NewBattleServiceOpClient(cli)
 	join, err := bcli.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("kcp JoinBattle: %v", err)
@@ -96,7 +96,7 @@ func TestE2EUDPBattle(t *testing.T) {
 	seedBattle(t, ctx, battle, "b-1", playerID)
 
 	cli := dialBattleChannel(t, sdkclient.DialUDP, gw.UDPURL, token)
-	bcli := battlev1.NewBattleServiceClient(cli)
+	bcli := battlev1.NewBattleServiceOpClient(cli)
 	join, err := bcli.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("udp JoinBattle: %v", err)

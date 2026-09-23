@@ -3,8 +3,8 @@
 // 下线流程反转（落库成功才停止，双库失败进入在线冻结）。
 // 会话裁决单点收敛到 Gateway（会话管理器）：game 侧不持 token 副本。
 //
-// 分发由 protoc-gen-atlas-actor 生成的桩接管（gamev1.NewPlayerServiceServer）：
-// 业务 actor 只实现 PlayerServiceServer 业务接口与可选生命周期（OnStart/OnStop）；
+// 分发由 protoc-gen-atlas-actor 生成的桩接管（gamev1.NewPlayerServiceActorServer）：
+// 业务 actor 只实现 PlayerServiceActorServer 业务接口与可选生命周期（OnStart/OnStop）；
 // 本地消息（tickSnapshot）经 WithLocalTell 类型路由注册，无 switch 分发。
 package actor
 
@@ -48,7 +48,7 @@ func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.Matchmaker
 			p := &PlayerActor{
 				pid: pid, svc: svc, store: store, match: match, snapTick: snapTick,
 			}
-			return gamev1.NewPlayerServiceServer(p, core.WithLocalTell(p.onTickSnapshot))
+			return gamev1.NewPlayerServiceActorServer(p, core.WithLocalTell(p.onTickSnapshot))
 		},
 		SpawnMode:     core.SpawnAuto,
 		Tell:          pkgactor.DefaultTellChain(),
@@ -61,7 +61,7 @@ func NewProps(svc biz.PlayerService, store repo.PlayerRepo, match biz.Matchmaker
 const MetricPlayersOnline = "game_players_online"
 
 // PlayerActor 是玩家在线态 actor：同一玩家全局唯一实例（Locator 注册 player:<id>）。
-// 实现 gamev1.PlayerServiceServer 业务接口；OnStart/OnStop 为可选生命周期接口
+// 实现 gamev1.PlayerServiceActorServer 业务接口；OnStart/OnStop 为可选生命周期接口
 // （生成桩断言转发）；OnAsk/OnTell 分发由生成桩全权接管。
 //
 // 耐久性编排（对齐第一期设计）：
@@ -70,11 +70,11 @@ const MetricPlayersOnline = "game_players_online"
 //   - 下线流程反转：先落库（短重试）成功才 ctx.Stop，失败转 Redis PERSIST 兜底；
 //   - OnStop 退化为零失败收尾（清定时器、断聚合根引用）。
 type PlayerActor struct {
-	gamev1.UnimplementedPlayerServiceServer // 兜底：service 加新 rpc 未实现也能编译
-	pid                                     types.PID
-	svc                                     biz.PlayerService
-	store                                   repo.PlayerRepo
-	match                                   biz.MatchmakerClient
+	gamev1.UnimplementedPlayerServiceActorServer // 兜底：service 加新 rpc 未实现也能编译
+	pid                                          types.PID
+	svc                                          biz.PlayerService
+	store                                        repo.PlayerRepo
+	match                                        biz.MatchmakerClient
 
 	player            *models.Player  // 内存聚合根（在线缓存；登录后持有）
 	partyID           string          // 我所在的队伍（纯在线态：下线即离队，名册权威在撮合域）

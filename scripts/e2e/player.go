@@ -33,8 +33,8 @@ type player struct {
 	id      string // 玩家 ID（登录回执）
 	sess    *sdkclient.Session
 	cli     *sdkclient.Client
-	players *gamev1.PlayerServiceClient   // 玩家域 op（业务通道，会话承载身份）
-	battle  *battlev1.BattleServiceClient // 战斗域 op（dual 战斗通道视图 / 单通道复用业务通道）
+	players *gamev1.PlayerServiceOpClient   // 玩家域 op（业务通道，会话承载身份）
+	battle  *battlev1.BattleServiceOpClient // 战斗域 op（dual 战斗通道视图 / 单通道复用业务通道）
 
 	started chan *gamev1.MatchStartedNotify
 	end     chan *battlev1.BattleEndNotify
@@ -75,11 +75,11 @@ func newPlayer(tag string, sess *sdkclient.Session, cli *sdkclient.Client) *play
 		ros:     make(chan *gamev1.PartyRosterNotify, 4),
 		failed:  make(chan *gamev1.MatchFailedNotify, 4),
 	}
-	p.players = gamev1.NewPlayerServiceClient(sess)
+	p.players = gamev1.NewPlayerServiceOpClient(sess)
 	if bv := cli.Channel(sdkclient.KindBattle); bv != nil {
-		p.battle = battlev1.NewBattleServiceClient(bv)
+		p.battle = battlev1.NewBattleServiceOpClient(bv)
 	} else {
-		p.battle = battlev1.NewBattleServiceClient(cli)
+		p.battle = battlev1.NewBattleServiceOpClient(cli)
 	}
 	p.watchNotifies()
 	return p

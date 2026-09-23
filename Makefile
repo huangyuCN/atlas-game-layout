@@ -106,7 +106,7 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 		protobuf/configs/*.proto services/*/internal/conf/conf.proto $(API_ALL_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		$(API_SERVICE_PROTOS)
+		$(API_SERVICE_PROTOS) $(API_DOMAIN_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-http_out=. --atlas-http_opt=paths=source_relative \
 		$(API_SERVICE_PROTOS)

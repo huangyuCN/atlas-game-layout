@@ -1,4 +1,4 @@
-// 会话域业务方法：Create/JoinBattle/SyncFrames/GetState（实现 BattleServiceServer 接口的
+// 会话域业务方法：Create/JoinBattle/SyncFrames/GetState（实现 BattleServiceActorServer 接口的
 // 会话部分）。管理一局战斗的玩家进出、状态查询与补帧；帧输入/结算见 battle_frame.go。
 
 package actor
@@ -13,7 +13,7 @@ import (
 	"github.com/huangyuCN/atlas/lockstep"
 )
 
-// Create 实现 battlev1.BattleServiceServer：开局登记参战玩家（matcher 成局后调用）。
+// Create 实现 battlev1.BattleServiceActorServer：开局登记参战玩家（matcher 成局后调用）。
 func (b *BattleActor) Create(ctx core.ActorContext, req *battlev1.CreateBattleRequest) (*battlev1.CreateBattleReply, error) {
 	b.matchID = req.GetMatchId()
 	for _, p := range req.GetPlayerIds() {
@@ -22,7 +22,7 @@ func (b *BattleActor) Create(ctx core.ActorContext, req *battlev1.CreateBattleRe
 	return &battlev1.CreateBattleReply{BattleId: b.battleID}, nil
 }
 
-// JoinBattle 实现 battlev1.BattleServiceServer：玩家加入 + lockstep JoinSession + 快照回执。
+// JoinBattle 实现 battlev1.BattleServiceActorServer：玩家加入 + lockstep JoinSession + 快照回执。
 // 发起者身份由投递 sender 注入（消息体无身份字段）：不在参战名单则拒绝。
 func (b *BattleActor) JoinBattle(ctx core.ActorContext, req *battlev1.JoinBattleReq) (*battlev1.JoinBattleReply, error) {
 	playerID, err := b.senderPlayer(ctx, "加入战斗")
@@ -48,7 +48,7 @@ func (b *BattleActor) JoinBattle(ctx core.ActorContext, req *battlev1.JoinBattle
 	}, nil
 }
 
-// SyncFrames 实现 battlev1.BattleServiceServer：按参战名单复核发起者后回执补帧
+// SyncFrames 实现 battlev1.BattleServiceActorServer：按参战名单复核发起者后回执补帧
 // （断线重连按帧区间拉取缺失帧；发起者由 sender 注入）。
 func (b *BattleActor) SyncFrames(ctx core.ActorContext, req *battlev1.SyncFramesReq) (*battlev1.SyncFramesReply, error) {
 	playerID, err := b.senderPlayer(ctx, "补帧")
@@ -69,7 +69,7 @@ func (b *BattleActor) SyncFrames(ctx core.ActorContext, req *battlev1.SyncFrames
 	}, nil
 }
 
-// GetState 实现 battlev1.BattleServiceServer：状态查询（grpc 管理接口转发）。
+// GetState 实现 battlev1.BattleServiceActorServer：状态查询（grpc 管理接口转发）。
 func (b *BattleActor) GetState(ctx core.ActorContext, _ *battlev1.GetStateReq) (*battlev1.GetStateReply, error) {
 	// 同节点会话：lockstep 消息为对象直传（非跨节点 proto 信封）。
 	reply, err := b.rt.Ask(ctx.Context(), b.sessionPID, lockstep.QueryStats{})

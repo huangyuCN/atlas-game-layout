@@ -1,5 +1,5 @@
 // 帧同步/结算域：SendFrameInput（输入转发）+ onFrameResult/checkSettle（帧广播处理与
-// 结算）+ 帧协议辅助（主题/键/元信息编码）。实现 BattleServiceServer 接口的帧部分。
+// 结算）+ 帧协议辅助（主题/键/元信息编码）。实现 BattleServiceActorServer 接口的帧部分。
 
 package actor
 
@@ -20,7 +20,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
 )
 
-// SendFrameInput 实现 battlev1.BattleServiceServer：帧输入转发 lockstep 会话。
+// SendFrameInput 实现 battlev1.BattleServiceActorServer：帧输入转发 lockstep 会话。
 // 输入者身份由投递 sender 注入（消息体无身份字段）；非参战玩家输入静默丢弃
 // （与现状一致）。
 func (b *BattleActor) SendFrameInput(ctx core.ActorContext, req *battlev1.FrameInputReq) error {

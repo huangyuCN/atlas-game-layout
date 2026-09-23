@@ -56,8 +56,8 @@ type player struct {
 	id      string
 	sess    *sdkclient.Session
 	cli     *sdkclient.Client
-	players *gamev1.PlayerServiceClient   // 匹配域 op（业务通道）
-	battle  *battlev1.BattleServiceClient // 战斗域 op（KCP 战斗通道 / WS 单通道）
+	players *gamev1.PlayerServiceOpClient   // 匹配域 op（业务通道）
+	battle  *battlev1.BattleServiceOpClient // 战斗域 op（KCP 战斗通道 / WS 单通道）
 	step    byte
 
 	started chan string // 开局通知（battleID）
@@ -117,8 +117,8 @@ func newPlayer(ctx context.Context, tcpAddr, battleAddr, transport string) (*pla
 	p := &player{
 		sess:    sess,
 		cli:     cli,
-		players: gamev1.NewPlayerServiceClient(sess),
-		battle:  battlev1.NewBattleServiceClient(battleInvoker(cli)),
+		players: gamev1.NewPlayerServiceOpClient(sess),
+		battle:  battlev1.NewBattleServiceOpClient(battleInvoker(cli)),
 		started: make(chan string, 2),
 	}
 	p.watchNotifies()

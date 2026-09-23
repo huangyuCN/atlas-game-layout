@@ -15,9 +15,9 @@ import (
 	proto "google.golang.org/protobuf/proto"
 )
 
-// BattleServiceServer 是业务 actor 实现的接口；签名由 service 块决定，
+// BattleServiceActorServer 是业务 actor 实现的接口；签名由 service 块决定，
 // returns 具体消息即 Ask，returns google.protobuf.Empty 即 Tell（单向）。
-type BattleServiceServer interface {
+type BattleServiceActorServer interface {
 	JoinBattle(ctx core.ActorContext, req *JoinBattleReq) (*JoinBattleReply, error)
 	SendFrameInput(ctx core.ActorContext, msg *FrameInputReq) error
 	SyncFrames(ctx core.ActorContext, req *SyncFramesReq) (*SyncFramesReply, error)
@@ -25,22 +25,22 @@ type BattleServiceServer interface {
 	GetState(ctx core.ActorContext, req *GetStateReq) (*GetStateReply, error)
 }
 
-// UnimplementedBattleServiceServer 是兜底基类；业务 actor embed 它获得接口演进安全。
-type UnimplementedBattleServiceServer struct{}
+// UnimplementedBattleServiceActorServer 是兜底基类；业务 actor embed 它获得接口演进安全。
+type UnimplementedBattleServiceActorServer struct{}
 
-func (UnimplementedBattleServiceServer) JoinBattle(core.ActorContext, *JoinBattleReq) (*JoinBattleReply, error) {
+func (UnimplementedBattleServiceActorServer) JoinBattle(core.ActorContext, *JoinBattleReq) (*JoinBattleReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.JoinBattle")
 }
-func (UnimplementedBattleServiceServer) SendFrameInput(core.ActorContext, *FrameInputReq) error {
+func (UnimplementedBattleServiceActorServer) SendFrameInput(core.ActorContext, *FrameInputReq) error {
 	return errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.SendFrameInput")
 }
-func (UnimplementedBattleServiceServer) SyncFrames(core.ActorContext, *SyncFramesReq) (*SyncFramesReply, error) {
+func (UnimplementedBattleServiceActorServer) SyncFrames(core.ActorContext, *SyncFramesReq) (*SyncFramesReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.SyncFrames")
 }
-func (UnimplementedBattleServiceServer) Create(core.ActorContext, *CreateBattleRequest) (*CreateBattleReply, error) {
+func (UnimplementedBattleServiceActorServer) Create(core.ActorContext, *CreateBattleRequest) (*CreateBattleReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.Create")
 }
-func (UnimplementedBattleServiceServer) GetState(core.ActorContext, *GetStateReq) (*GetStateReply, error) {
+func (UnimplementedBattleServiceActorServer) GetState(core.ActorContext, *GetStateReq) (*GetStateReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.GetState")
 }
 
@@ -83,7 +83,7 @@ func NewBattleServiceDecodeInbound() func(typeURL string, payload []byte) (any, 
 // battleServiceDispatch 组装业务实现与本地路由兜底；生命周期经 DispatchBase 断言转发。
 type battleServiceDispatch struct {
 	*core.DispatchBase
-	impl BattleServiceServer
+	impl BattleServiceActorServer
 }
 
 // OnAsk 分发 Ask 消息：前置钩子（可选）→ 静态 type switch，未命中回落本地路由。
@@ -118,8 +118,8 @@ func (d *battleServiceDispatch) OnTell(ctx core.ActorContext, msg any) error {
 	}
 }
 
-// NewBattleServiceServer 把业务实现组装为 core.Handler（含本地路由与入站解码能力）。
-func NewBattleServiceServer(impl BattleServiceServer, opts ...core.DispatchOption) core.Handler {
+// NewBattleServiceActorServer 把业务实现组装为 core.Handler（含本地路由与入站解码能力）。
+func NewBattleServiceActorServer(impl BattleServiceActorServer, opts ...core.DispatchOption) core.Handler {
 	return &battleServiceDispatch{
 		DispatchBase: core.NewDispatchBase(impl, opts...),
 		impl:         impl,

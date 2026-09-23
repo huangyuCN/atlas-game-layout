@@ -1,5 +1,5 @@
 // Package actor 匹配域业务方法：EnterMatchQueue/CancelMatch/GetMatchStatus
-// （实现 PlayerServiceServer 接口的匹配部分）。匹配属性从聚合根权威填充
+// （实现 PlayerServiceActorServer 接口的匹配部分）。匹配属性从聚合根权威填充
 // （客户端不可伪造）；未登录错误上抛；业务错误经集群 error 通道往返。
 package actor
 
@@ -9,7 +9,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 )
 
-// EnterMatchQueue 实现 gamev1.PlayerServiceServer：入队匹配（Ask）。
+// EnterMatchQueue 实现 gamev1.PlayerServiceActorServer：入队匹配（Ask）。
 // level 取聚合根权威数据；ruleset 空串由 matcher 取默认；
 // 已在匹配中等业务错误原样透传；match 客户端未装配（降级）时内部错误。
 func (p *PlayerActor) EnterMatchQueue(ctx core.ActorContext, req *gamev1.EnterMatchQueueReq) (*gamev1.EnterMatchQueueReply, error) {
@@ -25,7 +25,7 @@ func (p *PlayerActor) EnterMatchQueue(ctx core.ActorContext, req *gamev1.EnterMa
 	return &gamev1.EnterMatchQueueReply{}, nil
 }
 
-// CancelMatch 实现 gamev1.PlayerServiceServer：取消匹配（Ask，幂等）。
+// CancelMatch 实现 gamev1.PlayerServiceActorServer：取消匹配（Ask，幂等）。
 func (p *PlayerActor) CancelMatch(ctx core.ActorContext, _ *gamev1.CancelMatchReq) (*gamev1.CancelMatchReply, error) {
 	if p.match == nil {
 		return nil, errorv1.ErrInternal("匹配服务不可用")
@@ -37,7 +37,7 @@ func (p *PlayerActor) CancelMatch(ctx core.ActorContext, _ *gamev1.CancelMatchRe
 	return &gamev1.CancelMatchReply{Canceled: canceled}, nil
 }
 
-// GetMatchStatus 实现 gamev1.PlayerServiceServer：查询匹配状态（Ask，轮询兜底）。
+// GetMatchStatus 实现 gamev1.PlayerServiceActorServer：查询匹配状态（Ask，轮询兜底）。
 // matched 态回执 battle_id：开局推送丢失后，客户端重登据此恢复加入对局。
 func (p *PlayerActor) GetMatchStatus(ctx core.ActorContext, _ *gamev1.GetMatchStatusReq) (*gamev1.MatchStatusReply, error) {
 	if p.match == nil {

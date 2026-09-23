@@ -420,13 +420,13 @@ func TestDispatchRejectsUnknownMessage(t *testing.T) {
 // vetoServer 是验证生成桩前置钩子契约的最小业务实现：
 // OnBeforeAsk 按 veto 标志决定放行或拦截；GetPlayer 是放行后分发到的业务方法。
 type vetoServer struct {
-	gamev1.UnimplementedPlayerServiceServer
+	gamev1.UnimplementedPlayerServiceActorServer
 	veto error
 }
 
 func (s *vetoServer) OnBeforeAsk(_ core.ActorContext, _ any) error { return s.veto }
 
-// GetPlayer 实现 PlayerServiceServer：放行后分发到的业务方法（未登录拒查）。
+// GetPlayer 实现 PlayerServiceActorServer：放行后分发到的业务方法（未登录拒查）。
 func (s *vetoServer) GetPlayer(_ core.ActorContext, _ *gamev1.GetPlayerReq) (*gamev1.PlayerReply, error) {
 	return nil, errorv1.ErrPlayerNotOnline("玩家不在线")
 }
@@ -436,7 +436,7 @@ func (s *vetoServer) GetPlayer(_ core.ActorContext, _ *gamev1.GetPlayerReq) (*ga
 // 返回 nil → 继续正常分发到业务方法。
 func TestDispatchBeforeAskHook(t *testing.T) {
 	s := &vetoServer{}
-	h := gamev1.NewPlayerServiceServer(s)
+	h := gamev1.NewPlayerServiceActorServer(s)
 
 	boom := errors.New("钩子拦截")
 	s.veto = boom

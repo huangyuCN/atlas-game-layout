@@ -285,13 +285,14 @@ public sealed class PartyRosterNotify
 
 }
 
-/// <summary>PlayerService 的强类型客户端 stub：身份由会话承载，消息零身份字段。</summary>
-public sealed class PlayerServiceClient
+/// <summary>PlayerService 的业务 op 客户端 stub：身份由会话承载，消息零身份字段；
+/// 与 gRPC 生成的 PlayerServiceClient（连接级 client）错开命名。</summary>
+public sealed class PlayerServiceOpClient
 {
     private static readonly JsonSerializerOptions JsonOpts = new();
     private readonly IAtlasInvoker _inv;
 
-    public PlayerServiceClient(IAtlasInvoker inv) => _inv = inv;
+    public PlayerServiceOpClient(IAtlasInvoker inv) => _inv = inv;
 
     /// <summary>/game.v1.PlayerService/Register：请求-响应；业务拒绝返回业务错误（Reason 为主键）。</summary>
     public async Task<RegisterReply?> RegisterAsync(RegisterReq? req, CancellationToken cancellationToken = default)

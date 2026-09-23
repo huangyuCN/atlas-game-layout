@@ -45,7 +45,7 @@ export interface BattleEndNotify {
   winnerPlayerId?: string; // battle.v1.BattleEndNotify.winner_player_id
 }
 
-export class BattleServiceClient {
+export class BattleServiceOpClient {
   constructor(private readonly inv: Invoker) {}
 
   /** /battle.v1.BattleService/JoinBattle：请求-响应；业务拒绝抛 BusinessError（Reason 为主键）。 */

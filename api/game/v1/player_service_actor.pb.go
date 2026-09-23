@@ -15,9 +15,9 @@ import (
 	proto "google.golang.org/protobuf/proto"
 )
 
-// PlayerServiceServer 是业务 actor 实现的接口；签名由 service 块决定，
+// PlayerServiceActorServer 是业务 actor 实现的接口；签名由 service 块决定，
 // returns 具体消息即 Ask，returns google.protobuf.Empty 即 Tell（单向）。
-type PlayerServiceServer interface {
+type PlayerServiceActorServer interface {
 	Register(ctx core.ActorContext, req *RegisterReq) (*RegisterReply, error)
 	GetPlayerData(ctx core.ActorContext, req *GetPlayerDataReq) (*PlayerDataReply, error)
 	GetBackpack(ctx core.ActorContext, req *GetBackpackReq) (*BackpackReply, error)
@@ -35,52 +35,52 @@ type PlayerServiceServer interface {
 	GetPlayer(ctx core.ActorContext, req *GetPlayerReq) (*PlayerReply, error)
 }
 
-// UnimplementedPlayerServiceServer 是兜底基类；业务 actor embed 它获得接口演进安全。
-type UnimplementedPlayerServiceServer struct{}
+// UnimplementedPlayerServiceActorServer 是兜底基类；业务 actor embed 它获得接口演进安全。
+type UnimplementedPlayerServiceActorServer struct{}
 
-func (UnimplementedPlayerServiceServer) Register(core.ActorContext, *RegisterReq) (*RegisterReply, error) {
+func (UnimplementedPlayerServiceActorServer) Register(core.ActorContext, *RegisterReq) (*RegisterReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.Register")
 }
-func (UnimplementedPlayerServiceServer) GetPlayerData(core.ActorContext, *GetPlayerDataReq) (*PlayerDataReply, error) {
+func (UnimplementedPlayerServiceActorServer) GetPlayerData(core.ActorContext, *GetPlayerDataReq) (*PlayerDataReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.GetPlayerData")
 }
-func (UnimplementedPlayerServiceServer) GetBackpack(core.ActorContext, *GetBackpackReq) (*BackpackReply, error) {
+func (UnimplementedPlayerServiceActorServer) GetBackpack(core.ActorContext, *GetBackpackReq) (*BackpackReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.GetBackpack")
 }
-func (UnimplementedPlayerServiceServer) EnterMatchQueue(core.ActorContext, *EnterMatchQueueReq) (*EnterMatchQueueReply, error) {
+func (UnimplementedPlayerServiceActorServer) EnterMatchQueue(core.ActorContext, *EnterMatchQueueReq) (*EnterMatchQueueReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.EnterMatchQueue")
 }
-func (UnimplementedPlayerServiceServer) CancelMatch(core.ActorContext, *CancelMatchReq) (*CancelMatchReply, error) {
+func (UnimplementedPlayerServiceActorServer) CancelMatch(core.ActorContext, *CancelMatchReq) (*CancelMatchReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.CancelMatch")
 }
-func (UnimplementedPlayerServiceServer) GetMatchStatus(core.ActorContext, *GetMatchStatusReq) (*MatchStatusReply, error) {
+func (UnimplementedPlayerServiceActorServer) GetMatchStatus(core.ActorContext, *GetMatchStatusReq) (*MatchStatusReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.GetMatchStatus")
 }
-func (UnimplementedPlayerServiceServer) CreateParty(core.ActorContext, *CreatePartyReq) (*PartyReply, error) {
+func (UnimplementedPlayerServiceActorServer) CreateParty(core.ActorContext, *CreatePartyReq) (*PartyReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.CreateParty")
 }
-func (UnimplementedPlayerServiceServer) JoinParty(core.ActorContext, *JoinPartyReq) (*PartyReply, error) {
+func (UnimplementedPlayerServiceActorServer) JoinParty(core.ActorContext, *JoinPartyReq) (*PartyReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.JoinParty")
 }
-func (UnimplementedPlayerServiceServer) LeaveParty(core.ActorContext, *LeavePartyReq) (*PartyReply, error) {
+func (UnimplementedPlayerServiceActorServer) LeaveParty(core.ActorContext, *LeavePartyReq) (*PartyReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.LeaveParty")
 }
-func (UnimplementedPlayerServiceServer) GetParty(core.ActorContext, *GetPartyReq) (*PartyReply, error) {
+func (UnimplementedPlayerServiceActorServer) GetParty(core.ActorContext, *GetPartyReq) (*PartyReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.GetParty")
 }
-func (UnimplementedPlayerServiceServer) QueueParty(core.ActorContext, *QueuePartyReq) (*PartyQueueReply, error) {
+func (UnimplementedPlayerServiceActorServer) QueueParty(core.ActorContext, *QueuePartyReq) (*PartyQueueReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.QueueParty")
 }
-func (UnimplementedPlayerServiceServer) Login(core.ActorContext, *LoginReq) (*LoginReply, error) {
+func (UnimplementedPlayerServiceActorServer) Login(core.ActorContext, *LoginReq) (*LoginReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.Login")
 }
-func (UnimplementedPlayerServiceServer) Logout(core.ActorContext, *LogoutMsg) error {
+func (UnimplementedPlayerServiceActorServer) Logout(core.ActorContext, *LogoutMsg) error {
 	return errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.Logout")
 }
-func (UnimplementedPlayerServiceServer) GrantItem(core.ActorContext, *GrantItemReq) (*GrantItemReply, error) {
+func (UnimplementedPlayerServiceActorServer) GrantItem(core.ActorContext, *GrantItemReq) (*GrantItemReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.GrantItem")
 }
-func (UnimplementedPlayerServiceServer) GetPlayer(core.ActorContext, *GetPlayerReq) (*PlayerReply, error) {
+func (UnimplementedPlayerServiceActorServer) GetPlayer(core.ActorContext, *GetPlayerReq) (*PlayerReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.GetPlayer")
 }
 
@@ -163,7 +163,7 @@ func NewPlayerServiceDecodeInbound() func(typeURL string, payload []byte) (any, 
 // playerServiceDispatch 组装业务实现与本地路由兜底；生命周期经 DispatchBase 断言转发。
 type playerServiceDispatch struct {
 	*core.DispatchBase
-	impl PlayerServiceServer
+	impl PlayerServiceActorServer
 }
 
 // OnAsk 分发 Ask 消息：前置钩子（可选）→ 静态 type switch，未命中回落本地路由。
@@ -218,8 +218,8 @@ func (d *playerServiceDispatch) OnTell(ctx core.ActorContext, msg any) error {
 	}
 }
 
-// NewPlayerServiceServer 把业务实现组装为 core.Handler（含本地路由与入站解码能力）。
-func NewPlayerServiceServer(impl PlayerServiceServer, opts ...core.DispatchOption) core.Handler {
+// NewPlayerServiceActorServer 把业务实现组装为 core.Handler（含本地路由与入站解码能力）。
+func NewPlayerServiceActorServer(impl PlayerServiceActorServer, opts ...core.DispatchOption) core.Handler {
 	return &playerServiceDispatch{
 		DispatchBase: core.NewDispatchBase(impl, opts...),
 		impl:         impl,

@@ -28,7 +28,7 @@ import (
 type battleClient struct {
 	sess     *sdkclient.Session
 	cli      *sdkclient.Client
-	battle   *battlev1.BattleServiceClient
+	battle   *battlev1.BattleServiceOpClient
 	playerID string
 	token    string
 
@@ -45,7 +45,7 @@ func newBattleClient(t *testing.T, ctx context.Context, gw *gwassemble.Gateway) 
 	c := &battleClient{
 		sess:     sess,
 		cli:      cli,
-		battle:   battlev1.NewBattleServiceClient(cli),
+		battle:   battlev1.NewBattleServiceOpClient(cli),
 		playerID: sess.PlayerID(),
 		token:    sess.Token(),
 	}
@@ -392,7 +392,7 @@ func newBattleClientWithToken(t *testing.T, ctx context.Context, gw *gwassemble.
 	c := &battleClient{
 		sess:     sess,
 		cli:      cli,
-		battle:   battlev1.NewBattleServiceClient(cli),
+		battle:   battlev1.NewBattleServiceOpClient(cli),
 		playerID: prev.playerID,
 		token:    prev.token,
 	}

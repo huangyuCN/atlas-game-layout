@@ -11,19 +11,20 @@ import (
 	client "github.com/huangyuCN/atlas-sdk-go/client"
 )
 
-// PlayerServiceClient 是 PlayerService 的强类型客户端 stub（atlas.route.v1 注解生成）：
-// 方法直接映射客户端可达 rpc；身份由会话携带（消息体不含 token/player_id）。
-type PlayerServiceClient struct {
+// PlayerServiceOpClient 是 PlayerService 的业务 op 客户端 stub（atlas.route.v1 注解生成）：
+// 方法直接映射客户端可达 rpc，经会话通道发送；身份由会话携带（消息体不含 token/player_id）。
+// 与 gRPC 生成的 PlayerServiceClient（连接级 client）不是一回事。
+type PlayerServiceOpClient struct {
 	cli client.Invoker
 }
 
-// NewPlayerServiceClient 以会话内核构造 client stub。
-func NewPlayerServiceClient(cli client.Invoker) *PlayerServiceClient {
-	return &PlayerServiceClient{cli: cli}
+// NewPlayerServiceOpClient 以会话内核构造 client stub。
+func NewPlayerServiceOpClient(cli client.Invoker) *PlayerServiceOpClient {
+	return &PlayerServiceOpClient{cli: cli}
 }
 
 // Register 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) Register(ctx context.Context, req *RegisterReq) (*RegisterReply, error) {
+func (c *PlayerServiceOpClient) Register(ctx context.Context, req *RegisterReq) (*RegisterReply, error) {
 	var out RegisterReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/Register`, req, &out); err != nil {
 		return nil, err
@@ -32,7 +33,7 @@ func (c *PlayerServiceClient) Register(ctx context.Context, req *RegisterReq) (*
 }
 
 // GetPlayerData 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) GetPlayerData(ctx context.Context, req *GetPlayerDataReq) (*PlayerDataReply, error) {
+func (c *PlayerServiceOpClient) GetPlayerData(ctx context.Context, req *GetPlayerDataReq) (*PlayerDataReply, error) {
 	var out PlayerDataReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/GetPlayerData`, req, &out); err != nil {
 		return nil, err
@@ -41,7 +42,7 @@ func (c *PlayerServiceClient) GetPlayerData(ctx context.Context, req *GetPlayerD
 }
 
 // GetBackpack 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) GetBackpack(ctx context.Context, req *GetBackpackReq) (*BackpackReply, error) {
+func (c *PlayerServiceOpClient) GetBackpack(ctx context.Context, req *GetBackpackReq) (*BackpackReply, error) {
 	var out BackpackReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/GetBackpack`, req, &out); err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func (c *PlayerServiceClient) GetBackpack(ctx context.Context, req *GetBackpackR
 }
 
 // EnterMatchQueue 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) EnterMatchQueue(ctx context.Context, req *EnterMatchQueueReq) (*EnterMatchQueueReply, error) {
+func (c *PlayerServiceOpClient) EnterMatchQueue(ctx context.Context, req *EnterMatchQueueReq) (*EnterMatchQueueReply, error) {
 	var out EnterMatchQueueReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/EnterMatchQueue`, req, &out); err != nil {
 		return nil, err
@@ -59,7 +60,7 @@ func (c *PlayerServiceClient) EnterMatchQueue(ctx context.Context, req *EnterMat
 }
 
 // CancelMatch 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) CancelMatch(ctx context.Context, req *CancelMatchReq) (*CancelMatchReply, error) {
+func (c *PlayerServiceOpClient) CancelMatch(ctx context.Context, req *CancelMatchReq) (*CancelMatchReply, error) {
 	var out CancelMatchReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/CancelMatch`, req, &out); err != nil {
 		return nil, err
@@ -68,7 +69,7 @@ func (c *PlayerServiceClient) CancelMatch(ctx context.Context, req *CancelMatchR
 }
 
 // GetMatchStatus 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) GetMatchStatus(ctx context.Context, req *GetMatchStatusReq) (*MatchStatusReply, error) {
+func (c *PlayerServiceOpClient) GetMatchStatus(ctx context.Context, req *GetMatchStatusReq) (*MatchStatusReply, error) {
 	var out MatchStatusReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/GetMatchStatus`, req, &out); err != nil {
 		return nil, err
@@ -77,7 +78,7 @@ func (c *PlayerServiceClient) GetMatchStatus(ctx context.Context, req *GetMatchS
 }
 
 // CreateParty 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) CreateParty(ctx context.Context, req *CreatePartyReq) (*PartyReply, error) {
+func (c *PlayerServiceOpClient) CreateParty(ctx context.Context, req *CreatePartyReq) (*PartyReply, error) {
 	var out PartyReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/CreateParty`, req, &out); err != nil {
 		return nil, err
@@ -86,7 +87,7 @@ func (c *PlayerServiceClient) CreateParty(ctx context.Context, req *CreatePartyR
 }
 
 // JoinParty 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) JoinParty(ctx context.Context, req *JoinPartyReq) (*PartyReply, error) {
+func (c *PlayerServiceOpClient) JoinParty(ctx context.Context, req *JoinPartyReq) (*PartyReply, error) {
 	var out PartyReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/JoinParty`, req, &out); err != nil {
 		return nil, err
@@ -95,7 +96,7 @@ func (c *PlayerServiceClient) JoinParty(ctx context.Context, req *JoinPartyReq) 
 }
 
 // LeaveParty 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) LeaveParty(ctx context.Context, req *LeavePartyReq) (*PartyReply, error) {
+func (c *PlayerServiceOpClient) LeaveParty(ctx context.Context, req *LeavePartyReq) (*PartyReply, error) {
 	var out PartyReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/LeaveParty`, req, &out); err != nil {
 		return nil, err
@@ -104,7 +105,7 @@ func (c *PlayerServiceClient) LeaveParty(ctx context.Context, req *LeavePartyReq
 }
 
 // GetParty 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) GetParty(ctx context.Context, req *GetPartyReq) (*PartyReply, error) {
+func (c *PlayerServiceOpClient) GetParty(ctx context.Context, req *GetPartyReq) (*PartyReply, error) {
 	var out PartyReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/GetParty`, req, &out); err != nil {
 		return nil, err
@@ -113,7 +114,7 @@ func (c *PlayerServiceClient) GetParty(ctx context.Context, req *GetPartyReq) (*
 }
 
 // QueueParty 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerServiceClient) QueueParty(ctx context.Context, req *QueuePartyReq) (*PartyQueueReply, error) {
+func (c *PlayerServiceOpClient) QueueParty(ctx context.Context, req *QueuePartyReq) (*PartyQueueReply, error) {
 	var out PartyQueueReply
 	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/QueueParty`, req, &out); err != nil {
 		return nil, err
