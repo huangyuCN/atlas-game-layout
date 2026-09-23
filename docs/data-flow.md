@@ -205,13 +205,13 @@
                         battle 服务 / matcher 服务（业务侧）
                               │  发推送（业务代码里一行）：
                               │  pkgnats.PublishEnvelope(nc, 玩家ID, op, payload)
-                              │  主题：atlas.push.<playerID>，信封 {type, payload}
+                              │  主题：atlas.<ns>.push.<playerID>（`<ns>` = runtime.env 派生的命名空间），信封 {type, payload}
                               ▼
                     ┌───────────────────────┐
                     │        NATS           │
                     └─────────┬─────────────┘
                               ▼
-              gateway StartRelay 订阅 atlas.push.>
+              gateway StartRelay 订阅 atlas.<ns>.push.>
                               ▼
               ┌───────────────────────────────┐
               │ 本实例持有玩家 42 的连接吗？     │
@@ -230,7 +230,7 @@
                     └─────────────────────┘
 ```
 
-撮合事件（成局/失败）走的是另一类主题（`atlas.event.match.*`）：gateway 订阅事件 → 转成 Notify 消息（`game.v1.MatchStartedNotify`）→ 再经 `atlas.push.<玩家ID>` 按玩家下发。**推送 op = 消息完整名（`/` 开头）**，客户端订阅用它，与业务 Invoke 的 op 同一个字符串空间。
+撮合事件（成局/失败）走的是另一类主题（`atlas.<ns>.event.match.*`）：gateway 订阅事件 → 转成 Notify 消息（`game.v1.MatchStartedNotify`）→ 再经 `atlas.<ns>.push.<玩家ID>` 按玩家下发。**推送 op = 消息完整名（`/` 开头）**，客户端订阅用它，与业务 Invoke 的 op 同一个字符串空间。
 
 ---
 

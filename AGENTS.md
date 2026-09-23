@@ -201,13 +201,33 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 | 维度 | 取值 | 为什么 |
 |------|------|--------|
 | 键前缀 | `registry.namespace` 显式配置优先，否则 `/atlas/services/<runtime.env>`（`env` 缺省 `default`）| 多套部署共用同一 etcd 时必须靠它隔离：前缀与实例 ID 都相同会让后注册者覆盖前者的端点，且前者注销时删掉后者的注册 |
-| 实例 ID | `runtime.id` 显式配置优先，否则取主机名（`bootstrap.AssembleLoaded` 回填）| 注册实例 ID、actor NodeID、指标 `service_instance_id` **必须同源**；留空会让 Atlas 为注册另生成 UUID，与 actor NodeID 不一致 |
+| 实例 ID | `runtime.id` 显式配置优先，否则取 `<runtime.name>-<主机名>`（`bootstrap.AssembleLoaded` 回填）| 注册实例 ID、actor NodeID、指标 `service_instance_id` **必须同源**；留空会让 Atlas 为注册另生成 UUID，与 actor NodeID 不一致。**带服务名前缀是必需的**：actor NodeID 直接决定 NATS 节点 subject `atlas_actor.<ns>.node.<nodeID>.{in,spawn,drain,control}`，只用主机名会让同主机的多个服务共用同一套 subject、互相收到对方的节点消息（实测故障：网关与 game 争同一 actor 的目录租约 → `ACTOR_NOT_FOUND`）|
 | 服务名 | `runtime.name` | 同前缀下不同服务天然隔离 |
+
+- **实例 ID 的唯一边界**：缺省派生只按（服务，主机）唯一——**同主机同服务的双进程仍会撞**，此时必须显式配各自的 `runtime.id`（actor 节点声明会冲突并启动失败兜底，见「actor 平面身份」小节）。
 
 - **两种驱动形态同一套启停路径**：进程形态（`cmd/main` → `bootstrap.Assemble` → `ModuleFor`）与进程内形态（`services/*/assemble` → `bootstrap.Boot` → `ModuleForEmbedded`）都由 `atlas.App` 启动服务端、注册实例、注销与停机；进程内形态只是不注册进程信号（`Options.DisableSignal`），避免劫持宿主/测试进程的信号。
 - 注册端与发现端**共用同一条构造路径**（`pkg/fxkit.RegistryOptions` → `pkg/registry.NewEtcd`，返回对象同时实现 Registrar 与 Discovery）；前缀不一致会表现为「注册成功却发现不到」。
 - 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的前缀**（如 `/atlas/services/it-<纳秒>`）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。
 - 实例键冲突（`registry.ErrInstanceConflict`）会让进程**启动失败退出**：同一实例 ID 的旧进程仍在运行、或异常退出后租约尚未过期（TTL 15s）都会命中，等租约过期后重启即可。**不要**改 ID 绕过——那正是要防的静默顶替。
+
+### actor 平面身份与命名空间（改 actor 装配时必须遵守）
+
+actor 平面（NATS 节点消息、广播主题、etcd 归属目录）**与注册中心是两套寻址空间**，各自的隔离维度不同：
+
+| 维度 | 取值 | 为什么 |
+|------|------|--------|
+| actor NodeID | = 注册实例 ID（`runtime.id`，即 `<服务名>-<主机名>`）| NodeID 决定 NATS 节点 subject `atlas_actor.<ns>.node.<nodeID>.{in,spawn,drain,control}`；而**懒激活的候选节点取自服务发现的实例 ID**（`cluster/placement`），两者必须同源，改成"只给 actor 加前缀"会让 spawn 发往不存在的节点 |
+| 命名空间 `<ns>` | `runtime.env`（缺省 `default`），经 `pkg/actor.Options.Namespace` 传给传输层 `cluster.WithNamespace` | 注册中心已按 env 隔离，subject 若不隔离，两套共用同一 NATS 的部署会**静默串台**（互相收到节点消息/广播主题）。取值限 `[A-Za-z0-9_-]+`，非法值启动期报错 |
+| 归属目录前缀 | `/atlas/actors/<ns>`（locator 与节点归属键共用）| 同一 etcd 被多套部署共用时，PID→Owner 记录不会互相覆盖 |
+| 节点归属键 | `/atlas/actors/<ns>/nodes/<nodeID>`（etcd 租约，TTL 10s）| 同 ID 的第二进程**启动失败**（`actor.ErrNodeConflict`，错误带占用者租约号）；`kill -9` 后同 ID 快速重启会被自己的残留租约挡住 ≤10s，等过期即可 |
+| 业务 topic | `atlas.<ns>.push|event|gw.*`（`lib/consts.Topics`，fx 注入 `fxkit.Topics`）| 推送/事件/网关控制通道同样是全局 subject，不隔离会跨环境下发与串号 |
+| 业务键（redis） | `atlas:<ns>:<域>:<id>`（`pkg/redis.Keys`，命名空间在构造客户端时写入 `redis.Options.Namespace`）| 会话路由 / 玩家快照 / 撮合票据共用一个 redis，不隔离会互相覆盖——同样是静默故障。**键前缀只在 `pkg/redis.Keys` 一处拼**（含撮合后端的 `MatchmakerPrefix()`，经 `matchredis.WithPrefix` 注入），服务侧写 `cli.Keys().GatewayRoute(pid)` 这类调用，不再各自拼字符串 |
+
+- 进程内形态（`services/*/assemble`）不读 config.yaml：`newBootstrap` 按 `Options.Namespace`（注册中心前缀）的叶子段派生 `runtime.actor_namespace`（`bootstrap.ActorNamespaceOf`，**非法字符报错不归一**）——前缀是 etcd 键路径形态（含 `/`），**不能直接当 subject token**。
+- 新增/修改 actor 装配时不要绕过 `pkg/actor.NewRuntime`：命名空间、目录前缀、节点声明都在那里统一收口。
+- **隔离命名空间只有一个来源**：`pkg/actor.NamespaceOf(runtime)`（`runtime.actor_namespace` 优先、`env` 兜底）。actor subject、业务 topic、redis 键（含撮合后端前缀）三路都从它派生——任何一处另取来源都会立刻表现为"订阅收不到 / 键找不到"（本仓踩过一次：topic 用 env 而 actor 用 actor_namespace，进程内 e2e 直接收不到成局事件）。**注册中心键前缀是另一回事**：它只随 `runtime.env`（`pkg/registry.NamespaceOf`），不随 `actor_namespace`。
+- **NATS 发布统一走 `pkgnats.Publisher`**（`fxkit.NewPublisher` 装配）：连接与命名空间收口成类型，避免 `(nc, topics)` 成对透传；订阅侧仍用裸 `*nats.Conn`（订阅本身不带命名空间，subject 由 `Topics` 构造）。
 
 ### 传输层启动参数（gRPC / HTTP / TCP / WebSocket / KCP / UDP）
 
