@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"errors"
+	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"testing"
 	"time"
 
@@ -42,8 +43,12 @@ func TestE2EInstanceConflictFailsFast(t *testing.T) {
 	t.Cleanup(func() { _ = first.Stop(context.Background()) })
 
 	second, err := battleassemble.New(ctx, battleOpts(itNamespace))
-	if !errors.Is(err, atlasregistry.ErrInstanceConflict) {
-		t.Fatalf("同键实例装配应返回 ErrInstanceConflict，实际 %v（实例 %v）", err, second)
+	// 同键实例必须快速失败——两道闸门都可能先命中，断言接受任一，避免把闸门顺序写进测试：
+	//   1. actor 节点归属（pkgactor.ErrNodeConflict）：同 NodeID 会共用 NATS 节点 subject，
+	//      该检查在 actor 运行时启动时执行，通常早于注册中心的实例键检查；
+	//   2. 注册中心实例键冲突（atlasregistry.ErrInstanceConflict）。
+	if !errors.Is(err, atlasregistry.ErrInstanceConflict) && !errors.Is(err, pkgactor.ErrNodeConflict) {
+		t.Fatalf("同键实例装配应返回注册冲突或节点归属冲突，实际 %v（实例 %v）", err, second)
 	}
 }
 

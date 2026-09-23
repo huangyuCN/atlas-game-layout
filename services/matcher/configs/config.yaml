@@ -1,9 +1,11 @@
 runtime:
   name: matcher
-  # id 缺省取主机名：注册实例 ID、actor NodeID 与指标 service_instance_id 三处同源，
-  # 且同名服务多副本部署在不同主机时天然唯一（同主机多副本才需在此显式配唯一 id）。
+  # id 缺省取 <服务名>-<主机名>：注册实例 ID、actor NodeID 与指标 service_instance_id 三处同源，
+  # 且必须每进程唯一（actor NodeID 决定 NATS 节点 subject atlas_actor.<env>.node.<id>.*，
+  # 同主机的多个服务不得共用）；同主机同服务的双进程需在此显式配唯一 id。
   # version 缺省取构建注入版本（lib/version，Makefile/CI 经 -ldflags 写入）；需要时在此覆盖
-  env: test        # 进链路资源 deployment.environment.name，并决定注册中心键前缀 /atlas/services/<env>
+  env: test        # 命名空间来源：链路资源 deployment.environment.name、注册中心键前缀 /atlas/services/<env>、
+                   # actor 平面 NATS subject（atlas_actor.<env>.*）与业务 topic 前缀（atlas.<env>.push|event|gw.*）
 registry:
   etcd:
     endpoints:

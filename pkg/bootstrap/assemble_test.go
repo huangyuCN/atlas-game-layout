@@ -110,8 +110,10 @@ func TestAssembleMissingFile(t *testing.T) {
 }
 
 // TestAssembleLoadedFillsIdentity 验证 runtime 身份缺省值回填：
-// id 取主机名（注册实例 ID、actor NodeID、指标 service_instance_id 三处同源，
-// 缺省留空会让三处不一致），env 取 default（注册中心键前缀按它隔离）。
+// id 取 `<服务名>-<主机名>`（注册实例 ID、actor NodeID、指标 service_instance_id 三处同源；
+// 带服务前缀是因为 actor NodeID 要**每进程**唯一——同主机跑多个服务时主机名会撞，
+// 撞了会共用 NATS 节点 subject，见 AGENTS.md「注册中心身份与隔离」），
+// env 取 default（注册中心键前缀按它隔离）。
 func TestAssembleLoadedFillsIdentity(t *testing.T) {
 	host, err := os.Hostname()
 	if err != nil || host == "" {
@@ -124,8 +126,9 @@ func TestAssembleLoadedFillsIdentity(t *testing.T) {
 	if _, err := AssembleLoaded(cfg); err != nil {
 		t.Fatalf("AssembleLoaded() 错误 = %v", err)
 	}
-	if cfg.GetId() != host {
-		t.Fatalf("runtime.id 应回填主机名 %q，实际 %q", host, cfg.GetId())
+	want := "demo-" + host
+	if cfg.GetId() != want {
+		t.Fatalf("runtime.id 应回填 %q，实际 %q", want, cfg.GetId())
 	}
 	if cfg.GetEnv() != consts.EnvDefault {
 		t.Fatalf("runtime.env 应回填 %q，实际 %q", consts.EnvDefault, cfg.GetEnv())

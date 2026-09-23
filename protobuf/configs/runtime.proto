@@ -10,4 +10,8 @@ message Runtime {
   string id = 2;
   string version = 3;
   string env = 4;
+  // actor_namespace 是 actor 平面命名空间（NATS subject 前缀 atlas_actor.<ns>.* 与 etcd 归属目录
+  // /atlas/actors/<ns>）；空 = 取 env（再空则 default）。取值限 [A-Za-z0-9_-]，非法值启动期报错。
+  // 单列字段是为了让"环境标签"与"隔离命名空间"解耦：进程内/测试形态可以只改命名空间而不改环境标签。
+  string actor_namespace = 5;
 }

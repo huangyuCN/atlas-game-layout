@@ -111,9 +111,11 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 const defaultSampleRatio = 1.0
 
 // fillRuntimeIdentity 原地回填 runtime 身份缺省值（下游全部消费方共用这一份）：
-// id 缺省取主机名——注册实例 ID、actor NodeID 与指标 service_instance_id 必须同源，
-// 留空会让三处各不相同（atlas App 会为注册实例另生成 UUID），且同名服务多副本
-// 部署在不同主机时主机名天然唯一（同主机多副本需各自配置端口与 id）；
+// id 缺省取 `<服务名>-<主机名>`——注册实例 ID、actor NodeID 与指标 service_instance_id 必须同源，
+// 留空会让三处各不相同（atlas App 会为注册实例另生成 UUID）；而 actor NodeID 还必须**每进程唯一**
+// （它直接决定 NATS 节点 subject `atlas_actor.<ns>.node.<nodeID>.*`），只用主机名会让同主机的多个
+// 服务共用同一套 subject、互相收到对方的节点消息（spawn/入站/控制/排空），故带服务名前缀。
+// 边界：该派生只按（服务, 主机）唯一——同主机同服务的双进程仍会撞，需显式配 runtime.id。
 // env 缺省 default——注册中心键前缀按环境隔离，见 pkg/registry.NamespaceOf。
 func fillRuntimeIdentity(runtime *configspb.Runtime) error {
 	if runtime.GetId() == "" {
@@ -124,7 +126,7 @@ func fillRuntimeIdentity(runtime *configspb.Runtime) error {
 		if host == "" {
 			return fmt.Errorf("bootstrap: runtime.id 未配置且主机名为空")
 		}
-		runtime.Id = host
+		runtime.Id = runtime.GetName() + "-" + host
 	}
 	if runtime.GetEnv() == "" {
 		runtime.Env = consts.EnvDefault

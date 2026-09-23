@@ -1,6 +1,7 @@
 package actor
 
 import (
+	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"testing"
 
 	"github.com/huangyuCN/atlas/contrib/actor/core"
@@ -92,4 +93,26 @@ func mustPID(t *testing.T, typ, uid string) types.PID {
 		t.Fatalf("NewPID(%s,%s): %v", typ, uid, err)
 	}
 	return pid
+}
+
+// TestNamespaceOf 验证 actor 命名空间取值优先级：runtime.actor_namespace 优先，
+// 缺省取 runtime.env（两者都空时由 types.NormalizeNamespace 归一为 default）。
+func TestNamespaceOf(t *testing.T) {
+	tests := []struct {
+		name string
+		rt   *configspb.Runtime
+		want string
+	}{
+		{"显式 actor_namespace 优先", &configspb.Runtime{Env: "test", ActorNamespace: "iso"}, "iso"},
+		{"缺省取 env", &configspb.Runtime{Env: "prod"}, "prod"},
+		{"两者都空", &configspb.Runtime{}, ""},
+		{"runtime 为 nil", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NamespaceOf(tt.rt); got != tt.want {
+				t.Fatalf("NamespaceOf() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }

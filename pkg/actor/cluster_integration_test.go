@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -45,20 +46,24 @@ func (h *echoHandler) OnAsk(_ core.ActorContext, _ any) (any, error) { return h.
 // 节点 A 注册 SpawnAuto 类型，节点 B 向不存在 PID 发消息触发懒激活。
 // 无 etcd/nats 时自动跳过（按 AGENTS.md 在 10.10.9.36 执行）。
 func TestClusterLazyActivation(t *testing.T) {
+	// 节点 ID 每次运行唯一：节点归属键有租约（残留会挡住同 ID 重启），
+	// 用固定 ID 会让上一次中断运行的残留把本次测试变成"跳过"。
+	suffix := fmt.Sprintf("-%d", time.Now().UnixNano())
+	idA, idB := "m2-nodeA"+suffix, "m2-nodeB"+suffix
 	base := Options{
 		EtcdEndpoints: []string{"127.0.0.1:12379"},
 		NatsURL:       "nats://127.0.0.1:14222",
 		ServiceName:   "atlas-actor",
 		Discovery: &fakeDiscovery{instances: []*registry.ServiceInstance{
-			{ID: "m2-nodeA", Name: "atlas-actor"},
-			{ID: "m2-nodeB", Name: "atlas-actor"},
+			{ID: idA, Name: "atlas-actor"},
+			{ID: idB, Name: "atlas-actor"},
 		}},
 	}
-	rtA, err := NewRuntime(withNodeID(base, "m2-nodeA"))
+	rtA, err := NewRuntime(withNodeID(base, idA))
 	if err != nil {
 		t.Skipf("actor 集群不可用（nats 连接失败）: %v", err)
 	}
-	rtB, err := NewRuntime(withNodeID(base, "m2-nodeB"))
+	rtB, err := NewRuntime(withNodeID(base, idB))
 	if err != nil {
 		rtA.Shutdown(context.Background())
 		t.Skipf("actor 集群不可用: %v", err)
@@ -66,10 +71,16 @@ func TestClusterLazyActivation(t *testing.T) {
 
 	ctx := context.Background()
 	if err := rtA.Start(ctx); err != nil {
+		if errors.Is(err, ErrNodeConflict) {
+			t.Fatalf("节点归属冲突不应被当作依赖不可用: %v", err)
+		}
 		t.Skipf("etcd 不可用（目录启动失败）: %v", err)
 	}
 	if err := rtB.Start(ctx); err != nil {
 		rtA.Shutdown(ctx)
+		if errors.Is(err, ErrNodeConflict) {
+			t.Fatalf("节点归属冲突不应被当作依赖不可用: %v", err)
+		}
 		t.Skipf("etcd 不可用: %v", err)
 	}
 	t.Cleanup(func() {

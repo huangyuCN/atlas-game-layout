@@ -24,13 +24,17 @@ const (
 )
 
 type Runtime struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
-	Env           string                 `protobuf:"bytes,4,opt,name=env,proto3" json:"env,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Name    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id      string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Version string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Env     string                 `protobuf:"bytes,4,opt,name=env,proto3" json:"env,omitempty"`
+	// actor_namespace 是 actor 平面命名空间（NATS subject 前缀 atlas_actor.<ns>.* 与 etcd 归属目录
+	// /atlas/actors/<ns>）；空 = 取 env（再空则 default）。取值限 [A-Za-z0-9_-]，非法值启动期报错。
+	// 单列字段是为了让"环境标签"与"隔离命名空间"解耦：进程内/测试形态可以只改命名空间而不改环境标签。
+	ActorNamespace string `protobuf:"bytes,5,opt,name=actor_namespace,json=actorNamespace,proto3" json:"actor_namespace,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Runtime) Reset() {
@@ -91,16 +95,24 @@ func (x *Runtime) GetEnv() string {
 	return ""
 }
 
+func (x *Runtime) GetActorNamespace() string {
+	if x != nil {
+		return x.ActorNamespace
+	}
+	return ""
+}
+
 var File_protobuf_configs_runtime_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\x1eprotobuf/configs/runtime.proto\x12\ratlas.configs\"Y\n" +
+	"\x1eprotobuf/configs/runtime.proto\x12\ratlas.configs\"\x82\x01\n" +
 	"\aRuntime\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x10\n" +
-	"\x03env\x18\x04 \x01(\tR\x03envBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
+	"\x03env\x18\x04 \x01(\tR\x03env\x12'\n" +
+	"\x0factor_namespace\x18\x05 \x01(\tR\x0eactorNamespaceBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
 
 var (
 	file_protobuf_configs_runtime_proto_rawDescOnce sync.Once
