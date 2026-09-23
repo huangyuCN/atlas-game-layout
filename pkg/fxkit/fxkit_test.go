@@ -125,3 +125,31 @@ func TestRegistryOptionsTTL(t *testing.T) {
 		t.Fatalf("未配置 TTL 应为零值（交给底层默认），实际 %v", opts.TTL)
 	}
 }
+
+// TestNewRedisClientAppliesNamespace 验证 redis 客户端的键命名空间与 actor 平面同源
+// （runtime.actor_namespace 优先、env 兜底）：共用同一 redis 的多套部署靠它隔离。
+// 客户端惰性连接，构造不需要真实 redis。
+func TestNewRedisClientAppliesNamespace(t *testing.T) {
+	tests := []struct {
+		name string
+		rt   *configspb.Runtime
+		want string
+	}{
+		{"actor_namespace 优先", &configspb.Runtime{Env: "test", ActorNamespace: "iso"}, "atlas:iso:gw:p1"},
+		{"缺省取 env", &configspb.Runtime{Env: "prod"}, "atlas:prod:gw:p1"},
+		{"两者都空取 default", &configspb.Runtime{}, "atlas:default:gw:p1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &fakeRedisConf{data: &configspb.Data{Redis: &configspb.Data_Redis{Addrs: []string{"127.0.0.1:1"}}}, rt: tt.rt}
+			cli, err := NewRedisClient(cfg)
+			if err != nil {
+				t.Fatalf("NewRedisClient: %v", err)
+			}
+			t.Cleanup(func() { _ = cli.Close() })
+			if got := cli.Keys().GatewayRoute("p1"); got != tt.want {
+				t.Fatalf("Keys().GatewayRoute = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

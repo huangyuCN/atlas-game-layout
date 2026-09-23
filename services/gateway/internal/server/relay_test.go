@@ -61,7 +61,7 @@ func TestJoinBattleBindsBattleChannel(t *testing.T) {
 	// 绑定后推送经战斗通道下发（业务通道不重复下发）。
 	pctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := PublishPush(pctx, pub, "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
+	if err := PublishPush(pctx, testPublisher(pub), "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
 		t.Fatalf("PublishPush: %v", err)
 	}
 	if !waitFor(2*time.Second, func() bool { return hasPush(env.kcp.snapshot(), 77, consts.PushOpMatchStarted) }) {

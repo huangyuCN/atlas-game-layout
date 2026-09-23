@@ -25,8 +25,6 @@ import (
 
 // 缓存键与编码约定。
 const (
-	// playerCachePrefix 是玩家快照缓存键前缀：atlas:player:<playerID>。
-	playerCachePrefix = "atlas:player:"
 	// snapFormatVer 是快照编码格式版本（1 = s2 压缩的 BSON；演进留位）。
 	snapFormatVer byte = 1
 	// defaultSnapshotTTL 是玩家快照的正常租期（72h；Mongo 故障期间的保底窗口）。
@@ -93,7 +91,7 @@ func NewRedisPlayerCache(cli *pkredis.Client) *RedisPlayerCache {
 
 // Get 读取玩家快照；不存在返回 ErrPlayerNotFound。
 func (c *RedisPlayerCache) Get(ctx context.Context, playerID string) (*models.Player, error) {
-	b, err := c.cli.Raw().Get(ctx, playerCachePrefix+playerID).Bytes()
+	b, err := c.cli.Raw().Get(ctx, c.cli.Keys().PlayerSnapshot(playerID)).Bytes()
 	if errors.Is(err, goredis.Nil) {
 		return nil, ErrPlayerNotFound
 	}
@@ -109,28 +107,28 @@ func (c *RedisPlayerCache) Set(ctx context.Context, p *models.Player, ttl time.D
 	if err != nil {
 		return err
 	}
-	return c.cli.Raw().Set(ctx, playerCachePrefix+p.PlayerID, b, ttl).Err()
+	return c.cli.Raw().Set(ctx, c.cli.Keys().PlayerSnapshot(p.PlayerID), b, ttl).Err()
 }
 
 // SetEncoded 写入已编码的快照字节（统一落盘路径：编码只做一次）。
 func (c *RedisPlayerCache) SetEncoded(ctx context.Context, playerID string, b []byte, ttl time.Duration) error {
-	return c.cli.Raw().Set(ctx, playerCachePrefix+playerID, b, ttl).Err()
+	return c.cli.Raw().Set(ctx, c.cli.Keys().PlayerSnapshot(playerID), b, ttl).Err()
 }
 
 // Expire 恢复玩家快照的 TTL（登录补写 Mongo 成功后的 EXPIRE）。
 func (c *RedisPlayerCache) Expire(ctx context.Context, playerID string, ttl time.Duration) error {
-	return c.cli.Raw().Expire(ctx, playerCachePrefix+playerID, ttl).Err()
+	return c.cli.Raw().Expire(ctx, c.cli.Keys().PlayerSnapshot(playerID), ttl).Err()
 }
 
 // Persist 取消玩家快照的 TTL（转永不过期：该存档成为未落库权威副本）。
 func (c *RedisPlayerCache) Persist(ctx context.Context, playerID string) error {
-	return c.cli.Raw().Persist(ctx, playerCachePrefix+playerID).Err()
+	return c.cli.Raw().Persist(ctx, c.cli.Keys().PlayerSnapshot(playerID)).Err()
 }
 
 // TTLOf 查询玩家快照剩余 TTL；键不存在返回 ErrPlayerNotFound，
 // 无 TTL（PERSIST 过）返回 -1，其余返回剩余时长。
 func (c *RedisPlayerCache) TTLOf(ctx context.Context, playerID string) (time.Duration, error) {
-	d, err := c.cli.Raw().TTL(ctx, playerCachePrefix+playerID).Result()
+	d, err := c.cli.Raw().TTL(ctx, c.cli.Keys().PlayerSnapshot(playerID)).Result()
 	if errors.Is(err, goredis.Nil) {
 		return 0, ErrPlayerNotFound
 	}

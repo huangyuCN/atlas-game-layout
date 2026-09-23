@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"time"
 
+	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
@@ -48,7 +50,7 @@ func snapshotTTL(ctx context.Context, redisAddr, playerID string) (time.Duration
 		return 0, err
 	}
 	defer rc.Close()
-	return rc.Raw().TTL(ctx, "atlas:player:"+playerID).Result()
+	return rc.Raw().TTL(ctx, pkredis.NewKeys(actorNamespace()).PlayerSnapshot(playerID)).Result()
 }
 
 // assertPersistedTTL 轮询等待快照 key PERSIST（TTL = -1ns：未落库权威副本语义）。
@@ -89,6 +91,7 @@ func assertExpiringTTL(ctx context.Context, redisAddr, playerID, what string) er
 func grantItems(ctx context.Context, mw middlewareAddrs, playerID string, itemID, count uint32) error {
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID: "e2e-admin", ServiceName: consts.ServiceGame,
+		Namespace:     actorNamespace(),
 		EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL,
 	})
 	if err != nil {

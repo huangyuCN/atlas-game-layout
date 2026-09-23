@@ -55,12 +55,13 @@ func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter me
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
 	}
-	nodeID := ""
+	nodeID, ns := "", ""
 	if r := cfg.GetRuntime(); r != nil {
-		nodeID = r.GetId()
+		nodeID, ns = r.GetId(), pkgactor.NamespaceOf(r)
 	}
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,
+		Namespace:     ns,
 		ServiceName:   consts.ServiceGame,
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),

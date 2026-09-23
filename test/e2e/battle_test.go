@@ -216,7 +216,7 @@ func queueTwo(t *testing.T, ctx context.Context, m *matcherassemble.Matcher, sta
 func subscribeSettled(t *testing.T, nc *natsgo.Conn) <-chan *battlev1.BattleSettledEvent {
 	t.Helper()
 	ch := make(chan *battlev1.BattleSettledEvent, 4)
-	if _, err := nats.Subscribe(nc, consts.EventTopic("battle.settled"), func(_ string, data []byte) {
+	if _, err := nats.Subscribe(nc, e2eTopics.Event("battle.settled"), func(_ string, data []byte) {
 		var ev battlev1.BattleSettledEvent
 		if err := protojson.Unmarshal(data, &ev); err == nil {
 			ch <- &ev
@@ -242,7 +242,7 @@ func newBattleObserver(t *testing.T) *battleObserver {
 	}
 	t.Cleanup(nc.Close)
 	startedCh := make(chan *matcherv1.MatchStartedEvent, 4)
-	if _, err := nats.Subscribe(nc, consts.MatchStartedTopic(), func(_ string, data []byte) {
+	if _, err := nats.Subscribe(nc, e2eTopics.MatchStarted(), func(_ string, data []byte) {
 		var ev matcherv1.MatchStartedEvent
 		if err := protojson.Unmarshal(data, &ev); err == nil {
 			startedCh <- &ev

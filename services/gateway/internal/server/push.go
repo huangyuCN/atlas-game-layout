@@ -11,7 +11,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	atlaslog "github.com/huangyuCN/atlas/log"
-	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -22,33 +21,35 @@ type pushEnvelope struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// kickNotice 是 gateway 控制通道（atlas.gw.<instanceID>）的挤下线通知。
+// kickNotice 是 gateway 控制通道（atlas.<ns>.gw.<instanceID>）的挤下线通知。
 type kickNotice struct {
 	PlayerID string `json:"player_id"`
 }
 
 // StartRelay 启动下行推送与控制通道订阅（D11/D13）：
-//   - 订阅 atlas.push.> 通配主题，按路由表仅持有连接的实例下发；
-//   - 订阅成局事件（atlas.event.match.started），向参战玩家推送开局通知；
-//   - 订阅失败事件（atlas.event.match.failed），向玩家推送失败/取消通知；
+//   - 订阅 atlas.<ns>.push.> 通配主题，按路由表仅持有连接的实例下发；
+//   - 订阅成局事件（atlas.<ns>.event.match.started），向参战玩家推送开局通知；
+//   - 订阅失败事件（atlas.<ns>.event.match.failed），向玩家推送失败/取消通知；
 //   - 订阅本实例控制通道，处理跨实例挤下线通知。
+//
+// 命名空间由配置（runtime.env）决定：与 matcher/battle 的发布方同源，否则订阅落空。
 func (g *Gateway) StartRelay(ctx context.Context) error {
 	if g.nc == nil {
 		return nil
 	}
-	if _, err := pkgnats.SubscribeWildcard(g.nc, consts.TopicPush+">", g.onPushEvent); err != nil {
+	if _, err := pkgnats.SubscribeWildcard(g.nc, g.pub.Topics().PushWildcard(), g.onPushEvent); err != nil {
 		return err
 	}
-	if _, err := pkgnats.Subscribe(g.nc, consts.MatchStartedTopic(), g.onMatchStarted); err != nil {
+	if _, err := pkgnats.Subscribe(g.nc, g.pub.Topics().MatchStarted(), g.onMatchStarted); err != nil {
 		return err
 	}
-	if _, err := pkgnats.Subscribe(g.nc, consts.MatchFailedTopic(), g.onMatchFailed); err != nil {
+	if _, err := pkgnats.Subscribe(g.nc, g.pub.Topics().MatchFailed(), g.onMatchFailed); err != nil {
 		return err
 	}
-	if _, err := pkgnats.Subscribe(g.nc, consts.PartyRosterTopic(), g.onPartyRoster); err != nil {
+	if _, err := pkgnats.Subscribe(g.nc, g.pub.Topics().PartyRoster(), g.onPartyRoster); err != nil {
 		return err
 	}
-	_, err := pkgnats.Subscribe(g.nc, consts.GatewayTopic(g.instanceID), g.onKickNotice)
+	_, err := pkgnats.Subscribe(g.nc, g.pub.Topics().GatewayControl(g.instanceID), g.onKickNotice)
 	return err
 }
 
@@ -64,7 +65,7 @@ func (g *Gateway) relayEvent(operation string, data []byte,
 		return
 	}
 	for _, pid := range players {
-		_ = pkgnats.PublishEnvelope(ctx, g.nc, pid, operation, notify)
+		_ = g.pub.PublishEnvelope(ctx, pid, operation, notify)
 	}
 }
 
@@ -133,7 +134,7 @@ const relayTimeout = 2 * time.Second
 
 // onPushEvent 处理推送事件：解析玩家 ID 与消息信封，仅本实例持有该玩家时下发。
 func (g *Gateway) onPushEvent(subject string, data []byte) {
-	playerID := strings.TrimPrefix(subject, consts.TopicPush)
+	playerID := strings.TrimPrefix(subject, g.pub.Topics().PushPrefix())
 	if playerID == "" || playerID == subject {
 		return
 	}
@@ -170,14 +171,14 @@ func (g *Gateway) onKickNotice(_ string, data []byte) {
 }
 
 // publishControl 向指定 gateway 实例的控制通道发布挤下线通知。
-func publishControl(ctx context.Context, nc *nats.Conn, instanceID string, data []byte) error {
-	if nc == nil {
-		return nil
+func publishControl(ctx context.Context, pub *pkgnats.Publisher, instanceID string, data []byte) error {
+	if pub == nil {
+		return nil // 未配置 NATS（测试/裁剪形态）：无控制通道可发
 	}
-	return pkgnats.Publish(ctx, nc, consts.GatewayTopic(instanceID), data)
+	return pub.Publish(ctx, pub.Topics().GatewayControl(instanceID), data)
 }
 
 // PublishPush 向玩家推送消息（供 gateway 上层/测试发布 nats 推送事件）。
-func PublishPush(ctx context.Context, nc *nats.Conn, playerID, operation string, payload json.RawMessage) error {
-	return pkgnats.PublishEnvelope(ctx, nc, playerID, operation, payload)
+func PublishPush(ctx context.Context, pub *pkgnats.Publisher, playerID, operation string, payload json.RawMessage) error {
+	return pub.PublishEnvelope(ctx, playerID, operation, payload)
 }

@@ -8,7 +8,6 @@ import (
 
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	matcherassemble "github.com/huangyuCN/atlas-game-layout/services/matcher/assemble"
 	"github.com/huangyuCN/atlas/matchmaker"
@@ -37,7 +36,7 @@ func (s *recordSink) PublishStarted(ctx context.Context, battleID, matchID strin
 		MatchId: matchID, BattleId: battleID, PlayerIds: playerIDs,
 	})
 	if err == nil {
-		_ = nats.Publish(ctx, s.nc, consts.MatchStartedTopic(), payload)
+		_ = nats.Publish(ctx, s.nc, e2eTopics.MatchStarted(), payload)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,7 +71,7 @@ func TestE2EMatcherQueue(t *testing.T) {
 	}
 	defer nc.Close()
 	startedEvent := make(chan *matcherv1.MatchStartedEvent, 4)
-	if _, err := nats.Subscribe(nc, consts.MatchStartedTopic(), func(_ string, data []byte) {
+	if _, err := nats.Subscribe(nc, e2eTopics.MatchStarted(), func(_ string, data []byte) {
 		var ev matcherv1.MatchStartedEvent
 		if err := protojson.Unmarshal(data, &ev); err == nil {
 			startedEvent <- &ev

@@ -11,6 +11,9 @@ import (
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 )
 
+// testKeys 是单测用的键构造器：与 newTestEnv 里 redis 客户端一致（未指定命名空间 → default）。
+var testKeys = pkredis.NewKeys("")
+
 // newTestManager 起 miniredis 并构造 Manager（租期与清扫周期全默认）。
 func newTestManager(t *testing.T, instanceID string) *Manager {
 	m, _ := newTestEnv(t, instanceID, Options{})
@@ -211,7 +214,7 @@ func TestHeartbeatAppliesConfiguredTTL(t *testing.T) {
 	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
-	if ttl := mr.TTL("atlas:gw:p-1"); ttl <= 80*time.Second || ttl > 90*time.Second {
+	if ttl := mr.TTL(testKeys.GatewayRoute("p-1")); ttl <= 80*time.Second || ttl > 90*time.Second {
 		t.Fatalf("Bind 后路由 TTL = %v, 期望 ≈90s（配置租期）", ttl)
 	}
 	if err := m.store.Expire(ctx, "p-1", 5*time.Second); err != nil {
@@ -220,7 +223,7 @@ func TestHeartbeatAppliesConfiguredTTL(t *testing.T) {
 	if !m.Heartbeat(ctx, "p-1", "token-1") {
 		t.Fatal("Heartbeat 应成功")
 	}
-	if ttl := mr.TTL("atlas:gw:p-1"); ttl <= 80*time.Second || ttl > 90*time.Second {
+	if ttl := mr.TTL(testKeys.GatewayRoute("p-1")); ttl <= 80*time.Second || ttl > 90*time.Second {
 		t.Fatalf("心跳后路由 TTL = %v, 期望 ≈90s（心跳按配置租期续租）", ttl)
 	}
 }
@@ -394,7 +397,7 @@ func TestRouteLegacyValueCompatibility(t *testing.T) {
 		t.Fatalf("NewClient: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	_ = cli.Raw().Set(context.Background(), "atlas:gw:p-old", "gw-legacy", 0).Err()
+	_ = cli.Raw().Set(context.Background(), testKeys.GatewayRoute("p-old"), "gw-legacy", 0).Err()
 
 	store := NewRedisStore(cli)
 	r, err := store.Get(context.Background(), "p-old")
@@ -405,7 +408,7 @@ func TestRouteLegacyValueCompatibility(t *testing.T) {
 		t.Fatalf("旧值解析失败: %+v", r)
 	}
 	// 纯乱码旧值不应报错。
-	_ = cli.Raw().Set(context.Background(), "atlas:gw:p-bad", "!!!not-json", 0).Err()
+	_ = cli.Raw().Set(context.Background(), testKeys.GatewayRoute("p-bad"), "!!!not-json", 0).Err()
 	if _, err := store.Get(context.Background(), "p-bad"); err != nil {
 		t.Fatalf("乱码旧值应容错: %v", err)
 	}

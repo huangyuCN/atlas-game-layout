@@ -71,7 +71,7 @@ func TestPushOnlyOwnerDelivers(t *testing.T) {
 	// 推送 p-1：仅实例 A 下发。
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := PublishPush(ctx, pub, "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1","battle_id":"b-1"}`)); err != nil {
+	if err := PublishPush(ctx, testPublisher(pub), "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1","battle_id":"b-1"}`)); err != nil {
 		t.Fatalf("PublishPush p-1: %v", err)
 	}
 	if !waitFor(2*time.Second, func() bool { return hasPush(envA.push.snapshot(), 1, consts.PushOpMatchStarted) }) {
@@ -83,7 +83,7 @@ func TestPushOnlyOwnerDelivers(t *testing.T) {
 	}
 
 	// 推送 p-2：仅实例 B 下发。
-	if err := PublishPush(ctx, pub, "p-2", consts.PushOpMatchStarted, []byte(`{"match_id":"m-2","battle_id":"b-2"}`)); err != nil {
+	if err := PublishPush(ctx, testPublisher(pub), "p-2", consts.PushOpMatchStarted, []byte(`{"match_id":"m-2","battle_id":"b-2"}`)); err != nil {
 		t.Fatalf("PublishPush p-2: %v", err)
 	}
 	if !waitFor(2*time.Second, func() bool { return hasPush(envB.push.snapshot(), 1, consts.PushOpMatchStarted) }) {
@@ -145,7 +145,7 @@ func TestMatchStartedNotifyRelay(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := nats.Publish(ctx, pub, consts.MatchStartedTopic(), payload); err != nil {
+	if err := nats.Publish(ctx, pub, testTopics.MatchStarted(), payload); err != nil {
 		t.Fatalf("发布成局事件: %v", err)
 	}
 
@@ -184,7 +184,7 @@ func TestMatchFailedNotifyPush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("事件编码: %v", err)
 	}
-	if err := pub.Publish(consts.MatchFailedTopic(), ev); err != nil {
+	if err := pub.Publish(testTopics.MatchFailed(), ev); err != nil {
 		t.Fatalf("发布失败事件: %v", err)
 	}
 

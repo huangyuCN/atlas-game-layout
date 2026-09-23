@@ -32,8 +32,9 @@ type RedisStore struct {
 // NewRedisStore 构造 redis 路由存储。
 func NewRedisStore(cli *pkredis.Client) *RedisStore { return &RedisStore{cli: cli} }
 
-// routeKey 生成路由键：atlas:gw:<playerID>（与 pkg/redis 的 gatewaySessionKey 约定一致）。
-func routeKey(playerID string) string { return "atlas:gw:" + playerID }
+// routeKey 生成路由键（命名空间化：atlas:<ns>:gw:<playerID>，见 pkg/redis.Keys）：
+// 命名空间取自 redis 客户端（构造期由装配层按 runtime.actor_namespace/env 写入）。
+func (s *RedisStore) routeKey(playerID string) string { return s.cli.Keys().GatewayRoute(playerID) }
 
 // GetSet 实现 Store：SET key value EX ttl GET 单命令原子「写新值 + 设 TTL + 取旧值」。
 // 相比已弃用的 GETSET 命令（go-redis GetSet 已标注 Deprecated），
@@ -46,7 +47,7 @@ func (s *RedisStore) GetSet(ctx context.Context, playerID string, r *Route, ttl 
 	if err != nil {
 		return nil, fmt.Errorf("session: 路由编码失败: %w", err)
 	}
-	old, err := s.cli.Raw().SetArgs(ctx, routeKey(playerID), string(b), goredis.SetArgs{TTL: ttl, Get: true}).Result()
+	old, err := s.cli.Raw().SetArgs(ctx, s.routeKey(playerID), string(b), goredis.SetArgs{TTL: ttl, Get: true}).Result()
 	if err != nil && !errors.Is(err, goredis.Nil) {
 		return nil, err
 	}
@@ -58,7 +59,7 @@ func (s *RedisStore) GetSet(ctx context.Context, playerID string, r *Route, ttl 
 
 // Get 实现 Store。
 func (s *RedisStore) Get(ctx context.Context, playerID string) (*Route, error) {
-	v, err := s.cli.Raw().Get(ctx, routeKey(playerID)).Result()
+	v, err := s.cli.Raw().Get(ctx, s.routeKey(playerID)).Result()
 	if errors.Is(err, goredis.Nil) {
 		return nil, nil
 	}
@@ -70,12 +71,12 @@ func (s *RedisStore) Get(ctx context.Context, playerID string) (*Route, error) {
 
 // Delete 实现 Store。
 func (s *RedisStore) Delete(ctx context.Context, playerID string) error {
-	return s.cli.Raw().Del(ctx, routeKey(playerID)).Err()
+	return s.cli.Raw().Del(ctx, s.routeKey(playerID)).Err()
 }
 
 // Expire 实现 Store。
 func (s *RedisStore) Expire(ctx context.Context, playerID string, ttl time.Duration) error {
-	return s.cli.Raw().Expire(ctx, routeKey(playerID), ttl).Err()
+	return s.cli.Raw().Expire(ctx, s.routeKey(playerID), ttl).Err()
 }
 
 // parseRouteValue 解析路由值：JSON 优先；失败时按 M2 旧格式（纯实例 ID）降级。

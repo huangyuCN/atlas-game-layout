@@ -1,6 +1,6 @@
 // Package nats 提供游戏模板的 NATS 连接与消息封装：
-// 事件总线（atlas.event.*）、玩家推送（atlas.push.*）、gateway 控制通道
-// （atlas.gw.*）的主题约定见 lib/consts。
+// 事件总线（atlas.<ns>.event.*）、玩家推送（atlas.<ns>.push.*）、gateway 控制通道
+// （atlas.<ns>.gw.*）的主题约定见 lib/consts.Topics；发布统一走 Publisher（连接 + 命名空间收口）。
 package nats
 
 import (
@@ -83,12 +83,13 @@ type pushEnvelope struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// PublishEnvelope 以 {type, payload} 信封向玩家推送主题（atlas.push.<playerID>）发布，
+// PublishEnvelope 以 {type, payload} 信封向玩家推送主题（atlas.<ns>.push.<playerID>）发布，
 // 供 gateway 订阅后按信封透传下发（见 gateway server push 订阅约定）。
-func PublishEnvelope(ctx context.Context, nc *nats.Conn, playerID, operation string, payload []byte) error {
+// topics 决定命名空间，发布方与订阅方必须同源（否则推送落空）。
+func PublishEnvelope(ctx context.Context, nc *nats.Conn, topics consts.Topics, playerID, operation string, payload []byte) error {
 	env, err := json.Marshal(pushEnvelope{Type: operation, Payload: json.RawMessage(payload)})
 	if err != nil {
 		return fmt.Errorf("nats: 信封编码失败: %w", err)
 	}
-	return Publish(ctx, nc, consts.PushTopic(playerID), env)
+	return Publish(ctx, nc, topics.Push(playerID), env)
 }

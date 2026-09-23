@@ -8,14 +8,18 @@ package fxkit
 import (
 	"fmt"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
+	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	etcdreg "github.com/huangyuCN/atlas/contrib/registry/etcd"
 	"github.com/huangyuCN/atlas/registry"
+	"github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -35,6 +39,19 @@ type WithRuntime interface {
 type RegistryConfig interface {
 	WithRegistry
 	WithRuntime
+}
+
+// NewPublisher 装配业务事件发布器（NATS 连接 + topic 命名空间一次收口）：
+// 服务组件只依赖 *pkgnats.Publisher，不再各自持有 (nc, topics) 两个字段/参数。
+func NewPublisher(nc *nats.Conn, topics consts.Topics) *pkgnats.Publisher {
+	return pkgnats.NewPublisher(nc, topics)
+}
+
+// Topics 提供业务 topic 构造器（四服务共用同一份约定）：命名空间取
+// **与 actor 平面同一个值**（`runtime.actor_namespace` 优先、`env` 兜底，见 pkg/actor.NamespaceOf）——
+// 两者分家会立刻表现为"订阅端收不到事件"，也让隔离维度出现两套标准。
+func Topics[B WithRuntime](cfg B) consts.Topics {
+	return consts.NewTopics(pkgactor.NamespaceOf(cfg.GetRuntime()))
 }
 
 // EtcdEndpoints 提取 registry.etcd.endpoints（缺失时返回 nil）。
@@ -139,13 +156,24 @@ func RedisOptions[B WithData](cfg B) (pkredis.Options, error) {
 	}, nil
 }
 
+// DataRuntimeConfig 是装配 redis 客户端所需的最小配置接口：数据中间件段 + 服务身份
+// （键命名空间取 runtime.actor_namespace / env，见 pkg/actor.NamespaceOf）。
+type DataRuntimeConfig interface {
+	WithData
+	WithRuntime
+}
+
 // NewRedisClient 从配置装配 redis 客户端（惰性连接，不建连）；
 // 配置缺失或形态非法时快速失败——依赖 redis 的服务应尽早暴露而非静默降级。
-func NewRedisClient[B WithData](cfg B) (*pkredis.Client, error) {
+//
+// 业务键命名空间在此写入（`pkg/actor.NamespaceOf`）：与 actor subject / 业务 topic **同源**，
+// 共用同一 redis 的多套部署才不会互相覆盖（会话路由、玩家快照、撮合票据）。
+func NewRedisClient[B DataRuntimeConfig](cfg B) (*pkredis.Client, error) {
 	opts, err := RedisOptions(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("fxkit: %w", err)
 	}
+	opts.Namespace = pkgactor.NamespaceOf(cfg.GetRuntime())
 	cli, err := pkredis.NewClient(opts)
 	if err != nil {
 		return nil, fmt.Errorf("fxkit: 构造 redis 客户端失败: %w", err)

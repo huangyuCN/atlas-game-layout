@@ -108,7 +108,7 @@ func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Co
 
 	sess := session.NewManager(session.NewRedisStore(cli), id, session.Options{TTL: 30 * time.Second})
 	mock := newMockActorRuntime()
-	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), meter, nc,
+	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), meter, nc, testPublisher(nc),
 		push, new(fakePusher), kcpPush, udpSrv)
 	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
 	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))

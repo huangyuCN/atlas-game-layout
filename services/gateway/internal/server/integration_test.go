@@ -101,7 +101,7 @@ func TestIntegrationPushOnlyOwnerDelivers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := PublishPush(ctx, nc, "it-p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
+	if err := PublishPush(ctx, testPublisher(nc), "it-p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
 		t.Fatalf("PublishPush: %v", err)
 	}
 	if !waitFor(3*time.Second, func() bool { return hasPush(envA.push.snapshot(), 1, consts.PushOpMatchStarted) }) {

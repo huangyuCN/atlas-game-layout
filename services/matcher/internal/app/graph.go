@@ -31,6 +31,8 @@ var Module = fx.Module("matcher",
 	middleware.Module,
 	fx.Provide(
 		// ── infra：注册中心 + 外部客户端 + 集群客户端 ──
+		fxkit.Topics[*conf.Bootstrap], // 业务 topic 命名空间（与 actor 平面同源）
+		fxkit.NewPublisher,            // 业务事件发布入口（连接 + 命名空间收口）
 		fxkit.NewEtcdClient[*conf.Bootstrap],
 		fxkit.NewRegistrar[*conf.Bootstrap], // → registry.Registrar，供 atlas.App 服务注册
 		// → registry.Discovery：actor 集群选节点与 gRPC 客户端寻址共用（键前缀与注册端同源）

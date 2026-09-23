@@ -12,6 +12,7 @@ import (
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
 	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
+	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
@@ -45,6 +46,8 @@ var Module = fx.Module("gateway",
 		// → registry.Discovery：actor 集群选节点与 gRPC 客户端寻址共用（键前缀与注册端同源）
 		fxkit.NewEtcdDiscovery[*conf.Bootstrap],
 		fxkit.NewRedisClient[*conf.Bootstrap],
+		fxkit.Topics[*conf.Bootstrap], // 业务 topic 命名空间（与 actor 平面同源）
+		fxkit.NewPublisher,            // 业务事件发布入口（连接 + 命名空间收口）
 		NewNatsConn,
 		// ── server：五协议传输层构造（启停归属驱动方）──
 		server.NewHTTPServer,
@@ -112,6 +115,7 @@ func newGateway(
 	actors *actorclient.Client,
 	meter metrics.Collector,
 	nc *natsgo.Conn,
+	pub *pkgnats.Publisher,
 	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
 ) (*server.Gateway, error) {
 	instanceID := ""
@@ -124,7 +128,7 @@ func newGateway(
 	if err != nil {
 		return nil, fmt.Errorf("gateway: 透传路由表合并失败: %w", err)
 	}
-	g := server.NewGateway(instanceID, table, sess, actors, meter, nc, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	g := server.NewGateway(instanceID, table, sess, actors, meter, nc, pub, tcpSrv, wsSrv, kcpSrv, udpSrv)
 	// 通道绑定副作用（Gateway 会话模型的领域知识，装配声明——不进注解协议）：
 	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道（battle 帧推送寻址）。
 	g.Relay().WithChannelBinding("/battle.v1.BattleService/JoinBattle", relay.Slot(session.ChannelBattle))

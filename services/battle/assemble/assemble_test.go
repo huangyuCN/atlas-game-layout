@@ -3,6 +3,7 @@ package assemble
 import (
 	"testing"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	battleactor "github.com/huangyuCN/atlas-game-layout/services/battle/internal/actor"
 )
 
@@ -15,13 +16,22 @@ func TestNewBootstrap(t *testing.T) {
 		MongoURI:      "mongodb://127.0.0.1:27017",
 		MongoDB:       "battle_it",
 	}
-	cfg := newBootstrap(opts)
+	cfg, err := newBootstrap(opts)
+	if err != nil {
+		t.Fatalf("newBootstrap: %v", err)
+	}
 
 	if got := cfg.GetRuntime().GetName(); got != "battle" {
 		t.Errorf("runtime.name = %q, 期望 battle", got)
 	}
 	if got := cfg.GetRuntime().GetId(); got != "battle-it" {
 		t.Errorf("runtime.id = %q, 期望 battle-it", got)
+	}
+
+	// actor 命名空间经 ActorNamespaceOf 派生（未指定注册前缀时回落 default）：
+	// 与注册中心前缀同源，保证 NATS subject 与注册键在同一隔离维度。
+	if got := cfg.GetRuntime().GetActorNamespace(); got != bootstrap.DefaultActorNamespace {
+		t.Errorf("runtime.actor_namespace = %q, 期望 %q", got, bootstrap.DefaultActorNamespace)
 	}
 	eps := cfg.GetRegistry().GetEtcd().GetEndpoints()
 	if len(eps) != 1 || eps[0] != "127.0.0.1:12379" {

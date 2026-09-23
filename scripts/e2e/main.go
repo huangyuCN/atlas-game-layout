@@ -22,6 +22,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"os"
 	"strings"
 	"time"
@@ -43,6 +44,16 @@ import (
 // e2eNamespace 是本次运行独占的注册中心键前缀：与常驻进程（按 runtime.env 派生）
 // 隔离，也不会命中上一次运行残留的实例键（租约未过期）导致注册冲突。
 var e2eNamespace = fmt.Sprintf("%s/e2e-%d", pkgregistry.NamespacePrefix, time.Now().UnixNano())
+
+// actorNamespace 派生本次运行独占的命名空间（actor 平面 / 业务 topic / redis 键共用）：
+// 取注册中心前缀的叶子段，与进程内装配（assemble → newBootstrap）同源。
+func actorNamespace() string {
+	ns, err := bootstrap.ActorNamespaceOf(e2eNamespace)
+	if err != nil {
+		panic(err) // 前缀由本脚本生成（/atlas/services/e2e-<纳秒>），不会非法
+	}
+	return ns
+}
 
 // middlewareAddrs 是中间件地址集（默认与 deploy/docker-compose 端口约定一致）。
 type middlewareAddrs struct {

@@ -11,10 +11,14 @@ import (
 // fakeRedisConf 是满足 WithData 的最小测试配置。
 type fakeRedisConf struct {
 	data *configspb.Data
+	rt   *configspb.Runtime
 }
 
 // GetData 返回测试用数据中间件配置段。
 func (f *fakeRedisConf) GetData() *configspb.Data { return f.data }
+
+// GetRuntime 返回测试用服务身份（redis 键命名空间取自它，见 pkg/actor.NamespaceOf）。
+func (f *fakeRedisConf) GetRuntime() *configspb.Runtime { return f.rt }
 
 // TestRedisOptions 验证 proto 配置 → redis.Options 的映射（缺省/三形态/全字段）。
 func TestRedisOptions(t *testing.T) {

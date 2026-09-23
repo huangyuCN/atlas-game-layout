@@ -8,7 +8,7 @@ import (
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
-	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
+	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// settledTopicSuffix 是结算事件主题后缀（atlas.event.battle.settled）。
+// settledTopicSuffix 是结算事件主题后缀（atlas.<ns>.event.battle.settled）。
 const settledTopicSuffix = "battle.settled"
 
 // NewNatsConn 装配 NATS 连接（帧广播 + 结算事件）。
@@ -25,56 +25,56 @@ func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
 		url = d.GetNats().GetUrl()
 	}
-	return nats.Connect(nats.Options{URL: url, Name: "battle"})
+	return pkgnats.Connect(pkgnats.Options{URL: url, Name: "battle"})
 }
 
 // NatsBattleNotifier 是战斗下行通知实现（nats → gateway → 客户端）。
 type NatsBattleNotifier struct {
-	nc *natsgo.Conn
+	pub *pkgnats.Publisher
 }
 
 // NewNatsBattleNotifier 构造下行通知器。
-func NewNatsBattleNotifier(nc *natsgo.Conn) *NatsBattleNotifier {
-	return &NatsBattleNotifier{nc: nc}
+func NewNatsBattleNotifier(pub *pkgnats.Publisher) *NatsBattleNotifier {
+	return &NatsBattleNotifier{pub: pub}
 }
 
 // PublishFrame 实现 biz.BattleNotifier：
-// 以 atlas.push.<playerID> 信封（type=FrameBroadcast，op 为消息完整名）下发一帧。
+// 以 atlas.<ns>.push.<playerID> 信封（type=FrameBroadcast，op 为消息完整名）下发一帧。
 func (f *NatsBattleNotifier) PublishFrame(ctx context.Context, playerID, battleID string, frame *locksteppb.LockstepFrame) error {
 	payload, err := protojson.Marshal(&battlev1.FrameBroadcast{BattleId: battleID, Frame: frame})
 	if err != nil {
 		return fmt.Errorf("infra: 帧广播编码失败: %w", err)
 	}
-	return nats.PublishEnvelope(ctx, f.nc, playerID, consts.PushOpFrameBroadcast, payload)
+	return f.pub.PublishEnvelope(ctx, playerID, consts.PushOpFrameBroadcast, payload)
 }
 
 // PublishEnd 实现 biz.BattleNotifier：
-// 以 atlas.push.<playerID> 信封（type=BattleEndNotify，op 为消息完整名）下发战斗结束通知。
+// 以 atlas.<ns>.push.<playerID> 信封（type=BattleEndNotify，op 为消息完整名）下发战斗结束通知。
 func (f *NatsBattleNotifier) PublishEnd(ctx context.Context, playerID, battleID, winner string) error {
 	payload, err := protojson.Marshal(&battlev1.BattleEndNotify{BattleId: battleID, WinnerPlayerId: winner})
 	if err != nil {
 		return fmt.Errorf("infra: 结束通知编码失败: %w", err)
 	}
-	return nats.PublishEnvelope(ctx, f.nc, playerID, consts.PushOpBattleEnd, payload)
+	return f.pub.PublishEnvelope(ctx, playerID, consts.PushOpBattleEnd, payload)
 }
 
 // NatsSettlePublisher 是结算事件发布实现。
 type NatsSettlePublisher struct {
-	nc *natsgo.Conn
+	pub *pkgnats.Publisher
 }
 
 // NewNatsSettlePublisher 构造结算发布器。
-func NewNatsSettlePublisher(nc *natsgo.Conn) *NatsSettlePublisher {
-	return &NatsSettlePublisher{nc: nc}
+func NewNatsSettlePublisher(pub *pkgnats.Publisher) *NatsSettlePublisher {
+	return &NatsSettlePublisher{pub: pub}
 }
 
-// PublishSettled 实现 biz.SettlePublisher（主题 atlas.event.battle.settled）。
+// PublishSettled 实现 biz.SettlePublisher（主题 atlas.<ns>.event.battle.settled）。
 func (p *NatsSettlePublisher) PublishSettled(ctx context.Context, ev *battlev1.BattleSettledEvent) error {
 	payload, err := protojson.Marshal(ev)
 	if err != nil {
 		return fmt.Errorf("infra: 结算事件编码失败: %w", err)
 	}
-	return nats.Publish(ctx, p.nc, consts.EventTopic(settledTopicSuffix), payload)
+	return p.pub.Publish(ctx, p.pub.Topics().Event(settledTopicSuffix), payload)
 }
 
 // 静态保证实现接口。

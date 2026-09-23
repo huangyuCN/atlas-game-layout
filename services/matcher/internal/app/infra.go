@@ -6,6 +6,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
+	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
@@ -43,12 +44,13 @@ func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter me
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
 	}
-	nodeID := ""
+	nodeID, ns := "", ""
 	if r := cfg.GetRuntime(); r != nil {
-		nodeID = r.GetId()
+		nodeID, ns = r.GetId(), pkgactor.NamespaceOf(r)
 	}
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,
+		Namespace:     ns,
 		ServiceName:   consts.ServiceBattle,
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),
@@ -87,8 +89,8 @@ func serviceOf(rt *matchredis.Runtime) matchmaker.Service { return rt.Service }
 
 // newSink 装配成局观察方默认组合（nats 发布 + 开局调用）；
 // 测试注入经 fx.Decorate 覆盖本提供器输出（见 assemble）。
-func newSink(nc *natsgo.Conn, rt *pkgactor.Runtime) biz.MatchEventSink {
-	return infra.NewSink(nc, rt)
+func newSink(pub *pkgnats.Publisher, rt *pkgactor.Runtime) biz.MatchEventSink {
+	return infra.NewSink(pub, rt)
 }
 
 // rosterOf 把 nats 事件发布器绑定为名册变更发布接口（供 fx 按接口注入）。

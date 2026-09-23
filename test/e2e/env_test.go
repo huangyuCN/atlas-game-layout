@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"testing"
 	"time"
 
@@ -33,6 +34,19 @@ const (
 // itNamespace 是本次测试运行独占的注册中心键前缀：与常驻进程（按 runtime.env 派生）
 // 隔离，也不会命中上一次运行残留的实例键（租约未过期）导致注册冲突。
 var itNamespace = fmt.Sprintf("%s/it-%d", pkgregistry.NamespacePrefix, time.Now().UnixNano())
+
+// e2eTopics 是本次测试运行独占的业务 topic 命名空间：与进程内装配派生规则同源
+// （assemble.Options.Namespace 的叶子段），发布方与订阅方必须一致，否则消息落在不同 subject。
+var e2eTopics = consts.NewTopics(mustActorNamespace(itNamespace))
+
+// mustActorNamespace 派生 actor 命名空间；测试夹具里非法值直接 panic（前缀由本文件生成，不会非法）。
+func mustActorNamespace(registryNS string) string {
+	ns, err := bootstrap.ActorNamespaceOf(registryNS)
+	if err != nil {
+		panic(err)
+	}
+	return ns
+}
 
 // probeCore 探测基础中间件（etcd/redis/nats）；不可用返回 skip 原因。
 func probeCore(t *testing.T) string {

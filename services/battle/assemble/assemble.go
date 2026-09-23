@@ -83,7 +83,11 @@ type graphHandles struct {
 // 实例 ID 必须 == actor NodeID（matcher 懒激活按服务实例选 battle 节点的硬约束）。
 func New(ctx context.Context, o Options) (*Battle, error) {
 	var h graphHandles
-	inst, urls, err := bootstrap.Boot(ctx, newBootstrap(o),
+	cfg, err := newBootstrap(o)
+	if err != nil {
+		return nil, err
+	}
+	inst, urls, err := bootstrap.Boot(ctx, cfg,
 		fx.Options(battleapp.Module, overrideBattleConfig(o.BattleCfg)), &h, serverutil.SchemeGRPC)
 	if err != nil {
 		return nil, err
@@ -111,13 +115,17 @@ func overrideBattleConfig(override *BattleConfig) fx.Option {
 	})
 }
 
-// newBootstrap 把进程内装配参数映射为服务配置：
 // 装配图只认 *conf.Bootstrap 一种输入，两种驱动形态因此共享全部构造函数。
 // 监听地址固定随机端口（进程内形态不做端口管理）。
-func newBootstrap(o Options) *conf.Bootstrap {
+// newBootstrap 合成进程内形态配置；返回 error 的唯一来源是 actor 命名空间派生非法。
+func newBootstrap(o Options) (*conf.Bootstrap, error) {
+	actorNS, err := bootstrap.ActorNamespaceOf(o.Namespace)
+	if err != nil {
+		return nil, err
+	}
 	const randomPort = "127.0.0.1:0"
 	return &conf.Bootstrap{
-		Runtime: &configspb.Runtime{Name: "battle", Id: o.NodeID},
+		Runtime: &configspb.Runtime{Name: "battle", Id: o.NodeID, ActorNamespace: actorNS},
 		Registry: &configspb.Registry{
 			Etcd:      &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
 			Namespace: o.Namespace,
@@ -130,5 +138,5 @@ func newBootstrap(o Options) *conf.Bootstrap {
 			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
 			Mongo: &configspb.Data_Mongo{Uri: o.MongoURI, Database: o.MongoDB},
 		},
-	}
+	}, nil
 }

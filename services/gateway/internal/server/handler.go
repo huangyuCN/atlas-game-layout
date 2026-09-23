@@ -15,6 +15,7 @@ import (
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	libsession "github.com/huangyuCN/atlas-game-layout/lib/session"
+	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
@@ -91,6 +92,7 @@ type Gateway struct {
 	actors     *actorclient.Client
 	players    *gamev1.PlayerServiceClusterClient // 生成的玩家域集群互调 client
 	nc         *nats.Conn
+	pub        *pkgnats.Publisher // 业务事件发布入口（连接 + topic 命名空间收口）
 	pushers    map[transport.Kind]pushServer
 	udpSrv     *udpt.Server // UDP 按 peer 寻址（无 connID 语义）
 	relay      *Relay       // 业务 op 透传引擎（表由注解生成，见 relay.go）
@@ -118,6 +120,7 @@ func NewGateway(
 	actors *actorclient.Client,
 	meter metrics.Collector,
 	nc *nats.Conn,
+	pub *pkgnats.Publisher,
 	tcpSrv, wsSrv, kcpSrv pushServer,
 	udpSrv *udpt.Server,
 ) *Gateway {
@@ -127,6 +130,7 @@ func NewGateway(
 		actors:     actors,
 		players:    gamev1.NewPlayerServiceClusterClient(actors.PlayerInvoker()),
 		nc:         nc,
+		pub:        pub,
 		pushers: map[transport.Kind]pushServer{
 			transport.KindTCP:       tcpSrv,
 			transport.KindWebSocket: wsSrv,
@@ -316,7 +320,7 @@ func (g *Gateway) kickOld(ctx context.Context, playerID string, old *session.Rou
 	if err != nil {
 		return
 	}
-	_ = publishControl(ctx, g.nc, old.InstanceID, data)
+	_ = publishControl(ctx, g.pub, old.InstanceID, data)
 }
 
 // pushKicked 向会话的全部通道推送「被挤下线」通知。

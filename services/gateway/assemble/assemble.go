@@ -53,7 +53,11 @@ type graphHandles struct {
 // （含推送订阅、会话清扫与 actor 客户端），由 atlas.App 统一启动五协议服务端并注册实例。
 func New(ctx context.Context, o Options) (*Gateway, error) {
 	var h graphHandles
-	inst, urls, err := bootstrap.Boot(ctx, newBootstrap(o), gwapp.Module, &h,
+	cfg, err := newBootstrap(o)
+	if err != nil {
+		return nil, err
+	}
+	inst, urls, err := bootstrap.Boot(ctx, cfg, gwapp.Module, &h,
 		serverutil.SchemeTCP, serverutil.SchemeWS, serverutil.SchemeKCP,
 		serverutil.SchemeUDP, serverutil.SchemeHTTP)
 	if err != nil {
@@ -79,14 +83,18 @@ func (g *Gateway) Stop(ctx context.Context) error {
 	return g.stop(ctx)
 }
 
-// newBootstrap 把进程内装配参数映射为服务配置：
 // 装配图只认 *conf.Bootstrap 一种输入，两种驱动形态因此共享全部构造函数。
 // 实例 ID 加 gw- 前缀（会话路由与跨实例踢人依赖该约定）；
 // 监听地址固定随机端口（进程内形态不做端口管理）。
-func newBootstrap(o Options) *conf.Bootstrap {
+// newBootstrap 合成进程内形态配置；返回 error 的唯一来源是 actor 命名空间派生非法。
+func newBootstrap(o Options) (*conf.Bootstrap, error) {
+	actorNS, err := bootstrap.ActorNamespaceOf(o.Namespace)
+	if err != nil {
+		return nil, err
+	}
 	const randomPort = "127.0.0.1:0"
 	return &conf.Bootstrap{
-		Runtime: &configspb.Runtime{Name: "gateway", Id: "gw-" + o.ID},
+		Runtime: &configspb.Runtime{Name: "gateway", Id: "gw-" + o.ID, ActorNamespace: actorNS},
 		Registry: &configspb.Registry{
 			Etcd:      &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
 			Namespace: o.Namespace,
@@ -103,5 +111,5 @@ func newBootstrap(o Options) *conf.Bootstrap {
 			Redis: &configspb.Data_Redis{Addrs: o.RedisAddrs},
 			Nats:  &configspb.Data_Nats{Url: o.NatsURL},
 		},
-	}
+	}, nil
 }
