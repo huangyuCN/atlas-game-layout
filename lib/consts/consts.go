@@ -69,10 +69,6 @@ func (t Topics) GatewayControl(instanceID string) string {
 	return "atlas." + t.ns + ".gw." + instanceID
 }
 
-// HeaderKeyRequestID 是投递头中的客户端请求幂等键键名（gateway 透传注入，
-// actor 日志经 ctx.Header 记录，与客户端 SDK 调试日志一一对应）。
-const HeaderKeyRequestID = "x-atlas-request-id"
-
 // 上下文键（日志基础字段注入使用，见 pkg/middleware 与 pkg/log）。
 const (
 	CtxKeyPlayerID  = "player_id"

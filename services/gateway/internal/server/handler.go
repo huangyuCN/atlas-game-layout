@@ -156,7 +156,7 @@ func (g *Gateway) Relay() *Relay { return g.relay }
 // 透传路径同构，全部 op 的 actor 日志都能带 request_id（与客户端 SDK 调试日志对应）。
 func (g *Gateway) requestOptions(ctx context.Context) []core.SendOption {
 	if id := requestIDOf(ctx); id != "" {
-		return []core.SendOption{core.WithHeader(consts.HeaderKeyRequestID, id)}
+		return []core.SendOption{core.WithHeader(relay.MetadataRequestID, id)}
 	}
 	return nil
 }

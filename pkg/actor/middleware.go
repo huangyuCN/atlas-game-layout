@@ -5,8 +5,8 @@ package actor
 import (
 	"fmt"
 
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
+	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	atlaslog "github.com/huangyuCN/atlas/log"
 )
 
@@ -17,7 +17,7 @@ import (
 func LoggingMiddleware(next core.TellHandler) core.TellHandler {
 	return func(ctx core.ActorContext, msg any) error {
 		if ctx != nil {
-			if id, ok := ctx.Header(consts.HeaderKeyRequestID); ok {
+			if id, ok := ctx.Header(relay.MetadataRequestID); ok {
 				atlaslog.Ctx(ctx.Context()).Debug("actor tell",
 					"type", ctx.Self().Type(), "uid", ctx.Self().UID(),
 					"msg", fmt.Sprintf("%T", msg), "request_id", id)
@@ -68,7 +68,7 @@ func AskLoggingMiddleware(next core.AskHandler) core.AskHandler {
 		kv := []any{
 			"type", ctx.Self().Type(), "uid", ctx.Self().UID(), "req", fmt.Sprintf("%T", req),
 		}
-		if id, ok := ctx.Header(consts.HeaderKeyRequestID); ok {
+		if id, ok := ctx.Header(relay.MetadataRequestID); ok {
 			kv = append(kv, "request_id", id)
 		}
 		atlaslog.Ctx(ctx.Context()).Debug("actor ask", kv...)
