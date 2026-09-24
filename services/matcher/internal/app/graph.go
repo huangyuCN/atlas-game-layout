@@ -58,7 +58,9 @@ var Module = fx.Module("matcher",
 		// ── server：传输层构造（启停归属驱动方）──
 		// fx.As：构造函数返回具体类型（便于直接调 Server 字段/方法），仍以 transport.Server 进组。
 		fx.Annotate(server.NewHTTPServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
+		// gRPC 双面：Matcher 服务注册在 internal 面（服务间调用），
+		// 未启用的面为 nil，由 ActiveServers 在消费侧过滤。
+		server.NewGRPCServers,
 	),
 	fx.Invoke(
 		registerResources,

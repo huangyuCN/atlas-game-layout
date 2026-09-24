@@ -22,7 +22,7 @@ import (
 //   - ATLAS_DAEMON_ADDR（必填，否则跳过）：守护 gateway 业务通道地址，如 127.0.0.1:9001
 //   - ATLAS_DAEMON_REDIS（可选，默认 127.0.0.1:16379）：用于断言会话路由键 TTL
 //   - ATLAS_DAEMON_TTL（可选，默认 30s）：期望的会话租期（= 守护进程 session.ttl 配置）
-//   - ATLAS_DAEMON_NS（可选，默认 test）：守护进程的 redis 键命名空间（= 其 runtime.env 或 actor_namespace）
+//   - ATLAS_DAEMON_NS（可选，默认 test）：守护进程的命名空间 token（= 其 runtime.namespace）
 func TestDaemonProbe(t *testing.T) {
 	addr := os.Getenv("ATLAS_DAEMON_ADDR")
 	if addr == "" {
@@ -32,13 +32,16 @@ func TestDaemonProbe(t *testing.T) {
 	if redisAddr == "" {
 		redisAddr = itRedisAddr
 	}
-	// 守护进程的业务键命名空间：默认取模板 config.yaml 的 `env: test`，
-	// 部署改了 env（或显式配了 runtime.actor_namespace）时用 ATLAS_DAEMON_NS 覆盖。
+	// 守护进程的业务键命名空间：默认取模板 config.yaml 的 `runtime.namespace: test`，
+	// 部署改了命名空间时用 ATLAS_DAEMON_NS 覆盖（键前缀由框架 namespace.Derive 派生）。
 	daemonNS := os.Getenv("ATLAS_DAEMON_NS")
 	if daemonNS == "" {
 		daemonNS = "test"
 	}
-	daemonKeys := pkredis.NewKeys(daemonNS)
+	daemonKeys, err := pkredis.NewKeys(mustDerive(daemonNS))
+	if err != nil {
+		t.Fatalf("构造守护进程键构造器失败: %v", err)
+	}
 	wantTTL := 30 * time.Second
 	if v := os.Getenv("ATLAS_DAEMON_TTL"); v != "" {
 		d, err := time.ParseDuration(v)
@@ -55,14 +58,15 @@ func TestDaemonProbe(t *testing.T) {
 	t.Cleanup(func() { _ = cli.Close() })
 
 	account := testAccount(t, "daemon")
-	reg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "守护探针"})
+	rawReg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "守护探针"})
 	if err != nil {
 		t.Fatalf("守护形态注册失败（懒激活/身份链路回归）: %v", err)
 	}
-	if reg.PlayerID == "" {
+	reg := replyOf[*gatewayv1.RegisterReply](t, rawReg)
+	if reg.GetPlayerId() == "" {
 		t.Fatal("注册回执缺少 player_id（幽灵实例吞消息的典型症状）")
 	}
-	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.PlayerID, Password: "pw"}); err != nil {
+	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"}); err != nil {
 		t.Fatalf("守护形态登录失败: %v", err)
 	}
 	if _, err := sess.Heartbeat(ctx); err != nil {
@@ -70,13 +74,13 @@ func TestDaemonProbe(t *testing.T) {
 	}
 
 	// 会话路由 TTL 断言：redis 不可达时只跳过该断言（其余链路已验证）。
-	rc, err := pkredis.NewClient(pkredis.Options{Addrs: []string{redisAddr}})
+	rc, err := pkredis.NewClient(pkredis.Options{Addrs: []string{redisAddr}, Namespace: daemonNS})
 	if err != nil {
 		t.Logf("跳过 TTL 断言（redis 构造失败）: %v", err)
 	}
 	if rc != nil {
 		defer func() { _ = rc.Close() }()
-		ttl, terr := rc.Raw().TTL(ctx, daemonKeys.GatewayRoute(reg.PlayerID)).Result()
+		ttl, terr := rc.Raw().TTL(ctx, daemonKeys.GatewayRoute(reg.GetPlayerId())).Result()
 		if terr != nil {
 			t.Logf("跳过 TTL 断言（redis 不可用）: %v", terr)
 		} else if ttl <= wantTTL/2 || ttl > wantTTL {
@@ -94,7 +98,7 @@ func TestDaemonProbe(t *testing.T) {
 		}
 		t.Logf("等待 %v 后断言会话过期清扫…", d)
 		time.Sleep(d)
-		ttl, terr := rc.Raw().TTL(context.Background(), daemonKeys.GatewayRoute(reg.PlayerID)).Result()
+		ttl, terr := rc.Raw().TTL(context.Background(), daemonKeys.GatewayRoute(reg.GetPlayerId())).Result()
 		if terr != nil {
 			t.Fatalf("读路由 TTL 失败: %v", terr)
 		}

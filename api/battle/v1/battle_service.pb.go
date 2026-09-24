@@ -470,13 +470,13 @@ const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\x0fSyncFramesReply\x12#\n" +
 	"\rcurrent_frame\x18\x01 \x01(\x04R\fcurrentFrame\x12=\n" +
 	"\bsnapshot\x18\x02 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\x128\n" +
-	"\x06missed\x18\x03 \x03(\v2 .atlas.game.lockstep.FrameInputsR\x06missed\"g\n" +
+	"\x06missed\x18\x03 \x03(\v2 .atlas.game.lockstep.FrameInputsR\x06missed\"m\n" +
 	"\x0eFrameBroadcast\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x128\n" +
-	"\x05frame\x18\x02 \x01(\v2\".atlas.game.lockstep.LockstepFrameR\x05frame\"X\n" +
+	"\x05frame\x18\x02 \x01(\v2\".atlas.game.lockstep.LockstepFrameR\x05frame:\x04\xd8\xd5\"\x01\"^\n" +
 	"\x0fBattleEndNotify\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x12(\n" +
-	"\x10winner_player_id\x18\x02 \x01(\tR\x0ewinnerPlayerId2\x8e\x03\n" +
+	"\x10winner_player_id\x18\x02 \x01(\tR\x0ewinnerPlayerId:\x04\xd8\xd5\"\x012\x8e\x03\n" +
 	"\rBattleService\x12B\n" +
 	"\n" +
 	"JoinBattle\x12\x18.battle.v1.JoinBattleReq\x1a\x1a.battle.v1.JoinBattleReply\x12B\n" +

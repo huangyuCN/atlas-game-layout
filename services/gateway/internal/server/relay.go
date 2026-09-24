@@ -7,11 +7,11 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/huangyuCN/atlas/contrib/actor/opcall"
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
-	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	"github.com/huangyuCN/atlas/metrics"
@@ -67,53 +67,36 @@ func (r *Relay) Each(fn func(entry relay.RouteEntry) error) error {
 }
 
 // Forward 处理一次透传请求（计数薄壳）：op 标签取路由条目 operation，
-// result 按 forward 结果 success/error——自留会话接口（meteredSession）与
+// result 按投递结果 success/error——自留会话接口（meteredSession）与
 // 透传共用 gateway_requests_total，面板按 op 汇总全部入口 QPS。
 func (r *Relay) Forward(ctx context.Context, entry relay.RouteEntry, req proto.Message) (proto.Message, error) {
-	rep, err := r.forward(ctx, entry, req)
+	rep, err := r.deliver(ctx, entry, req)
 	meterRequest(r.meter, entry.Operation, err)
 	return rep, err
 }
 
-// forward 是 Forward 的业务本体：身份识别 → target PID → sender 注入 → Ask/Tell。
-// 业务错误原样透传（code/reason 经集群 error 通道往返保留，产生点即语义）。
-// 幂等：entry 注解声明 IDEMPOTENT 且客户端帧携带请求幂等键（Atlas-Frame-Request-Id）
-// 时，把 ID 注入投递去重键——Ask 同 (pid, request_id) 窗口内只执行一次并复用结果，
-// Tell 窗口内重复投递直接丢弃；客户端未携带或注解未声明走原路径零开销。
-func (r *Relay) forward(ctx context.Context, entry relay.RouteEntry, req proto.Message) (proto.Message, error) {
-	playerID, err := r.identify(ctx)
+// deliver 是透传的业务本体：会话身份 → target PID → 投递计划 → opcall 唯一投递 → 回执归一。
+// 业务错误原样透传（code/reason 经集群错误通道往返保留，产生点即语义）。
+// 幂等：条目声明 IDEMPOTENT 且客户端帧携带请求 ID 时，投递计划把该 ID 作为去重键
+// （Ask 同 (pid, request_id) 窗口内只执行一次并复用结果，Tell 窗口内重复投递直接丢弃）。
+func (r *Relay) deliver(ctx context.Context, entry relay.RouteEntry, req proto.Message) (proto.Message, error) {
+	playerID, err := r.playerOf(ctx)
 	if err != nil {
 		return nil, err
 	}
 	pid, err := entry.ResolvePID(req, playerID)
 	if err != nil {
-		return nil, r.mapRouteErr(err)
+		return nil, mapResolveErr(err)
 	}
-	sender, err := types.NewPID("player", playerID)
+	plan, err := r.planFor(ctx, entry, playerID)
 	if err != nil {
-		return nil, errorv1.ErrInternal("透传组装发起者身份失败")
+		return nil, err
 	}
-	sendOpts := []core.SendOption{core.WithSender(sender)}
-	if id := requestIDOf(ctx); id != "" {
-		// 观测标记随消息头往返（所有 op）：actor 日志经 ctx.Header 记录 request_id，
-		// 与客户端 SDK 调试日志一一对应；去重行为仍由注解 + WithRequestID 显式触发。
-		sendOpts = append(sendOpts, core.WithHeader(relay.MetadataRequestID, id))
-		if entry.Idempotency == relay.Idempotent {
-			sendOpts = append(sendOpts, core.WithRequestID(id))
-		}
-	}
-	if entry.IsTell {
-		if err := r.rt.Tell(ctx, pid, req, sendOpts...); err != nil {
-			return nil, err
-		}
-		r.bindChannel(ctx, entry.Operation, playerID)
-		return nil, nil
-	}
-	rep, err := r.rt.Ask(ctx, pid, req, sendOpts...)
+	rep, err := opcall.Deliver(ctx, r.rt, entry, pid, req, plan.Options()...)
 	if err != nil {
 		return nil, err // 业务错误透传（产生点即语义）
 	}
-	resp, err := entry.ReplyOf(rep)
+	resp, err := opcall.ReplyOf(entry, rep)
 	if err != nil {
 		return nil, errorv1.ErrInternal("透传回执处理失败: %v", err)
 	}
@@ -121,14 +104,14 @@ func (r *Relay) forward(ctx context.Context, entry relay.RouteEntry, req proto.M
 	return resp, nil
 }
 
-// idempotencyID 计算本次透传的投递去重键（注入决策的纯函数，便于单测）：
-// 路由条目注解声明 IDEMPOTENT 且客户端帧携带请求幂等键时返回该键，否则空串
-// （未声明注解或客户端未携带走原路径零开销，不做静默兜底）。
-func idempotencyID(entry relay.RouteEntry, requestID string) string {
-	if entry.Idempotency != relay.Idempotent || requestID == "" {
-		return ""
+// planFor 组装本次投递的计划：发起者取网关会话身份（客户端不可影响），
+// 请求 ID 取帧头——所有 op 作观测头，仅声明幂等的 op 追加为去重键（零开销原路径）。
+func (r *Relay) planFor(ctx context.Context, entry relay.RouteEntry, playerID string) (opcall.Plan, error) {
+	sender, err := types.NewPID("player", playerID)
+	if err != nil {
+		return opcall.Plan{}, errorv1.ErrInternal("透传组装发起者身份失败")
 	}
-	return requestID
+	return opcall.PlanFor(sender, requestIDOf(ctx), entry), nil
 }
 
 // requestIDOf 从请求头取帧请求幂等键（FlagRequestID 置位时引擎已解析写入）。
@@ -181,9 +164,9 @@ func (r *Relay) slotToken(ctx context.Context) string {
 	return hdr.Get("Atlas-Frame-Session")
 }
 
-// identify 识别请求玩家身份：帧会话槽凭据优先（UDP/KCP 每帧验证），
-// 否则按连接绑定反查（TCP/WS 长连接）。均未命中即拒绝。
-func (r *Relay) identify(ctx context.Context) (string, error) {
+// playerOf 解析请求的玩家身份：帧会话槽凭据优先（UDP/KCP 每帧验证），
+// 否则按连接绑定反查（TCP/WS 长连接）。均未命中即拒绝——身份只来自会话，不来自载荷。
+func (r *Relay) playerOf(ctx context.Context) (string, error) {
 	if tr, ok := transport.FromServerContext(ctx); ok {
 		if hdr := tr.RequestHeader(); hdr != nil {
 			if tok := hdr.Get("Atlas-Frame-Session"); tok != "" {
@@ -206,14 +189,14 @@ func (r *Relay) identify(ctx context.Context) (string, error) {
 	return playerID, nil
 }
 
-// mapRouteErr 把路由错误映射为对外错误码（产生点即语义）。
-func (r *Relay) mapRouteErr(err error) error {
+// mapResolveErr 把寻址/身份解析错误映射为客户端可判定的错误码（产生点即语义）。
+func mapResolveErr(err error) error {
 	switch {
 	case err == relay.ErrNoSession:
 		return errorv1.ErrInvalidToken("会话未登录或已过期")
 	case err == relay.ErrNoUID:
 		return errorv1.ErrInvalidParams("路由 UID 为空（客体字段缺失）")
 	default:
-		return fmt.Errorf("relay: %w", err)
+		return fmt.Errorf("gateway: 投递寻址失败: %w", err)
 	}
 }

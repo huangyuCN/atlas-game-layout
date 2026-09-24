@@ -6,8 +6,9 @@ package actorclient
 import (
 	"context"
 	"fmt"
+	battlev1actor "github.com/huangyuCN/atlas-game-layout/api/battle/v1/actor"
+	gamev1actor "github.com/huangyuCN/atlas-game-layout/api/game/v1/actor"
 
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
@@ -28,12 +29,12 @@ func NewClient(rt Runtime) *Client { return &Client{rt: rt} }
 
 // PlayerPID 构造玩家 actor PID（路由 game 服务的 PlayerActor）。
 func PlayerPID(playerID string) (types.PID, error) {
-	return newPID(consts.ActorTypePlayer, playerID)
+	return newPID(gamev1actor.PlayerServiceActorType, playerID)
 }
 
 // BattlePID 构造战斗 actor PID（路由 battle 服务的战斗 actor）。
 func BattlePID(battleID string) (types.PID, error) {
-	return newPID(consts.ActorTypeBattle, battleID)
+	return newPID(battlev1actor.BattleServiceActorType, battleID)
 }
 
 // newPID 构造并校验 PID。

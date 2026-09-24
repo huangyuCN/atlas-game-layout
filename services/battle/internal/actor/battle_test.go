@@ -16,7 +16,7 @@ import (
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 )
 
-// playerType 是发起者 sender 的 actor 类型名（与 consts.ActorTypePlayer 一致）。
+// playerType 是发起者 sender 的 actor 类型名（与 gamev1actor.PlayerServiceActorType 一致）。
 const playerType = "player"
 
 // memNotifier 是下行通知的内存实现（帧/结束通知记录）。

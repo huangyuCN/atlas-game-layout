@@ -5,9 +5,9 @@ package infra
 import (
 	"context"
 	"fmt"
+	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
@@ -45,7 +45,7 @@ func (f *NatsBattleNotifier) PublishFrame(ctx context.Context, playerID, battleI
 	if err != nil {
 		return fmt.Errorf("infra: 帧广播编码失败: %w", err)
 	}
-	return f.pub.PublishEnvelope(ctx, playerID, consts.PushOpFrameBroadcast, payload)
+	return f.pub.PublishEnvelope(ctx, playerID, battlev1opclient.BattleServicePushOps.FrameBroadcast, payload)
 }
 
 // PublishEnd 实现 biz.BattleNotifier：
@@ -55,7 +55,7 @@ func (f *NatsBattleNotifier) PublishEnd(ctx context.Context, playerID, battleID,
 	if err != nil {
 		return fmt.Errorf("infra: 结束通知编码失败: %w", err)
 	}
-	return f.pub.PublishEnvelope(ctx, playerID, consts.PushOpBattleEnd, payload)
+	return f.pub.PublishEnvelope(ctx, playerID, battlev1opclient.BattleServicePushOps.BattleEndNotify, payload)
 }
 
 // NatsSettlePublisher 是结算事件发布实现。

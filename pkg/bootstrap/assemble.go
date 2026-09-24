@@ -12,8 +12,10 @@ import (
 	pkglog "github.com/huangyuCN/atlas-game-layout/pkg/log"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	atlasconfig "github.com/huangyuCN/atlas/config"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/metrics"
+	"github.com/huangyuCN/atlas/namespace"
 	"go.uber.org/fx"
 	"google.golang.org/protobuf/proto"
 )
@@ -41,7 +43,15 @@ func Assemble(name string, cfg proto.Message, extra ...fx.Option) ([]fx.Option, 
 	if err := config.FromService(name, cfg); err != nil {
 		return nil, err
 	}
-	return AssembleLoaded(cfg, extra...)
+	opts, err := AssembleLoaded(cfg, extra...)
+	if err != nil {
+		return nil, err
+	}
+	// 框架 config.Config 适配器（只读本服务那一份自包含 YAML，不引入合并层）：
+	// 惰性构造——没有消费方时不会读文件；服务可自行注入使用（Load 按节读取、Watch 明确报错）。
+	return append(opts, fx.Provide(func() (atlasconfig.Config, error) {
+		return config.NewServiceProvider(name)
+	})), nil
 }
 
 // AssembleLoaded 对已加载的配置装配通用模块（拆分出来便于单测）：
@@ -56,17 +66,14 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 	if runtime == nil || runtime.GetName() == "" {
 		return nil, fmt.Errorf("bootstrap: 配置缺少 runtime.name")
 	}
+	// R9 严格模式：命名空间必须显式配置，缺失即装配失败（不回落 env/default）。
+	if err := RequireNamespace(runtime.GetNamespace()); err != nil {
+		return nil, err
+	}
 	if err := fillRuntimeIdentity(runtime); err != nil {
 		return nil, err
 	}
-
-	logOpts := pkglog.Options{Service: runtime.GetName()}
-	if l := like.GetLog(); l != nil {
-		logOpts.Level = l.GetLevel()
-		logOpts.Format = l.GetFormat()
-		logOpts.File = l.GetFile()
-	}
-	if err := pkglog.Init(logOpts); err != nil {
+	if err := initLogging(like); err != nil {
 		return nil, err
 	}
 
@@ -76,20 +83,14 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 
 	// OTLP 链路导出（端点未配置时 noop）：资源带服务身份、采样器与采样率可配；
 	// 服务停止时 flush 未导出的 span。
-	traceOpts, err := tracingOptionsOf(like, identity)
-	if err != nil {
-		return nil, err
-	}
-	shutdownTrace, err := observability.InitTracing(context.Background(), traceOpts)
+	shutdownTrace, err := initTracing(like, identity)
 	if err != nil {
 		return nil, err
 	}
 
 	// 指标采集与 Prometheus 抓取端点（未配置时 noop 采集器，热路径零开销）：
-	// 采集器以 metrics.Collector 接口注入依赖图（actor 运行时与业务打点共用），
-	// 常量标签带同一份服务身份；服务停止时关闭抓取端点与底层 provider。
-	m, err := observability.InitMetrics(
-		like.GetObservability().GetMetrics().GetPrometheus(), identity)
+	// 常量标签带同一份服务身份，服务停止时关闭抓取端点与底层 provider。
+	m, err := observability.InitMetrics(like.GetObservability().GetMetrics().GetPrometheus(), identity)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +108,40 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 	return opts, nil
 }
 
+// initLogging 按 log 配置段初始化全局日志（服务名取 runtime.name；文件输出供采集器进 Loki）。
+func initLogging(like ConfigLike) error {
+	logOpts := pkglog.Options{Service: like.GetRuntime().GetName()}
+	if l := like.GetLog(); l != nil {
+		logOpts.Level = l.GetLevel()
+		logOpts.Format = l.GetFormat()
+		logOpts.File = l.GetFile()
+	}
+	return pkglog.Init(logOpts)
+}
+
+// initTracing 初始化 OTLP 链路导出（端点未配置时 noop），返回停机时的 flush 钩子。
+func initTracing(like ConfigLike, identity observability.ServiceIdentity) (func(context.Context) error, error) {
+	traceOpts, err := tracingOptionsOf(like, identity)
+	if err != nil {
+		return nil, err
+	}
+	return observability.InitTracing(context.Background(), traceOpts)
+}
+
+// RequireNamespace 校验命名空间 token（配置字段 runtime.namespace）非空且合法（R9 严格模式）。
+//
+// 该字段是**唯一命名空间来源**：注册中心键前缀、actor NATS subject、业务 topic、
+// redis 键、etcd 目录五面全部由它经框架 namespace.Derive 派生；空值/非法字符一律报错，
+// 不回落 env、不回落 default、不静默归一——否则"忘配字段"会从启动失败退化成静默串台。
+// 进程形态在 AssembleLoaded 调用，进程内/嵌入式形态由 services/*/assemble 的 newBootstrap 调用。
+func RequireNamespace(ns string) error {
+	if _, err := namespace.Derive(ns); err != nil {
+		return fmt.Errorf("bootstrap: runtime.namespace 缺失或非法（必须显式配置，示例 runtime.namespace: test；"+
+			"五面派生与缺省约定见 docs/config.md）: %w", err)
+	}
+	return nil
+}
+
 // defaultSampleRatio 是 sample_ratio 未配置时的默认采样率（全量采集）。
 const defaultSampleRatio = 1.0
 
@@ -116,7 +151,8 @@ const defaultSampleRatio = 1.0
 // （它直接决定 NATS 节点 subject `atlas_actor.<ns>.node.<nodeID>.*`），只用主机名会让同主机的多个
 // 服务共用同一套 subject、互相收到对方的节点消息（spawn/入站/控制/排空），故带服务名前缀。
 // 边界：该派生只按（服务, 主机）唯一——同主机同服务的双进程仍会撞，需显式配 runtime.id。
-// env 缺省 default——注册中心键前缀按环境隔离，见 pkg/registry.NamespaceOf。
+// env 缺省 default——它**只作标签**（链路资源 deployment.environment.name 与指标 env 标签），
+// 不参与任何前缀派生；命名空间的唯一来源是 runtime.namespace（见 RequireNamespace）。
 func fillRuntimeIdentity(runtime *configspb.Runtime) error {
 	if runtime.GetId() == "" {
 		host, err := os.Hostname()

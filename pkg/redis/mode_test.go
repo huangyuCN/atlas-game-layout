@@ -35,7 +35,7 @@ func TestNewClientSingleUsesAddrs(t *testing.T) {
 	t.Cleanup(mr.Close)
 
 	// Mode 零值即 single。
-	c, err := NewClient(Options{Addrs: []string{mr.Addr()}})
+	c, err := NewClient(Options{Addrs: []string{mr.Addr()}, Namespace: "test"})
 	if err != nil {
 		t.Fatalf("NewClient() 错误 = %v", err)
 	}
@@ -52,12 +52,13 @@ func TestNewClientValidation(t *testing.T) {
 		opts    Options
 		wantErr string
 	}{
-		{"single 无地址", Options{}, "single"},
-		{"single 多地址", Options{Addrs: []string{"127.0.0.1:6379", "127.0.0.1:6380"}}, "single"},
-		{"sentinel 缺 master_name", Options{Mode: ModeSentinel, Addrs: []string{"127.0.0.1:26379"}}, "master_name"},
-		{"sentinel 缺地址", Options{Mode: ModeSentinel, MasterName: "mymaster"}, "sentinel"},
-		{"cluster 缺地址", Options{Mode: ModeCluster}, "cluster"},
-		{"越界形态", Options{Mode: Mode(9), Addrs: []string{"127.0.0.1:6379"}}, "unknown(9)"},
+		{"single 无地址", Options{Namespace: "test"}, "single"},
+		{"single 多地址", Options{Namespace: "test", Addrs: []string{"127.0.0.1:6379", "127.0.0.1:6380"}}, "single"},
+		{"sentinel 缺 master_name", Options{Namespace: "test", Mode: ModeSentinel, Addrs: []string{"127.0.0.1:26379"}}, "master_name"},
+		{"sentinel 缺地址", Options{Namespace: "test", Mode: ModeSentinel, MasterName: "mymaster"}, "sentinel"},
+		{"cluster 缺地址", Options{Namespace: "test", Mode: ModeCluster}, "cluster"},
+		{"越界形态", Options{Namespace: "test", Mode: Mode(9), Addrs: []string{"127.0.0.1:6379"}}, "unknown(9)"},
+		{"缺命名空间", Options{Addrs: []string{"127.0.0.1:6379"}}, "runtime.namespace"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,6 +73,7 @@ func TestNewClientValidation(t *testing.T) {
 // TestNewClientSentinelAndCluster 验证哨兵/集群形态可构造（惰性连接，不建连）。
 func TestNewClientSentinelAndCluster(t *testing.T) {
 	sc, err := NewClient(Options{
+		Namespace:  "test",
 		Mode:       ModeSentinel,
 		MasterName: "mymaster",
 		Addrs:      []string{"127.0.0.1:26379", "127.0.0.1:26380"},
@@ -84,9 +86,10 @@ func TestNewClientSentinelAndCluster(t *testing.T) {
 	t.Cleanup(func() { _ = sc.Close() })
 
 	cc, err := NewClient(Options{
-		Mode:     ModeCluster,
-		Addrs:    []string{"127.0.0.1:7000", "127.0.0.1:7001"},
-		Password: "pw",
+		Namespace: "test",
+		Mode:      ModeCluster,
+		Addrs:     []string{"127.0.0.1:7000", "127.0.0.1:7001"},
+		Password:  "pw",
 	})
 	if err != nil {
 		t.Fatalf("cluster NewClient() 错误 = %v", err)

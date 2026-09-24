@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
+	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
 	"os"
 	"sort"
 	"sync"
@@ -30,7 +32,8 @@ import (
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
+	"github.com/huangyuCN/atlas-game-layout/scripts/sdksession"
 	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -56,8 +59,8 @@ type player struct {
 	id      string
 	sess    *sdkclient.Session
 	cli     *sdkclient.Client
-	players *gamev1.PlayerServiceOpClient   // 匹配域 op（业务通道）
-	battle  *battlev1.BattleServiceOpClient // 战斗域 op（KCP 战斗通道 / WS 单通道）
+	players *gamev1opclient.PlayerService   // 匹配域 op（业务通道）
+	battle  *battlev1opclient.BattleService // 战斗域 op（KCP 战斗通道 / WS 单通道）
 	step    byte
 
 	started chan string // 开局通知（battleID）
@@ -65,9 +68,10 @@ type player struct {
 	frames  []time.Duration // 帧广播延迟样本（收到时刻 - server_time）
 }
 
-// newSession 构造 SDK 会话管理器（关闭 SDK 内置 nil 心跳，改由真 DTO 心跳承担续租）。
+// newSession 构造 SDK 会话管理器（会话协议接缝取自模板生成描述符 scripts/sdksession；
+// 关闭 SDK 内置 nil 心跳，改由真 DTO 心跳承担续租）。
 func newSession() *sdkclient.Session {
-	return sdkclient.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
+	return sdksession.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
 }
 
 // commonDialOpts 公共拨号参数：传输保活 + 会话续租心跳（登录后生效）。
@@ -78,7 +82,7 @@ func commonDialOpts(sess *sdkclient.Session) []sdkclient.Option {
 			if sess.Token() == "" {
 				return "", nil // 未登录：跳过本轮
 			}
-			return sdkclient.OpSessionHeartbeat, &gatewayv1.HeartbeatRequest{Ts: time.Now().UnixMilli()}
+			return gatewayv1opclient.SessionProtocolOps.Heartbeat, &gatewayv1.HeartbeatRequest{Ts: time.Now().UnixMilli()}
 		}),
 	}
 }
@@ -113,24 +117,41 @@ func newPlayer(ctx context.Context, tcpAddr, battleAddr, transport string) (*pla
 			return nil, fmt.Errorf("dual: %w", err)
 		}
 	}
-	sess.Bind(cli)
+	if err := sess.Bind(cli); err != nil {
+		_ = cli.Close()
+		return nil, fmt.Errorf("会话绑定失败: %w", err)
+	}
 	p := &player{
 		sess:    sess,
 		cli:     cli,
-		players: gamev1.NewPlayerServiceOpClient(sess),
-		battle:  battlev1.NewBattleServiceOpClient(battleInvoker(cli)),
+		players: gamev1opclient.NewPlayerService(sess),
+		battle:  battlev1opclient.NewBattleService(battleInvoker(cli)),
 		started: make(chan string, 2),
 	}
 	p.watchNotifies()
-	account := fmt.Sprintf("lt-%s-%d", transport, time.Now().UnixNano())
-	if _, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"}); err != nil {
-		return nil, fmt.Errorf("注册: %w", err)
+	if err := p.registerLogin(ctx, transport); err != nil {
+		return nil, err
 	}
-	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: sess.PlayerID(), Password: "pw"}); err != nil {
-		return nil, fmt.Errorf("登录: %w", err)
-	}
-	p.id = sess.PlayerID()
 	return p, nil
+}
+
+// registerLogin 注册并登录（账号按传输形态与时间戳唯一）：玩家 ID 取注册回执的生成 DTO，
+// 登录后凭据由会话保管（帧会话槽 / 连接绑定按传输形态自动携带）。
+func (p *player) registerLogin(ctx context.Context, transport string) error {
+	account := fmt.Sprintf("lt-%s-%d", transport, time.Now().UnixNano())
+	rawReg, err := p.sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
+	if err != nil {
+		return fmt.Errorf("注册: %w", err)
+	}
+	reg, err := sdksession.ReplyAs[*gatewayv1.RegisterReply](rawReg)
+	if err != nil {
+		return fmt.Errorf("注册回执: %w", err)
+	}
+	if _, err := p.sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"}); err != nil {
+		return fmt.Errorf("登录: %w", err)
+	}
+	p.id = p.sess.PlayerID()
+	return nil
 }
 
 // battleInvoker 战斗域 op 的通道：dual 形态取战斗通道视图，单通道复用业务通道。
@@ -144,21 +165,21 @@ func battleInvoker(cli *sdkclient.Client) sdkclient.Invoker {
 // watchNotifies 订阅开局通知、帧广播与结束通知（业务 + 战斗通道双挂）。
 func (p *player) watchNotifies() {
 	for _, sub := range []func(string, sdkclient.NotifyHandler) func(){p.cli.On} {
-		sub(consts.PushOpMatchStarted, p.watch)
-		sub(consts.PushOpFrameBroadcast, p.watch)
-		sub(consts.PushOpBattleEnd, p.watch)
+		sub(gamev1opclient.PlayerServicePushOps.MatchStartedNotify, p.watch)
+		sub(battlev1opclient.BattleServicePushOps.FrameBroadcast, p.watch)
+		sub(battlev1opclient.BattleServicePushOps.BattleEndNotify, p.watch)
 	}
 	if bv := p.cli.Channel(sdkclient.KindBattle); bv != nil {
-		bv.On(consts.PushOpMatchStarted, p.watch)
-		bv.On(consts.PushOpFrameBroadcast, p.watch)
-		bv.On(consts.PushOpBattleEnd, p.watch)
+		bv.On(gamev1opclient.PlayerServicePushOps.MatchStartedNotify, p.watch)
+		bv.On(battlev1opclient.BattleServicePushOps.FrameBroadcast, p.watch)
+		bv.On(battlev1opclient.BattleServicePushOps.BattleEndNotify, p.watch)
 	}
 }
 
 // watch 收集开局通知、帧广播与结束通知。
 func (p *player) watch(operation string, payload []byte) {
 	switch operation {
-	case consts.PushOpMatchStarted:
+	case gamev1opclient.PlayerServicePushOps.MatchStartedNotify:
 		var n gamev1.MatchStartedNotify
 		if err := protojson.Unmarshal(payload, &n); err == nil && n.GetBattleId() != "" {
 			select {
@@ -166,7 +187,7 @@ func (p *player) watch(operation string, payload []byte) {
 			default:
 			}
 		}
-	case consts.PushOpFrameBroadcast:
+	case battlev1opclient.BattleServicePushOps.FrameBroadcast:
 		var fb battlev1.FrameBroadcast
 		if err := protojson.Unmarshal(payload, &fb); err != nil || fb.GetFrame().GetServerTime() == nil {
 			return
@@ -175,7 +196,7 @@ func (p *player) watch(operation string, payload []byte) {
 		p.mu.Lock()
 		p.frames = append(p.frames, latency)
 		p.mu.Unlock()
-	case consts.PushOpBattleEnd:
+	case battlev1opclient.BattleServicePushOps.BattleEndNotify:
 		// 压测场景战斗不结束（原地步进输入）；结束通知仅容错记录。
 	}
 }

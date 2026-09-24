@@ -79,3 +79,88 @@ func TestBizCodeHelpers(t *testing.T) {
 		t.Fatalf("ReasonPlayerNotFound() = %q, 期望 PLAYER_NOT_FOUND", got)
 	}
 }
+
+// TestAdminErrors 校验管理面错误码（P7 步骤 1）：号段紧接 ClientVersionTooLow=1011
+// 之后（1012–1016），HTTP code 与用途一一对应——缺操作人/缺幂等键/幂等键复用/
+// 同键操作在途/单次发放超上限。
+func TestAdminErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		code   int32
+		reason string
+		biz    int32
+	}{
+		{"AdminOperatorMissing", ErrAdminOperatorMissing("缺少操作人"), 400, "ADMIN_OPERATOR_MISSING", 1012},
+		{"AdminIdempotencyKeyMissing", ErrAdminIdempotencyKeyMissing("缺少幂等键"), 400, "ADMIN_IDEMPOTENCY_KEY_MISSING", 1013},
+		{"AdminIdempotencyKeyReused", ErrAdminIdempotencyKeyReused("幂等键已用于其他参数"), 409, "ADMIN_IDEMPOTENCY_KEY_REUSED", 1014},
+		{"AdminOperationInFlight", ErrAdminOperationInFlight("同键操作在途"), 409, "ADMIN_OPERATION_IN_FLIGHT", 1015},
+		{"AdminGrantCountExceeded", ErrAdminGrantCountExceeded("超过单次发放上限"), 400, "ADMIN_GRANT_COUNT_EXCEEDED", 1016},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			se := atlaserrors.FromError(tc.err)
+			if se == nil {
+				t.Fatal("FromError 返回 nil")
+			}
+			if se.Code != tc.code {
+				t.Fatalf("Code = %d, 期望 %d", se.Code, tc.code)
+			}
+			if se.Reason != tc.reason {
+				t.Fatalf("Reason = %q, 期望 %q", se.Reason, tc.reason)
+			}
+			if got := se.Metadata["biz_code"]; got != fmt.Sprint(tc.biz) {
+				t.Fatalf("biz_code = %q, 期望 %d", got, tc.biz)
+			}
+			if got := se.Metadata["biz_reason"]; got != tc.name {
+				t.Fatalf("biz_reason = %q, 期望 %q", got, tc.name)
+			}
+		})
+	}
+}
+
+// TestAdminErrorIsHelpers 校验管理面 Is*/Code*/Reason*/BizCode* 判定：
+// 命中返回 true，相邻号段互不串号（同码段内 reason 必须精确匹配），nil 不 panic。
+func TestAdminErrorIsHelpers(t *testing.T) {
+	err := ErrAdminIdempotencyKeyReused("幂等键已用于其他参数")
+	if !IsAdminIdempotencyKeyReused(err) {
+		t.Fatal("IsAdminIdempotencyKeyReused(ErrAdminIdempotencyKeyReused) 应返回 true")
+	}
+	if IsAdminIdempotencyKeyMissing(err) {
+		t.Fatal("IsAdminIdempotencyKeyMissing(ErrAdminIdempotencyKeyReused) 应返回 false（相邻号段不得串号）")
+	}
+	if IsAdminOperatorMissing(err) {
+		t.Fatal("IsAdminOperatorMissing(ErrAdminIdempotencyKeyReused) 应返回 false")
+	}
+	if IsAdminIdempotencyKeyReused(nil) {
+		t.Fatal("IsAdminIdempotencyKeyReused(nil) 应返回 false")
+	}
+	if got := BizCodeAdminGrantCountExceeded(); got != 1016 {
+		t.Fatalf("BizCodeAdminGrantCountExceeded() = %d, 期望 1016", got)
+	}
+	if got := CodeAdminGrantCountExceeded(); got != 400 {
+		t.Fatalf("CodeAdminGrantCountExceeded() = %d, 期望 400", got)
+	}
+	if got := ReasonAdminOperationInFlight(); got != "ADMIN_OPERATION_IN_FLIGHT" {
+		t.Fatalf("ReasonAdminOperationInFlight() = %q, 期望 ADMIN_OPERATION_IN_FLIGHT", got)
+	}
+}
+
+// TestGeneratedErrorsAreBusinessClass 验证业务错误码生成物自动标注业务类（P6 步骤 3）：
+// 日志按类定级（业务类为 Warn 且可被过滤），并且不计入故障率。
+func TestGeneratedErrorsAreBusinessClass(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"ErrPlayerNotFound", ErrPlayerNotFound("玩家不存在")},
+		{"ErrAlreadyInMatch", ErrAlreadyInMatch("已在匹配中")},
+		{"NewBattleNotFound", NewBattleNotFound("战斗不存在")},
+		{"WrapInvalidToken", WrapInvalidToken(fmt.Errorf("底层原因"), "令牌无效")},
+	}
+	for _, c := range cases {
+		if got := atlaserrors.ClassOf(c.err); got != atlaserrors.ClassBusiness {
+			t.Errorf("%s 的 class = %v, 期望 business", c.name, got)
+		}
+	}
+}

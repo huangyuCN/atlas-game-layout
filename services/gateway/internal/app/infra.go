@@ -12,6 +12,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/metrics"
+	"github.com/huangyuCN/atlas/namespace"
 	"github.com/huangyuCN/atlas/registry"
 	natsgo "github.com/nats-io/nats.go"
 )
@@ -70,13 +71,18 @@ func NewActorClient(cfg *conf.Bootstrap, discovery registry.Discovery, meter met
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
 	}
-	nodeID, ns := "", ""
+	nodeID := ""
+	var derived namespace.Derived
 	if r := cfg.GetRuntime(); r != nil {
-		nodeID, ns = r.GetId(), pkgactor.NamespaceOf(r)
+		d, derr := namespace.Derive(r.GetNamespace())
+		if derr != nil {
+			return nil, fmt.Errorf("app: %w", derr)
+		}
+		nodeID, derived = r.GetId(), d
 	}
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,
-		Namespace:     ns,
+		Namespace:     derived.Namespace,
 		ServiceName:   consts.ServiceGame, // 懒激活在 game 节点执行（PlayerActor 宿主）
 		EtcdEndpoints: endpoints,
 		NatsURL:       natsURLOf(cfg),

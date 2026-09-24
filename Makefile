@@ -18,7 +18,7 @@ LDFLAGS := -X $(MODULE)/lib/version.Version=$(VERSION) \
            -X $(MODULE)/lib/version.Commit=$(COMMIT) \
            -X $(MODULE)/lib/version.BuildTime=$(BUILD_TIME)
 
-.PHONY: help build lint comment-lint check-dup run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
+.PHONY: help build build-gmctl lint comment-lint check-dup run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
 
 help: ## 列出所有目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -32,6 +32,10 @@ build: ## 构建全部服务到 ./bin
 build-%: ## 构建单个服务（make build-gateway）
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$* ./services/$*/cmd
+
+build-gmctl: ## 构建 GM 命令行到 ./bin/gmctl（管理面 internal listener 的运维工具，无版本注入）
+	@mkdir -p $(BIN_DIR)
+	$(GO) build -o $(BIN_DIR)/gmctl ./cmd/gmctl
 
 lint: ## 代码规范检查：包名前缀 + Go doc 注释 + 重复代码
 	$(GO) run ./scripts/check-pkgname . scripts/check-pkgname/allowlist.txt
@@ -72,14 +76,25 @@ clean:
 ATLAS_BIN ?= ../atlas/bin
 ATLAS_DIR ?= $(dir $(ATLAS_BIN))
 PROTO_INC := -I. -Ithird_party -I$(abspath $(ATLAS_DIR))
-# 信任边界三层：管理面（google.api.http REST，atlas-http/go-grpc 生成）、
-# 域统一契约（客户端 op + actor 分发共用一份 service：atlas-actor 生成分发桩 +
-# 路由表 + RPC 接入层、atlas-client 生成 SDK stub；透传引擎按注解路由表运行时注册）、
-# 注意：域 proto 必须与 --go-grpc_out 同批生成——接入层产物实现 gRPC 接口，漏生成编译不过。
-# 会话生命周期（gateway.v1.Session，Gateway 自留，四传输生成桩）。
+# 信任边界三层：
+#  1) 管理面（api/admin/**）：普通 gRPC 内网面，**只**进 --go_out/--go-grpc_out/--openapi_out。
+#     隔离理由：管理面不加 atlas.route.v1 / google.api.http 注解，但「插件自行跳过」只是默认值、
+#     不是契约——atlas-http 的 omitempty 默认 true（跳过无注解 service），一旦传
+#     omitempty=false 就会为 AdminService 产出兜底 REST 路由（POST /admin.game.v1.AdminService/*），
+#     把管理面暴露成 HTTP 接口；atlas-actor / atlas-client / 四传输插件也只按注解或命名约定过滤，
+#     有人给 admin.proto 补注解或改 service 名即会产出 actor 桩 / 客户端 SDK。
+#     故用 API_ADMIN_PROTOS 把管理面挡在这些调用行之外：隔离由 Makefile 保证，不依赖插件行为。
+#  2) 域统一契约（客户端 op + actor 分发共用一份 service）：atlas-actor 生成路由表 +
+#     actor/ 分发桩 + rpc/ 双面接入层（自带 grpc.ServiceDesc）、atlas-client 生成 opclient/ SDK stub；
+#     透传引擎按注解路由表运行时注册。
+#  3) 会话生命周期（gateway.v1.Session，Gateway 自留，四传输生成桩）。
+# 注意：域 proto **不进 --go-grpc_out**——rpc/ 平面自持 gRPC 管线，不依赖标准 _grpc.pb.go；
+# 只有 API_SERVICE_PROTOS（会话等无 route 注解的 proto）与 API_ADMIN_PROTOS 需要标准 gRPC 产物。
 API_SERVICE_PROTOS := api/game/v1/player.proto api/matcher/v1/matcher.proto api/battle/v1/battle.proto
 API_DOMAIN_PROTOS := api/game/v1/player_service.proto api/battle/v1/battle_service.proto
 API_SESSION_PROTOS := api/gateway/v1/session.proto
+# 管理面：只进 go/go-grpc/openapi（理由见上），绝不进 atlas-http/atlas-actor/atlas-client 与四传输插件。
+API_ADMIN_PROTOS := api/admin/game/v1/admin.proto
 API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_DOMAIN_PROTOS) $(API_SESSION_PROTOS)
 
 .PHONY: proto proto-tools
@@ -104,10 +119,10 @@ proto-tools: ## 收集/构建 protoc 插件到 ./bin（Atlas 全家桶 + go/go-g
 proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/openapi/配置）
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--go_out=. --go_opt=paths=source_relative \
-		protobuf/configs/*.proto services/*/internal/conf/conf.proto $(API_ALL_PROTOS)
+		protobuf/configs/*.proto services/*/internal/conf/conf.proto $(API_ALL_PROTOS) $(API_ADMIN_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		$(API_SERVICE_PROTOS) $(API_DOMAIN_PROTOS)
+		$(API_SERVICE_PROTOS) $(API_ADMIN_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-http_out=. --atlas-http_opt=paths=source_relative \
 		$(API_SERVICE_PROTOS)
@@ -117,6 +132,11 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-client_out=. --atlas-client_opt=paths=source_relative \
 		$(API_DOMAIN_PROTOS)
+# 会话协议 stub + 协议描述符（R13：会话协议留在模板，按项目生成三语言产物；
+# 描述符给出 op 名与 token/playerID/expiresAt 提取器，供 SDK 的 SessionProtocol 接缝消费）。
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
+		--atlas-client_out=. --atlas-client_opt=paths=source_relative \
+		$(API_SESSION_PROTOS)
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-tcp_out=. --atlas-tcp_opt=paths=source_relative \
 		--atlas-ws_out=. --atlas-ws_opt=paths=source_relative \
@@ -134,9 +154,16 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-client_opt=lang=csharp,paths=source_relative --atlas-client_out=api/client/csharp \
 		$(API_DOMAIN_PROTOS)
+# 会话协议的 TS/C# 产物：同样分两次独立调用（原因见上）。
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
+		--atlas-client_opt=lang=ts,paths=source_relative --atlas-client_out=api/client/ts \
+		$(API_SESSION_PROTOS)
+	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
+		--atlas-client_opt=lang=csharp,paths=source_relative --atlas-client_out=api/client/csharp \
+		$(API_SESSION_PROTOS)
 
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--atlas-errors_out=. --atlas-errors_opt=paths=source_relative,biz_code_key=biz_code,biz_reason_key=biz_reason \
 		api/error/v1/errors.proto
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
-		--openapi_out=paths=source_relative:. $(API_ALL_PROTOS)
+		--openapi_out=paths=source_relative:. $(API_ALL_PROTOS) $(API_ADMIN_PROTOS)

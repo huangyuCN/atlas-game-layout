@@ -16,7 +16,7 @@ func newTestClient(t *testing.T) *Client {
 		t.Fatalf("启动 miniredis 失败: %v", err)
 	}
 	t.Cleanup(mr.Close)
-	client, err := NewClient(Options{Addrs: []string{mr.Addr()}})
+	client, err := NewClient(Options{Addrs: []string{mr.Addr()}, Namespace: "test"})
 	if err != nil {
 		t.Fatalf("NewClient() 错误 = %v", err)
 	}
@@ -24,10 +24,17 @@ func newTestClient(t *testing.T) *Client {
 	return client
 }
 
-// TestNewClientEmptyAddr 验证空地址报错。
+// TestNewClientEmptyAddr 验证空地址报错（命名空间已给定时仍按形态校验）。
 func TestNewClientEmptyAddr(t *testing.T) {
-	if _, err := NewClient(Options{}); err == nil {
+	if _, err := NewClient(Options{Namespace: "test"}); err == nil {
 		t.Fatal("NewClient() 期望错误，实际为 nil")
+	}
+}
+
+// TestNewClientRequiresNamespace 验证命名空间缺失即报错（R9：不回落 default）。
+func TestNewClientRequiresNamespace(t *testing.T) {
+	if _, err := NewClient(Options{Addrs: []string{"127.0.0.1:6379"}}); err == nil {
+		t.Fatal("NewClient() 期望缺少命名空间错误，实际为 nil")
 	}
 }
 
@@ -63,7 +70,7 @@ func TestPlayerSessionTTL(t *testing.T) {
 		t.Fatalf("启动 miniredis 失败: %v", err)
 	}
 	t.Cleanup(mr.Close)
-	c, err := NewClient(Options{Addrs: []string{mr.Addr()}})
+	c, err := NewClient(Options{Addrs: []string{mr.Addr()}, Namespace: "test"})
 	if err != nil {
 		t.Fatalf("NewClient() 错误 = %v", err)
 	}

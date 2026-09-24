@@ -14,6 +14,7 @@ package gateway.v1;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1";
 
+import "api/atlas/v1/route.proto";
 import "api/common/v1/common.proto";
 
 // RegisterRequest 注册：账号不存在则创建玩家（注册与登录两段式）。
@@ -31,6 +32,12 @@ message RegisterReply {
 message LoginRequest {
   string player_id = 1;
   string password = 2;
+  // client_version 是客户端 semver 版本（M1 协议演进）：网关按 runtime.min_client_version
+  // 与 runtime.min_client_version_mode 决定是否拒绝；Resume 需复述同一版本。
+  string client_version = 3;
+  // client_end 是客户端端标识（M5 预留位：多端会话维度——同一玩家多端并存时的端区分）。
+  // 本轮行为仍**单端**（新登录顶掉旧会话，client_end 只登记不参与裁决）；多端归属下一轮。
+  string client_end = 4;
 }
 
 // LoginReply 登录回执：token 是会话凭据（只在 Login 出现一次；
@@ -46,6 +53,10 @@ message LoginReply {
 message ResumeRequest {
   string token = 1;
   string player_id = 2;
+  // client_version 与 Login 同义：恢复会话时复述客户端版本，门槛判定口径一致。
+  string client_version = 3;
+  // client_end 与 Login 同义（M5 预留位：多端会话维度，本轮不参与裁决）。
+  string client_end = 4;
 }
 
 // ResumeReply 恢复回执（凭据沿用原 token，不轮换）。
@@ -77,11 +88,18 @@ enum KickedReason {
 
 // KickedNotify 服务端推送：被挤下线（旧连接断开前收到）。
 message KickedNotify {
+  option (atlas.route.v1.push) = true;
   KickedReason reason = 1;
 }
 
 // Session 是 Gateway 自留的会话生命周期服务（业务通道协议 tcp/ws/kcp/udp）。
+//
+// 注解只声明 access=CLIENT：客户端 op stub 由 protoc-gen-atlas-client 生成（三语言）；
+// **actor 留空** = 由网关本地实现，不进透传路由表（会话协议不上移框架，见 R13）。
 service Session {
+  option (atlas.route.v1.service_route) = {
+    access: ACCESS_CLIENT
+  };
   rpc Register (RegisterRequest) returns (RegisterReply);
   rpc Login (LoginRequest) returns (LoginReply);
   rpc Resume (ResumeRequest) returns (ResumeReply);

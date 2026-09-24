@@ -2,11 +2,12 @@ package server
 
 import (
 	"context"
+	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 	"testing"
 	"time"
 
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas/transport"
@@ -24,7 +25,7 @@ const (
 // probeBackends 探测真实 redis/nats；不可用返回 skip 消息。
 func probeBackends(t *testing.T) string {
 	t.Helper()
-	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{integrationRedisAddr}})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{integrationRedisAddr}, Namespace: testNamespace})
 	if err != nil {
 		return "redis 客户端构造失败: " + err.Error()
 	}
@@ -62,7 +63,7 @@ func TestIntegrationKickCrossInstance(t *testing.T) {
 	envB.login(t, 1, "it-p-1")
 
 	if !waitFor(3*time.Second, func() bool {
-		return hasPush(envA.push.snapshot(), 1, consts.PushOpKickedOffline)
+		return hasPush(envA.push.snapshot(), 1, gatewayv1opclient.SessionPushOps.KickedNotify)
 	}) {
 		t.Fatalf("A 旧连接未收到被挤下线通知: %+v", envA.push.snapshot())
 	}
@@ -101,14 +102,16 @@ func TestIntegrationPushOnlyOwnerDelivers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := PublishPush(ctx, testPublisher(nc), "it-p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
+	if err := PublishPush(ctx, testPublisher(nc), "it-p-1", gamev1opclient.PlayerServicePushOps.MatchStartedNotify, []byte(`{"match_id":"m-1"}`)); err != nil {
 		t.Fatalf("PublishPush: %v", err)
 	}
-	if !waitFor(3*time.Second, func() bool { return hasPush(envA.push.snapshot(), 1, consts.PushOpMatchStarted) }) {
+	if !waitFor(3*time.Second, func() bool {
+		return hasPush(envA.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify)
+	}) {
 		t.Fatalf("A 未收到 p-1 推送: %+v", envA.push.snapshot())
 	}
 	time.Sleep(300 * time.Millisecond)
-	if hasPush(envB.push.snapshot(), 1, consts.PushOpMatchStarted) {
+	if hasPush(envB.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify) {
 		t.Fatal("B 不应收到 p-1 推送")
 	}
 }

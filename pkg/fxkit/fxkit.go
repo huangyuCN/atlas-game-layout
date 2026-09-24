@@ -9,7 +9,6 @@ import (
 	"fmt"
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/pkg/enumconv"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
@@ -18,6 +17,7 @@ import (
 	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	etcdreg "github.com/huangyuCN/atlas/contrib/registry/etcd"
+	"github.com/huangyuCN/atlas/namespace"
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -47,11 +47,20 @@ func NewPublisher(nc *nats.Conn, topics consts.Topics) *pkgnats.Publisher {
 	return pkgnats.NewPublisher(nc, topics)
 }
 
-// Topics 提供业务 topic 构造器（四服务共用同一份约定）：命名空间取
-// **与 actor 平面同一个值**（`runtime.actor_namespace` 优先、`env` 兜底，见 pkg/actor.NamespaceOf）——
-// 两者分家会立刻表现为"订阅端收不到事件"，也让隔离维度出现两套标准。
-func Topics[B WithRuntime](cfg B) consts.Topics {
-	return consts.NewTopics(pkgactor.NamespaceOf(cfg.GetRuntime()))
+// Topics 提供业务 topic 构造器（四服务共用同一份约定）：命名空间取配置字段
+// **runtime.namespace**，经框架 namespace.Derive 派生（唯一来源）——与 actor subject、
+// redis 键、注册中心前缀同源；缺失/非法即报错（R9：不回落 env/default），
+// 两者分家会立刻表现为"订阅端收不到事件"。
+func Topics[B WithRuntime](cfg B) (consts.Topics, error) {
+	derived, err := namespace.Derive(cfg.GetRuntime().GetNamespace())
+	if err != nil {
+		return consts.Topics{}, fmt.Errorf("fxkit: %w", err)
+	}
+	topics, err := consts.NewTopics(derived)
+	if err != nil {
+		return consts.Topics{}, fmt.Errorf("fxkit: %w", err)
+	}
+	return topics, nil
 }
 
 // EtcdEndpoints 提取 registry.etcd.endpoints（缺失时返回 nil）。
@@ -78,16 +87,20 @@ func NewEtcdClient[B WithRegistry](cfg B) (*clientv3.Client, error) {
 }
 
 // RegistryOptions 把 registry 配置段与服务身份映射为注册器构造选项：
-// namespace 缺省按 runtime.env 隔离（多套部署共用同一 etcd 时不串台），
+// 键前缀取配置字段 runtime.namespace 经框架 namespace.Derive 派生的 RegistryPrefix
+// （多套部署共用同一 etcd 时不串台；R9：缺失/非法即报错，不回落 env），
 // ttl 未配置时留零值交给底层默认值。
 func RegistryOptions[B RegistryConfig](cfg B) (pkgregistry.Options, error) {
-	r := cfg.GetRegistry()
-	ttl, err := config.ParseDuration(r.GetTtl())
+	derived, err := namespace.Derive(cfg.GetRuntime().GetNamespace())
+	if err != nil {
+		return pkgregistry.Options{}, fmt.Errorf("fxkit: %w", err)
+	}
+	ttl, err := config.ParseDuration(cfg.GetRegistry().GetTtl())
 	if err != nil {
 		return pkgregistry.Options{}, fmt.Errorf("fxkit: registry.ttl 无效: %w", err)
 	}
 	return pkgregistry.Options{
-		Namespace: pkgregistry.NamespaceOf(r.GetNamespace(), cfg.GetRuntime().GetEnv()),
+		Namespace: derived.RegistryPrefix,
 		TTL:       ttl,
 	}, nil
 }
@@ -157,7 +170,7 @@ func RedisOptions[B WithData](cfg B) (pkredis.Options, error) {
 }
 
 // DataRuntimeConfig 是装配 redis 客户端所需的最小配置接口：数据中间件段 + 服务身份
-// （键命名空间取 runtime.actor_namespace / env，见 pkg/actor.NamespaceOf）。
+// （键命名空间取配置字段 runtime.namespace，经框架 namespace.Derive 派生）。
 type DataRuntimeConfig interface {
 	WithData
 	WithRuntime
@@ -166,14 +179,19 @@ type DataRuntimeConfig interface {
 // NewRedisClient 从配置装配 redis 客户端（惰性连接，不建连）；
 // 配置缺失或形态非法时快速失败——依赖 redis 的服务应尽早暴露而非静默降级。
 //
-// 业务键命名空间在此写入（`pkg/actor.NamespaceOf`）：与 actor subject / 业务 topic **同源**，
-// 共用同一 redis 的多套部署才不会互相覆盖（会话路由、玩家快照、撮合票据）。
+// 业务键命名空间在此写入（唯一来源是 runtime.namespace 经 namespace.Derive 派生）：
+// 与 actor subject / 业务 topic **同源**，共用同一 redis 的多套部署才不会互相覆盖
+// （会话路由、玩家快照、撮合票据）；缺失/非法即报错（R9：不回落 env/default）。
 func NewRedisClient[B DataRuntimeConfig](cfg B) (*pkredis.Client, error) {
 	opts, err := RedisOptions(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("fxkit: %w", err)
 	}
-	opts.Namespace = pkgactor.NamespaceOf(cfg.GetRuntime())
+	derived, err := namespace.Derive(cfg.GetRuntime().GetNamespace())
+	if err != nil {
+		return nil, fmt.Errorf("fxkit: %w", err)
+	}
+	opts.Namespace = derived.Namespace.String()
 	cli, err := pkredis.NewClient(opts)
 	if err != nil {
 		return nil, fmt.Errorf("fxkit: 构造 redis 客户端失败: %w", err)

@@ -9,10 +9,27 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	"github.com/huangyuCN/atlas/namespace"
 )
 
-// testKeys 是单测用的键构造器：与 newTestEnv 里 redis 客户端一致（未指定命名空间 → default）。
-var testKeys = pkredis.NewKeys("")
+// testNamespace 是单测使用的命名空间 token（redis 键前缀由框架 namespace.Derive 派生）。
+const testNamespace = "test"
+
+// testKeys 是单测用的键构造器：与 newTestEnv 里 redis 客户端同源（同一命名空间 test）。
+var testKeys = mustKeys()
+
+// mustKeys 派生测试用键构造器（夹具里非法值直接 panic）。
+func mustKeys() pkredis.Keys {
+	derived, err := namespace.Derive(testNamespace)
+	if err != nil {
+		panic(err)
+	}
+	keys, err := pkredis.NewKeys(derived)
+	if err != nil {
+		panic(err)
+	}
+	return keys
+}
 
 // newTestManager 起 miniredis 并构造 Manager（租期与清扫周期全默认）。
 func newTestManager(t *testing.T, instanceID string) *Manager {
@@ -30,7 +47,7 @@ func newTestManagerWithTTL(t *testing.T, instanceID string, ttl time.Duration) *
 func newTestEnv(t *testing.T, instanceID string, opts Options) (*Manager, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
-	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{mr.Addr()}})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{mr.Addr()}, Namespace: testNamespace})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -392,7 +409,7 @@ func TestStartHonorsSweepInterval(t *testing.T) {
 // TestRouteLegacyValueCompatibility 验证 M2 旧版纯实例 ID 字符串可解析。
 func TestRouteLegacyValueCompatibility(t *testing.T) {
 	mr := miniredis.RunT(t)
-	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{mr.Addr()}})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{mr.Addr()}, Namespace: testNamespace})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

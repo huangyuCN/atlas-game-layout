@@ -2,13 +2,14 @@ package server
 
 import (
 	"context"
+	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 	"testing"
 	"time"
 
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas/transport"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -28,13 +29,13 @@ func TestKickCrossInstance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if !waitFor(3*time.Second, func() bool {
-		return hasPush(envA.push.snapshot(), 1, consts.PushOpKickedOffline)
+		return hasPush(envA.push.snapshot(), 1, gatewayv1opclient.SessionPushOps.KickedNotify)
 	}) {
 		t.Fatalf("A 的旧连接未收到挤下线推送: %+v", envA.push.snapshot())
 	}
 	pushes := envA.push.snapshot()
 	for _, p := range pushes {
-		if p.op != consts.PushOpKickedOffline {
+		if p.op != gatewayv1opclient.SessionPushOps.KickedNotify {
 			continue
 		}
 		var kn gatewayv1.KickedNotify
@@ -71,22 +72,26 @@ func TestPushOnlyOwnerDelivers(t *testing.T) {
 	// 推送 p-1：仅实例 A 下发。
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := PublishPush(ctx, testPublisher(pub), "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1","battle_id":"b-1"}`)); err != nil {
+	if err := PublishPush(ctx, testPublisher(pub), "p-1", gamev1opclient.PlayerServicePushOps.MatchStartedNotify, []byte(`{"match_id":"m-1","battle_id":"b-1"}`)); err != nil {
 		t.Fatalf("PublishPush p-1: %v", err)
 	}
-	if !waitFor(2*time.Second, func() bool { return hasPush(envA.push.snapshot(), 1, consts.PushOpMatchStarted) }) {
+	if !waitFor(2*time.Second, func() bool {
+		return hasPush(envA.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify)
+	}) {
 		t.Fatalf("A 未收到 p-1 推送: %+v", envA.push.snapshot())
 	}
 	time.Sleep(300 * time.Millisecond)
-	if hasPush(envB.push.snapshot(), 1, consts.PushOpMatchStarted) {
+	if hasPush(envB.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify) {
 		t.Fatal("B 不应收到 p-1 推送")
 	}
 
 	// 推送 p-2：仅实例 B 下发。
-	if err := PublishPush(ctx, testPublisher(pub), "p-2", consts.PushOpMatchStarted, []byte(`{"match_id":"m-2","battle_id":"b-2"}`)); err != nil {
+	if err := PublishPush(ctx, testPublisher(pub), "p-2", gamev1opclient.PlayerServicePushOps.MatchStartedNotify, []byte(`{"match_id":"m-2","battle_id":"b-2"}`)); err != nil {
 		t.Fatalf("PublishPush p-2: %v", err)
 	}
-	if !waitFor(2*time.Second, func() bool { return hasPush(envB.push.snapshot(), 1, consts.PushOpMatchStarted) }) {
+	if !waitFor(2*time.Second, func() bool {
+		return hasPush(envB.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify)
+	}) {
 		t.Fatalf("B 未收到 p-2 推送: %+v", envB.push.snapshot())
 	}
 }
@@ -102,7 +107,7 @@ func TestKickCrossInstanceKeepsNewRoute(t *testing.T) {
 
 	// A 的旧连接收到挤下线通知。
 	if !waitFor(3*time.Second, func() bool {
-		return hasPush(envA.push.snapshot(), 1, consts.PushOpKickedOffline)
+		return hasPush(envA.push.snapshot(), 1, gatewayv1opclient.SessionPushOps.KickedNotify)
 	}) {
 		t.Fatalf("未收到挤下线通知: %+v", envA.push.snapshot())
 	}
@@ -151,7 +156,7 @@ func TestMatchStartedNotifyRelay(t *testing.T) {
 
 	// 参战玩家收到开局通知（含对局 ID、battle ID 与参战名单）。
 	if !waitFor(2*time.Second, func() bool {
-		return hasPush(env.push.snapshot(), 1, consts.PushOpMatchStarted)
+		return hasPush(env.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify)
 	}) {
 		t.Fatalf("未收到开局通知: %+v", env.push.snapshot())
 	}
@@ -189,7 +194,7 @@ func TestMatchFailedNotifyPush(t *testing.T) {
 	}
 
 	if !waitFor(3*time.Second, func() bool {
-		return hasPush(env.push.snapshot(), 1, consts.PushOpMatchFailed)
+		return hasPush(env.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchFailedNotify)
 	}) {
 		t.Fatalf("未收到匹配失败通知: %+v", env.push.snapshot())
 	}

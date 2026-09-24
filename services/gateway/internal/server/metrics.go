@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas/metrics"
@@ -34,13 +35,13 @@ func meterRequest(c metrics.Collector, op string, err error) {
 	c.Counter(MetricGatewayRequests, "op", op, "result", result).Add(1)
 }
 
-// 自留会话接口 op（与生成注册的 op 路径形态一致）。
-const (
-	opGatewayRegister  = "/gateway.v1.Session/Register"
-	opGatewayLogin     = "/gateway.v1.Session/Login"
-	opGatewayResume    = "/gateway.v1.Session/Resume"
-	opGatewayLogout    = "/gateway.v1.Session/Logout"
-	opGatewayHeartbeat = "/gateway.v1.Session/Heartbeat"
+// 自留会话接口 op：唯一来源是会话协议描述符（生成物），此处不再手抄字面量。
+var (
+	opGatewayRegister  = gatewayv1opclient.SessionProtocolOps.Register
+	opGatewayLogin     = gatewayv1opclient.SessionProtocolOps.Login
+	opGatewayResume    = gatewayv1opclient.SessionProtocolOps.Resume
+	opGatewayLogout    = gatewayv1opclient.SessionProtocolOps.Logout
+	opGatewayHeartbeat = gatewayv1opclient.SessionProtocolOps.Heartbeat
 )
 
 // meteredSession 是自留会话接口（*Gateway）的打点装饰器：

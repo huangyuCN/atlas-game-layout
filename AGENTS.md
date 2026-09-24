@@ -54,7 +54,7 @@ Atlas 类型仅在 `pkg/` 装配层使用。`go.mod` 以本地 `replace` 指向 
 - **规模与复用（新增/修改代码时遵守）**：
   - **单文件**：同一源文件行数**不超过 500 行**（含空行与注释）；若逼近上限，应拆分为多个文件或子包，并保证职责清晰。
   - **单函数**：同一函数**不超过 50 行**（含空行与注释）；超出则拆分为多个函数或提取步骤，避免单块过长。
-  - **工具生成代码不受上述行数限制**：`*.pb.go`（含 `_actor` / `_route` / `_rpc_adapter` / `_grpc` 等 protoc 插件产物）、`*.g.cs`、`*_pb.ts` 等由代码生成器产出的文件，行数与函数长度以生成器输出为准；禁止手工编辑（改生成器后重新生成），也不要求为"逼近 500 行"而拆分。
+  - **工具生成代码不受上述行数限制**：`*.pb.go`（含 `_route` / `_grpc` 与 `actor/` / `rpc/` / `opclient/` 等 protoc 插件产物）、`*.g.cs`、`*_pb.ts` 等由代码生成器产出的文件，行数与函数长度以生成器输出为准；禁止手工编辑（改生成器后重新生成），也不要求为"逼近 500 行"而拆分。
   - **生成器本身受限制**：`cmd/protoc-gen-*` 下的插件源码是手写代码，同样遵守单文件 ≤500 行、单函数 ≤50 行——生成逻辑膨胀时按职责拆文件（如 `actor.go` / `route.go` / `rpcadapter.go` 分列）。
   - **生成物仍按职责分文件**：同一 proto 的 actor 分发桩、路由表、RPC 接入层各自独立成文件（便于 review 与减少合并冲突），不因为"不受行数限制"就堆进同一个文件。
   - **枚举优先（杜绝魔法值）**：协议与代码中语义有限的值（状态/原因/类型/级别等）**必须**定义为 proto enum 或 Go 常量集合，杜绝散落的魔法字符串/数字——客户端拿到的是自解释的枚举名（protojson 默认下发枚举名）。协议新增 reason/状态/类型字段一律用 enum 类型；发现存量魔法值，在改造到该处时一并枚举化。自由文本（如操作备注、错误描述）不在此列；纯路由键（如推送 operation 的消息完整名）是协议寻址键，不属魔法值。
@@ -94,6 +94,7 @@ atlas-game-layout/              ← Go module: github.com/huangyuCN/atlas-game-l
 ├── deploy/                     ← 中间件 docker-compose
 ├── scripts/e2e                 ← 双客户端闭环脚本（双形态）
 ├── scripts/loadtest            ← 帧通道压测（KCP vs WS）
+├── scripts/sdksession          ← SDK 会话协议接缝适配（模板生成描述符 → SessionProtocol）
 ├── test/e2e                    ← 进程内端到端测试（真中间件，不可达自动跳过）
 ├── third_party/                ← 第三方 proto 依赖
 └── docs/superpowers/           ← 设计文档（计划 / 规格 / ADR / benchmark）
@@ -120,27 +121,16 @@ services/<svc>/
 ```
 
 **铁律**：
-- `internal/{conf,infra,biz,data,server,actor,session}` 只做各自职责，**不含装配逻辑**；
-- 所有依赖图（fx 提供者、端口、实例化顺序）**只写在 assemble/app**；
-- 进程形态（`atlas.App`）与嵌入式形态（bootstrap.Boot → atlas.App 驱动）**共用同一张依赖图**（app 与 assemble 同源）；
-- 新增依赖/组件 → 只在 assemble.go 声明，不改各 internal 子包间的直接构造。
-
-## actor 方法组织约定
-
-game/battle 的业务 actor（`services/*/internal/actor/`）采用**按域分文件**组织，同一 receiver 跨文件（Go 原生支持）：
-
-| 文件 | 职责 |
-|------|------|
-| `player.go` / `battle.go` | 类型、装配（NewProps）、生命周期（OnStart/OnStop）、横切钩子 |
-| `player_auth.go` / `battle_session.go` | 认证/会话域方法（Register/Login/Logout / Create/Join/Reconnect/GetState） |
-| `player_bag.go` / `battle_frame.go` | 背包/帧同步域方法（GrantItem/GetBackpack/GetPlayer / FrameInput/onFrameResult/checkSettle） |
-
-**铁律**：
-- 业务 actor **实现生成的 `<Service>ActorServer` 接口**（方法签名 `(ctx core.ActorContext, req *X) (*Y, error)`）；分发由生成桩（`New<Service>ActorServer`）接管——**不手写 OnTell/OnAsk/switch 分发/decodeEnvelope**；
-- 每个域 proto 会生成**两面**，用途不同不要混用：
-  - **actor 面**：`<Service>ActorServer`（业务实现）+ `New<Service>ActorServer`（本地分发桩）+ `<Service>ClusterClient`（**仅集群内互调**，跨服务请走 RPC 面）；
-  - **RPC 面**：`<Service>Server`（gRPC 接口，`--go-grpc_out` 生成）+ `<Service>RPCAdapter`（接入层，`New<Service>RPCAdapter(rt, opts)`：解析 metadata → 组装 PID → Ask/Tell，可直接注册到 `grpc.Server`）+ `<Service>OpClient`（客户端 SDK stub，经会话通道发起 op）。
-  - **部署前提**：接入层同时暴露 CLIENT 与 INTERNAL op，`server.grpc` 必须限内网——客户端越权面靠网络边界，不靠 access 过滤。
+- 业务 actor **实现生成的 `actor/` 子包接口**（如 `gamev1actor.PlayerService` / `battlev1actor.BattleService`，方法签名 `(ctx core.ActorContext, req *X) (*Y, error)`）；分发由生成桩（`New<Service>`）接管——**不手写 OnTell/OnAsk/switch 分发/decodeEnvelope**；
+- 每个域 proto 生成**四类产物**，用途不同不要混用（零词缀：类型名即 `<Service>`）：
+  - **根包**：消息（`--go_out`）+ 路由表 `<Service>RouteTable`（`relay.Table`，注解生成）；
+  - **actor 面**（`api/<域>/v1/actor/`）：`<Service>`（业务实现）+ `Unimplemented<Service>` 兜底 + `New<Service>`（本地分发桩）+ `New<Service>DecodeInbound` + `<Service>ClusterClient`（**仅集群内互调**，按 PID 寻址）+ `<Service>ActorType`（PID 组装用的 actor 类型名）；
+  - **rpc 面**（`api/<域>/v1/rpc/`）：`<Service>Edge`（access=CLIENT，**客户端面**）与 `<Service>Internal`（access=INTERNAL，**服务面**）双接口 + 各自 `Register…`/`New…`（自带 `grpc.ServiceDesc`，**域 proto 不再需要 `--go-grpc_out`**）+ `<Service>Client`（服务面的类型化 gRPC 客户端，仅供跨服务调用）；
+  - **opclient 面**（`api/<域>/v1/opclient/`）：会话通道 CLIENT op stub（Go/TS/C#，仅导出 access=CLIENT 方法；TS/C# 零 protobuf 运行时依赖）+ 推送 op 常量（消息级 `push` 注解生成，值 = 消息完整名）。
+  - **信任边界**：Edge 与 Internal 注册到**两个独立 listener**（端口隔离即信任边界）；"把 Internal 实现注册到 Edge"在编译期即不成立（形参类型不同）。
+- 客户端 op 的投递统一走框架 `opcall`：`opcall.CallFromContext(ctx, rt, entry, req)`（生成的 `rpc/` 方法体即此一行组合），网关侧为 `relay.Table` 查表 + `opcall.PlanFor`（发起者/观测头/去重键）+ `opcall.Deliver`（Ask/Tell 唯一入口）+ `opcall.ReplyOf`（回执归一）；
+- **注册 `rpc/` 平面到 listener 时必须挂 `opgrpc` 拦截器**（服务端 `opgrpc.UnaryServerInterceptor()`：metadata→ctx + 错误投影；客户端 `opgrpc.UnaryClientInterceptor()`：ctx→metadata），否则跨进程身份与 reason 判定不成立（域 `rpc/` 面的 listener 注册随 P7 管理面窗口落地）；
+- 每个 rpc 必须使用**独立请求消息**（actor 分发按消息类型路由，生成期即校验）；
 - 错误**上抛**（`return nil, err`，结构化 error 经集群 error 通道往返），**不包 `Ok:false` 回执**；
 - 本地消息（如定时快照 `tickSnapshot`）经 `core.WithLocalTell[T]` 类型路由注册；
 - 生命周期（OnStart/OnStop）经生成桩 `DispatchBase` 断言转发；
@@ -152,17 +142,19 @@ game/battle 的业务 actor（`services/*/internal/actor/`）采用**按域分�
 
 `api/<svc>/v1/*.proto` 是协议事实源（按服务分目录：gateway/game/matcher/battle/common/error）。
 
-**协议边界约定（一句话规则）**：
+**协议面与产物（统一设计 v2：一份 IDL，按平面分子包）**：
 
-| 协议面 | 位置 | 服务命名 | 特征 |
-|---|---|---|---|
-| 客户端 op（SDK 消费） | `api/gateway/v1/*_client.proto`（唯一客户端命名空间） | `GatewayXxx` | 携带 token 鉴权位；gateway 校验会话并防伪造 player_id 后转发 |
-| 集群内部方法 | 域包 `*_actor.proto` | `XxxActor` | 无鉴权位，身份由集群 PID 决定；服务端能力不得出现在客户端面 |
-| 管理面（grpc/http） | 域包（如 `player.proto`） | 与域同名 | 运维/活动渠道，google.api.http 注解 |
+| 协议面 | 位置 | 特征 |
+|---|---|---|
+| 客户端 op（SDK 消费） | 域 proto 的 `service`，rpc 标 `access: ACCESS_CLIENT`（service 级默认 + rpc 级覆盖） | 身份来自会话/字段（`uid`/`uid_field`），**业务消息不含身份字段**；SDK 导出、网关透传 |
+| 服务端内部方法 | 同一 service 的 rpc 标 `access: ACCESS_INTERNAL` | 服务间 gRPC（如 game 的 Login/Logout），客户端 stub 不导出 |
+| 推送（服务端 → 客户端） | 消息级注解 `option (atlas.route.v1.push) = true;` | 推送 op = 消息完整名；生成三语言常量；不进路由表 |
+| 会话生命周期 | `api/gateway/v1/session.proto`（**留在模板原地**，R13） | Gateway 自留：四传输生成桩 + `opclient` 会话 stub + 协议描述符（`SessionProtocolOps`/`Token`/`PlayerID`/`ExpiresAt`）；三 SDK 经 `SessionProtocol` 接缝接入（**P4 落地**）|
+| 管理面（P7） | `api/admin/**`（P7 新增） | 普通 gRPC 面（`--go-grpc_out`），只注册到 **internal listener** |
 
-- 改协议 → `make proto` → 生成桩落在同目录（.pb.go / _grpc.pb.go / 各传输生成代码 / openapi）；
-- 新增业务接口流程：改 proto → `make proto` → 在 `services/<svc>/internal/biz/handler/` 实现生成的服务接口 → 在 `assemble` 挂载；
-- **客户端接口只定义在 `api/gateway/v1/*_client.proto` 的 `GatewayXxx` 服务**（gateway handler 只做转发投影，无自有业务契约）；matcher/battle/game 域包只保留服务端面（域类型/枚举/事件/`XxxActor`/管理面），依赖单向：`gateway.v1` 可引 `game.v1`/`matcher.v1`/`battle.v1`/`common.v1`，反向禁止；推送消息（Notify）按连接路由、只能住在客户端面文件；事件（Event）住服务间契约文件；
+- 改协议 → `make proto` → 产物落四类平面（根包消息 + 路由表 / `actor/` / `rpc/` / `opclient/`）；
+- 新增业务 op 流程：改 proto（补注解与限流/生命周期字段）→ `make proto` → 在 `services/<svc>/internal/actor/` 实现 actor 面方法 → 网关零代码（路由表驱动透传）；
+- 客户端 op 与 actor 分发**共用同一份 service/消息**（不再有 gateway ↔ 域 的镜像投影服务）；`gateway.v1` 只留会话协议与推送；
 - **手写代码与生成代码同目录**：生成文件有明确生成头（Code generated），不得手改；手写文件注释用中文。
 
 ## lib/ — 代码级公共定义
@@ -187,7 +179,7 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 |--------|------|
 | `actor/` | actor 集群接入装配 |
 | `redis/` `nats/` `mongo/` `etcd/` | 中间件 client 装配（fx 提供者）|
-| `registry/` | 服务注册/发现装配（键前缀派生 `NamespaceOf`：显式配置优先，否则按 `runtime.env` 隔离）|
+| `registry/` | 服务注册/发现装配（键前缀**必填**，取 `namespace.Derive` 的 `RegistryPrefix`；缺失即报错，不回落 env/default）|
 | `config/` | 配置加载 |
 | `log/` | 日志装配 |
 | `bootstrap/` | 配置加载 + 日志 + App 组装；`ModuleFor`/`ModuleForEmbedded` 提供 App 模块（进程/进程内两形态共用同一启停路径），`Boot` 以进程内形态启动依赖图并归集端点；回填 `runtime.id`（缺省主机名）与 `runtime.env`（缺省 `default`），并把注册失败升级为启动失败 |
@@ -207,7 +199,7 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 
 | 维度 | 取值 | 为什么 |
 |------|------|--------|
-| 键前缀 | `registry.namespace` 显式配置优先，否则 `/atlas/services/<runtime.env>`（`env` 缺省 `default`）| 多套部署共用同一 etcd 时必须靠它隔离：前缀与实例 ID 都相同会让后注册者覆盖前者的端点，且前者注销时删掉后者的注册 |
+| 键前缀 | `runtime.namespace` 经框架 `namespace.Derive` 派生的 `RegistryPrefix`（`/atlas/services/<ns>`；**必填，缺失即启动失败**，R9）| 多套部署共用同一 etcd 时必须靠它隔离：前缀与实例 ID 都相同会让后注册者覆盖前者的端点，且前者注销时删掉后者的注册 |
 | 实例 ID | `runtime.id` 显式配置优先，否则取 `<runtime.name>-<主机名>`（`bootstrap.AssembleLoaded` 回填）| 注册实例 ID、actor NodeID、指标 `service_instance_id` **必须同源**；留空会让 Atlas 为注册另生成 UUID，与 actor NodeID 不一致。**带服务名前缀是必需的**：actor NodeID 直接决定 NATS 节点 subject `atlas_actor.<ns>.node.<nodeID>.{in,spawn,drain,control}`，只用主机名会让同主机的多个服务共用同一套 subject、互相收到对方的节点消息（实测故障：网关与 game 争同一 actor 的目录租约 → `ACTOR_NOT_FOUND`）|
 | 服务名 | `runtime.name` | 同前缀下不同服务天然隔离 |
 
@@ -215,18 +207,18 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 
 - **两种驱动形态同一套启停路径**：进程形态（`cmd/main` → `bootstrap.Assemble` → `ModuleFor`）与进程内形态（`services/*/assemble` → `bootstrap.Boot` → `ModuleForEmbedded`）都由 `atlas.App` 启动服务端、注册实例、注销与停机；进程内形态只是不注册进程信号（`Options.DisableSignal`），避免劫持宿主/测试进程的信号。
 - 注册端与发现端**共用同一条构造路径**（`pkg/fxkit.RegistryOptions` → `pkg/registry.NewEtcd`，返回对象同时实现 Registrar 与 Discovery）；前缀不一致会表现为「注册成功却发现不到」。
-- 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的前缀**（如 `/atlas/services/it-<纳秒>`）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。
+- 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的命名空间 token**（如 `it-<纳秒>`；路径前缀 `/atlas/services/<ns>` 由框架 `namespace.Derive` 拼，代码里不出现路径字面量）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。该字段**必填**，缺失即装配失败（R9）。
 - 实例键冲突（`registry.ErrInstanceConflict`）会让进程**启动失败退出**：同一实例 ID 的旧进程仍在运行、或异常退出后租约尚未过期（TTL 15s）都会命中，等租约过期后重启即可。**不要**改 ID 绕过——那正是要防的静默顶替。
 
-### 域 op 的目标身份（battle 域为例，两面规则不同）
+### 域 op 的目标身份（battle 域为例）
 
 | 面 | 寻址来源 | 空值行为 |
 |----|----------|----------|
-| 帧协议/网关透传（CLIENT op） | 请求字段（`battle_id`）或会话身份，按注解 `uid`/`uid_field` | 一律拒绝（不回落） |
-| 服务 gRPC 管理面（`BattleHandler.CreateBattle`） | 请求 `battle_id`，未携带时**回落 `match_id`**（既有管理面行为，`battle:<match_id>` 是历史约定） | 回落 |
-| RPC 接入层（INTERNAL op） | 请求 `battle_id`（由调用方分配并携带，如 matcher 的 `idgen.Battle()`） | 拒绝 |
+| 网关透传（CLIENT op：`relay.Table` + `opcall.Deliver`） | 请求字段（`battle_id`）或会话身份，按注解 `uid`/`uid_field` | 一律拒绝（不回落） |
+| `rpc/` 平面的 Edge/Internal 面（gRPC 接入） | 同上（`opcall.PIDFrom` 从 metadata/请求解析） | 拒绝 |
+| `actor/` 平面的 `<Service>ClusterClient`（集群内互调） | 调用方显式给 PID（`battle:<battleID>`，由 `idgen.Battle()` 分配） | 拒绝 |
 
-> `Create` 之前目标 battle actor 尚不存在，因此**调用方必须把目标身份写进请求**（`CreateBattleRequest.battle_id`）——RPC 面没有 PID 概念，接入层只能按字段寻址。
+> `Create` 之前目标 battle actor 尚不存在，因此**调用方必须把目标身份写进请求**（`CreateBattleRequest.battle_id`）——集群互调没有"域 op 寻址"概念，只能按字段/显式 PID 寻址。旧的 `service Battle` 管理面（`BattleHandler`）与 `service Player` 管理面已按统一设计删除，管理能力归 P7 的 `api/admin`。
 
 ### actor 平面身份与命名空间（改 actor 装配时必须遵守）
 
@@ -235,15 +227,15 @@ actor 平面（NATS 节点消息、广播主题、etcd 归属目录）**与注�
 | 维度 | 取值 | 为什么 |
 |------|------|--------|
 | actor NodeID | = 注册实例 ID（`runtime.id`，即 `<服务名>-<主机名>`）| NodeID 决定 NATS 节点 subject `atlas_actor.<ns>.node.<nodeID>.{in,spawn,drain,control}`；而**懒激活的候选节点取自服务发现的实例 ID**（`cluster/placement`），两者必须同源，改成"只给 actor 加前缀"会让 spawn 发往不存在的节点 |
-| 命名空间 `<ns>` | `runtime.env`（缺省 `default`），经 `pkg/actor.Options.Namespace` 传给传输层 `cluster.WithNamespace` | 注册中心已按 env 隔离，subject 若不隔离，两套共用同一 NATS 的部署会**静默串台**（互相收到节点消息/广播主题）。取值限 `[A-Za-z0-9_-]+`，非法值启动期报错 |
+| 命名空间 `<ns>` | `runtime.namespace`（**必填，缺失即启动失败**，R9），经 `pkg/actor.Options.Namespace` 传给传输层 `cluster.WithNamespace`；五面前缀的唯一派生点是框架 `namespace.Derive` | 注册中心、actor subject、业务 topic、redis 键、etcd 目录必须同源隔离，任一面漏隔离都会**静默串台**（互相收到节点消息/广播主题）。取值限 `[A-Za-z0-9_-]+`，缺失或非法值启动期报错；`runtime.env` **仅作链路/指标标签**，不参与任何前缀派生 |
 | 归属目录前缀 | `/atlas/actors/<ns>`（locator 与节点归属键共用）| 同一 etcd 被多套部署共用时，PID→Owner 记录不会互相覆盖 |
 | 节点归属键 | `/atlas/actors/<ns>/nodes/<nodeID>`（etcd 租约，TTL 10s）| 同 ID 的第二进程**启动失败**（`actor.ErrNodeConflict`，错误带占用者租约号）；`kill -9` 后同 ID 快速重启会被自己的残留租约挡住 ≤10s，等过期即可 |
 | 业务 topic | `atlas.<ns>.push|event|gw.*`（`lib/consts.Topics`，fx 注入 `fxkit.Topics`）| 推送/事件/网关控制通道同样是全局 subject，不隔离会跨环境下发与串号 |
 | 业务键（redis） | `atlas:<ns>:<域>:<id>`（`pkg/redis.Keys`，命名空间在构造客户端时写入 `redis.Options.Namespace`）| 会话路由 / 玩家快照 / 撮合票据共用一个 redis，不隔离会互相覆盖——同样是静默故障。**键前缀只在 `pkg/redis.Keys` 一处拼**（含撮合后端的 `MatchmakerPrefix()`，经 `matchredis.WithPrefix` 注入），服务侧写 `cli.Keys().GatewayRoute(pid)` 这类调用，不再各自拼字符串 |
 
-- 进程内形态（`services/*/assemble`）不读 config.yaml：`newBootstrap` 按 `Options.Namespace`（注册中心前缀）的叶子段派生 `runtime.actor_namespace`（`bootstrap.ActorNamespaceOf`，**非法字符报错不归一**）——前缀是 etcd 键路径形态（含 `/`），**不能直接当 subject token**。
+- 进程内形态（`services/*/assemble`）不读 config.yaml：`newBootstrap` 收 `Options.Namespace`（**ns token**，如 `it-<纳秒>`；**不是**注册键前缀路径）并交 `bootstrap.RequireNamespace` 校验——缺失/非法即装配失败（R9），五面前缀由各消费方经 `namespace.Derive` 派生。
 - 新增/修改 actor 装配时不要绕过 `pkg/actor.NewRuntime`：命名空间、目录前缀、节点声明都在那里统一收口。
-- **隔离命名空间只有一个来源**：`pkg/actor.NamespaceOf(runtime)`（`runtime.actor_namespace` 优先、`env` 兜底）。actor subject、业务 topic、redis 键（含撮合后端前缀）三路都从它派生——任何一处另取来源都会立刻表现为"订阅收不到 / 键找不到"（本仓踩过一次：topic 用 env 而 actor 用 actor_namespace，进程内 e2e 直接收不到成局事件）。**注册中心键前缀是另一回事**：它只随 `runtime.env`（`pkg/registry.NamespaceOf`），不随 `actor_namespace`。
+- **隔离命名空间只有一个来源**：配置字段 `runtime.namespace` 经框架 `namespace.Derive` 一次派生五面（注册中心键前缀 / actor subject / 业务 topic / redis 键 / etcd 目录）。任何一处另取来源都会立刻表现为"订阅收不到 / 键找不到"（本仓踩过一次：topic 用 env 而 actor 用 actor_namespace，进程内 e2e 直接收不到成局事件）。**`runtime.env` 只作链路与指标标签**（`deployment.environment.name` 与指标 env 标签），不参与任何前缀派生。
 - **NATS 发布统一走 `pkgnats.Publisher`**（`fxkit.NewPublisher` 装配）：连接与命名空间收口成类型，避免 `(nc, topics)` 成对透传；订阅侧仍用裸 `*nats.Conn`（订阅本身不带命名空间，subject 由 `Topics` 构造）。
 
 ### 传输层启动参数（gRPC / HTTP / TCP / WebSocket / KCP / UDP）
@@ -293,7 +285,10 @@ actor 平面（NATS 节点消息、广播主题、etcd 归属目录）**与注�
 | `deploy/docker-compose/` | 中间件编排（etcd 12379 / redis 16379 / nats 14222 / mongo 27017）|
 | `scripts/e2e/` | 双客户端闭环验证（`make e2e`；dual/single 形态）|
 | `scripts/loadtest/` | 帧通道压测（`go run ./scripts/loadtest ...`）|
+| `scripts/sdksession/` | SDK 会话协议接缝适配：会话 op 名/凭据提取/被挤下线识别取自生成描述符，`test/e2e` 与两个脚本共用一份（未注入接缝时 SDK 会话全部报 `ErrNoSessionProtocol`）|
 | `test/e2e/` | 进程内端到端测试（真中间件，不可达自动 Skipf 跳过）|
+| `deploy/observability/` | 观测栈与**指标命名表/面板位**（M7 预留位，见该目录 `README.md`）|
+| `docs/superpowers/specs/2026-09-24-v2-reserved-slots.md` | 统一设计 v2 的 M3–M7 预留位登记（只留位置，不写实现）|
 
 ## 常用命令（开发速查）
 

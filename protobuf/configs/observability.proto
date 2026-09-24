@@ -1,5 +1,7 @@
 // 公共配置：可观测性（链路追踪 OTLP 导出 + 指标暴露）。
-// 空端点 = 不注册 exporter（noop，零开销）；配置后服务侧 span 经 OTLP 导出到
+//
+// 缺省约定（唯一规则）见 docs/config.md：otlp 端点与 metrics.prometheus 地址是必需参数——
+// 为空 = 该 exporter/抓取端点不启用（noop，零开销）；配置后服务侧 span 经 OTLP 导出到
 // Tempo/Jaeger 等后端（gRPC 或 HTTP，由端点 scheme 决定），Grafana 面板查询链路；
 // 指标经 Prometheus 文本端点暴露，由 Prometheus 抓取、Grafana 面板查询。
 syntax = "proto3";

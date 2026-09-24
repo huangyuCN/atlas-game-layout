@@ -13,7 +13,6 @@ package matcherv1
 
 import (
 	v1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
-	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -934,7 +933,7 @@ var File_api_matcher_v1_matcher_proto protoreflect.FileDescriptor
 const file_api_matcher_v1_matcher_proto_rawDesc = "" +
 	"\n" +
 	"\x1capi/matcher/v1/matcher.proto\x12\n" +
-	"matcher.v1\x1a\x1aapi/common/v1/common.proto\x1a\x1cgoogle/api/annotations.proto\"|\n" +
+	"matcher.v1\x1a\x1aapi/common/v1/common.proto\"|\n" +
 	"\x11QueueMatchRequest\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x120\n" +
 	"\x06player\x18\x02 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\x12\x18\n" +
@@ -986,20 +985,20 @@ const file_api_matcher_v1_matcher_proto_rawDesc = "" +
 	"\x13MATCH_STATE_WAITING\x10\x01\x12\x17\n" +
 	"\x13MATCH_STATE_MATCHED\x10\x02\x12\x16\n" +
 	"\x12MATCH_STATE_FAILED\x10\x03\x12\x14\n" +
-	"\x10MATCH_STATE_NONE\x10\x042\xf6\x06\n" +
-	"\aMatcher\x12f\n" +
+	"\x10MATCH_STATE_NONE\x10\x042\xec\x04\n" +
+	"\aMatcher\x12J\n" +
 	"\n" +
-	"QueueMatch\x12\x1d.matcher.v1.QueueMatchRequest\x1a\x1b.matcher.v1.QueueMatchReply\"\x1c\x82\xd3\xe4\x93\x02\x16:\x01*\"\x11/v1/matcher/queue\x12j\n" +
-	"\vCancelMatch\x12\x1e.matcher.v1.CancelMatchRequest\x1a\x1c.matcher.v1.CancelMatchReply\"\x1d\x82\xd3\xe4\x93\x02\x17:\x01*\"\x12/v1/matcher/cancel\x12o\n" +
+	"QueueMatch\x12\x1d.matcher.v1.QueueMatchRequest\x1a\x1b.matcher.v1.QueueMatchReply\"\x00\x12M\n" +
+	"\vCancelMatch\x12\x1e.matcher.v1.CancelMatchRequest\x1a\x1c.matcher.v1.CancelMatchReply\"\x00\x12J\n" +
 	"\n" +
-	"QueryMatch\x12\x1d.matcher.v1.QueryMatchRequest\x1a\x1b.matcher.v1.QueryMatchReply\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/matcher/query/{player_id}\x12p\n" +
-	"\vCreateParty\x12\x1e.matcher.v1.CreatePartyRequest\x1a\x1c.matcher.v1.CreatePartyReply\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/matcher/party/create\x12h\n" +
-	"\tJoinParty\x12\x1c.matcher.v1.JoinPartyRequest\x1a\x1a.matcher.v1.JoinPartyReply\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/matcher/party/join\x12l\n" +
+	"QueryMatch\x12\x1d.matcher.v1.QueryMatchRequest\x1a\x1b.matcher.v1.QueryMatchReply\"\x00\x12M\n" +
+	"\vCreateParty\x12\x1e.matcher.v1.CreatePartyRequest\x1a\x1c.matcher.v1.CreatePartyReply\"\x00\x12G\n" +
+	"\tJoinParty\x12\x1c.matcher.v1.JoinPartyRequest\x1a\x1a.matcher.v1.JoinPartyReply\"\x00\x12J\n" +
 	"\n" +
-	"LeaveParty\x12\x1d.matcher.v1.LeavePartyRequest\x1a\x1b.matcher.v1.LeavePartyReply\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/matcher/party/leave\x12n\n" +
-	"\rDescribeParty\x12 .matcher.v1.DescribePartyRequest\x1a\x15.matcher.v1.PartyInfo\"$\x82\xd3\xe4\x93\x02\x1e\x12\x1c/v1/matcher/party/{party_id}\x12l\n" +
+	"LeaveParty\x12\x1d.matcher.v1.LeavePartyRequest\x1a\x1b.matcher.v1.LeavePartyReply\"\x00\x12J\n" +
+	"\rDescribeParty\x12 .matcher.v1.DescribePartyRequest\x1a\x15.matcher.v1.PartyInfo\"\x00\x12J\n" +
 	"\n" +
-	"QueueParty\x12\x1d.matcher.v1.QueuePartyRequest\x1a\x1b.matcher.v1.QueuePartyReply\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/matcher/party/queueBAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
+	"QueueParty\x12\x1d.matcher.v1.QueuePartyRequest\x1a\x1b.matcher.v1.QueuePartyReply\"\x00BAZ?github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1b\x06proto3"
 
 var (
 	file_api_matcher_v1_matcher_proto_rawDescOnce sync.Once

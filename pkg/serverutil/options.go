@@ -27,7 +27,7 @@ type ClientMiddlewares []atlasmiddleware.Middleware
 type Filters []atlashttp.FilterFunc
 
 // HTTPOptions 把 server.http 配置映射为 HTTP 服务端选项：
-// 空串 / 0 / 未设置的字段一律不追加对应选项，交给底层默认值，避免「不配就变行为」；
+// 空串 / 0 / 未设置的字段一律不追加对应选项，交给底层默认值（缺省约定唯一规则见 docs/config.md）；
 // 时长字段解析失败直接报错（启动期暴露，不静默降级）。
 func HTTPOptions(c *configspb.Server_HTTP) ([]atlashttp.ServerOption, error) {
 	if c == nil {
@@ -70,8 +70,11 @@ func HTTPOptions(c *configspb.Server_HTTP) ([]atlashttp.ServerOption, error) {
 	return opts, nil
 }
 
-// GRPCOptions 把 server.grpc 配置映射为 gRPC 服务端选项（空值语义同 HTTPOptions）。
-func GRPCOptions(c *configspb.Server_GRPC) ([]atlasgrpc.ServerOption, error) {
+// GRPCOptions 把 server.grpc 配置映射为**某个面**的 gRPC 服务端选项：
+// addr 是该面的监听地址（edge_addr 或 internal_addr，面是否启用由调用方按地址非空判定，
+// 见 docs/config.md）；其余字段空串 / 0 / 未设置一律不追加对应选项（不覆盖底层默认），
+// 时长解析失败直接报错。
+func GRPCOptions(c *configspb.Server_GRPC, addr string) ([]atlasgrpc.ServerOption, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -83,8 +86,8 @@ func GRPCOptions(c *configspb.Server_GRPC) ([]atlasgrpc.ServerOption, error) {
 	if network != "" {
 		opts = append(opts, atlasgrpc.WithNetwork(network))
 	}
-	if c.GetAddr() != "" {
-		opts = append(opts, atlasgrpc.WithAddress(c.GetAddr()))
+	if addr != "" {
+		opts = append(opts, atlasgrpc.WithAddress(addr))
 	}
 	timeout, err := config.ParseDuration(c.GetTimeout())
 	if err != nil {
@@ -136,20 +139,6 @@ func HTTPServer(c *configspb.Server_HTTP, mws Middlewares, filters Filters) (*at
 		opts = append(opts, atlashttp.WithFilter(filters...))
 	}
 	return build("HTTP 服务端", atlashttp.NewServer, opts...)
-}
-
-// GRPCServer 按 server.grpc 配置构造 gRPC 服务端，并挂载中间件
-// （业务服务由调用方注册）。同一链同时挂一元与流式：只挂一元会让新增的
-// 流式 RPC 静默失去日志/追踪/指标。
-func GRPCServer(c *configspb.Server_GRPC, mws Middlewares) (*atlasgrpc.Server, error) {
-	opts, err := GRPCOptions(c)
-	if err != nil {
-		return nil, err
-	}
-	if len(mws) > 0 {
-		opts = append(opts, atlasgrpc.Middleware(mws...), atlasgrpc.StreamMiddleware(mws...))
-	}
-	return build("gRPC 服务端", atlasgrpc.NewServer, opts...)
 }
 
 // build 调用服务端构造函数并统一包装错误（构造失败在启动期暴露）。

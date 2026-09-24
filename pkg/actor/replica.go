@@ -1,7 +1,8 @@
 package actor
 
 import (
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	battlev1actor "github.com/huangyuCN/atlas-game-layout/api/battle/v1/actor"
+	gamev1actor "github.com/huangyuCN/atlas-game-layout/api/game/v1/actor"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 )
@@ -35,10 +36,10 @@ func RegisterAutoReplica(r *Runtime, actorType string) error {
 
 // RegisterPlayerReplica 注册 PlayerActor 类型懒激活副本（gateway 使用；实际拉起在 game 节点）。
 func RegisterPlayerReplica(r *Runtime) error {
-	return RegisterAutoReplica(r, consts.ActorTypePlayer)
+	return RegisterAutoReplica(r, gamev1actor.PlayerServiceActorType)
 }
 
 // RegisterBattleReplica 注册战斗 actor 类型懒激活副本（matcher 开局使用；实际拉起在 battle 节点）。
 func RegisterBattleReplica(r *Runtime) error {
-	return RegisterAutoReplica(r, consts.ActorTypeBattle)
+	return RegisterAutoReplica(r, battlev1actor.BattleServiceActorType)
 }

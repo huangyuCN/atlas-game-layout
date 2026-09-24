@@ -14,6 +14,8 @@ import (
 // 端点 scheme：与各传输层 Endpoint() 返回的 scheme 一致（即 urls 的 map 键）。
 // 注意 WS 的 scheme 是 "ws"，与 transport.KindWebSocket 的字符串 "websocket" 不同，
 // 故不直接复用 transport.Kind。
+// gRPC 有两个面：SchemeGRPC 是 **internal 面**（可信区：服务间调用，框架发现解析器按它寻址），
+// edge 面单列 SchemeGRPCEdge（见 grpc_faces.go）——同一实例的两个面必须能被区分。
 const (
 	SchemeGRPC = "grpc"
 	SchemeHTTP = "http"

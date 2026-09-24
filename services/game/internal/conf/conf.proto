@@ -20,4 +20,13 @@ message Bootstrap {
   atlas.configs.Log log = 5;
   // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
   atlas.configs.Observability observability = 6;
+  // admin 是管理面（GM/运维）配置：仅 internal listener 可达，见 server.grpc.internal_addr。
+  game.conf.Admin admin = 7;
+}
+
+// Admin 是管理面（GM/运维）配置。
+message Admin {
+  // max_grant_count 是单次发放上限（R12）：缺省或 0 回退默认 100，
+  // **不提供「关闭上限」**；dry-run 同样受限（超限即拒单，不写审计、不改档）。
+  uint32 max_grant_count = 1;
 }

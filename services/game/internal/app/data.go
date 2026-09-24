@@ -20,6 +20,16 @@ func newMongoPlayerRepo(cli *mongo.Client) (*repo.MongoPlayerRepo, error) {
 	return persist, nil
 }
 
+// newMongoAuditRepo 装配管理面审计仓储（启动期建索引：幂等键唯一稀疏索引等）。
+// 与玩家仓储同理，构造函数需要外部 ctx（fx 无法注入裸 ctx）。
+func newMongoAuditRepo(cli *mongo.Client) (*repo.MongoAuditRepo, error) {
+	audit, err := repo.NewMongoAuditRepo(context.Background(), cli)
+	if err != nil {
+		return nil, fmt.Errorf("app: 装配审计仓储失败: %w", err)
+	}
+	return audit, nil
+}
+
 // newMatchQueueClient 装配 matcher gRPC 客户端（服务发现寻址 + 客户端中间件）。
 // 连接惰性建立（进程级上下文无 deadline），matcher 未就绪不阻塞 game 启动。
 func newMatchQueueClient(discovery registry.Discovery,

@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
 	"strings"
 	"time"
 
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -72,7 +72,7 @@ func (g *Gateway) relayEvent(operation string, data []byte,
 // onMatchStarted 处理成局事件：向参战玩家推送开局通知
 // （MatchStartedNotify：对局 ID + battle ID + 参战名单 + 实例端点，规格 §7）。
 func (g *Gateway) onMatchStarted(_ string, data []byte) {
-	g.relayEvent(consts.PushOpMatchStarted, data, func(_ context.Context) ([]string, []byte, bool) {
+	g.relayEvent(gamev1opclient.PlayerServicePushOps.MatchStartedNotify, data, func(_ context.Context) ([]string, []byte, bool) {
 		var ev matcherv1.MatchStartedEvent
 		if err := protojson.Unmarshal(data, &ev); err != nil {
 			return nil, nil, false
@@ -92,7 +92,7 @@ func (g *Gateway) onMatchStarted(_ string, data []byte) {
 
 // onMatchFailed 处理失败事件：向玩家推送失败/取消通知（MatchFailedNotify）。
 func (g *Gateway) onMatchFailed(_ string, data []byte) {
-	g.relayEvent(consts.PushOpMatchFailed, data, func(_ context.Context) ([]string, []byte, bool) {
+	g.relayEvent(gamev1opclient.PlayerServicePushOps.MatchFailedNotify, data, func(_ context.Context) ([]string, []byte, bool) {
 		var ev matcherv1.MatchFailedEvent
 		if err := protojson.Unmarshal(data, &ev); err != nil {
 			return nil, nil, false
@@ -110,7 +110,7 @@ func (g *Gateway) onMatchFailed(_ string, data []byte) {
 
 // onPartyRoster 处理名册变更事件：向全队推送名册快照（PartyRosterNotify）。
 func (g *Gateway) onPartyRoster(_ string, data []byte) {
-	g.relayEvent(consts.PushOpPartyRoster, data, func(_ context.Context) ([]string, []byte, bool) {
+	g.relayEvent(gamev1opclient.PlayerServicePushOps.PartyRosterNotify, data, func(_ context.Context) ([]string, []byte, bool) {
 		var ev matcherv1.PartyRosterEvent
 		if err := protojson.Unmarshal(data, &ev); err != nil {
 			atlaslog.Error("gateway: 名册事件解码失败", "err", err, "raw", string(data))

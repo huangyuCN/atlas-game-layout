@@ -8,7 +8,6 @@ package game.v1;
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
 
 import "api/common/v1/common.proto";
-import "google/api/annotations.proto";
 
 // GetPlayerRequest/Reply 玩家信息查询。
 message GetPlayerRequest {
@@ -43,23 +42,3 @@ message GrantItemRequest {
 }
 
 message GrantItemReply {}
-
-// Player 是玩家业务 grpc 服务。
-service Player {
-  rpc GetPlayer (GetPlayerRequest) returns (GetPlayerReply) {
-    option (google.api.http) = {
-      get: "/v1/players/{player_id}"
-    };
-  }
-  rpc GetBackpack (GetBackpackRequest) returns (GetBackpackReply) {
-    option (google.api.http) = {
-      get: "/v1/players/{player_id}/backpack"
-    };
-  }
-  rpc GrantItem (GrantItemRequest) returns (GrantItemReply) {
-    option (google.api.http) = {
-      post: "/v1/players/{player_id}/items"
-      body: "*"
-    };
-  }
-}

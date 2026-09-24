@@ -33,7 +33,7 @@ type RedisStore struct {
 func NewRedisStore(cli *pkredis.Client) *RedisStore { return &RedisStore{cli: cli} }
 
 // routeKey 生成路由键（命名空间化：atlas:<ns>:gw:<playerID>，见 pkg/redis.Keys）：
-// 命名空间取自 redis 客户端（构造期由装配层按 runtime.actor_namespace/env 写入）。
+// 命名空间取自 redis 客户端（构造期由装配层按 runtime.namespace 经 namespace.Derive 写入）。
 func (s *RedisStore) routeKey(playerID string) string { return s.cli.Keys().GatewayRoute(playerID) }
 
 // GetSet 实现 Store：SET key value EX ttl GET 单命令原子「写新值 + 设 TTL + 取旧值」。

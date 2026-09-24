@@ -7,7 +7,6 @@ package battle.v1;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1";
 
-import "google/api/annotations.proto";
 
 // CreateBattleRequest 开局：matcher 成局后调用。
 message CreateBattleRequest {
@@ -56,19 +55,4 @@ message GetStateReply {
   string state = 1;
   uint64 current_frame = 2;
   uint32 player_count = 3;
-}
-
-// Battle 是战斗管理服务。
-service Battle {
-  rpc CreateBattle (CreateBattleRequest) returns (CreateBattleReply) {
-    option (google.api.http) = {
-      post: "/v1/battles"
-      body: "*"
-    };
-  }
-  rpc GetBattle (GetBattleRequest) returns (GetBattleReply) {
-    option (google.api.http) = {
-      get: "/v1/battles/{battle_id}"
-    };
-  }
 }

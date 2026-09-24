@@ -7,7 +7,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
-	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/data/repo"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/server"
@@ -44,15 +43,18 @@ var Module = fx.Module("game",
 		newMatchQueueClient,
 		matchmakerClientOf,
 		newMongoPlayerRepo,
+		newMongoAuditRepo, // 管理面审计仓储（被 newAdminService 消费，启动期建幂等键唯一稀疏索引）
 		newPlayerStore,
 		// ── biz：业务服务与 actor 访问客户端 ──
 		newPlayerService,
 		newPlayerStateAccess,
-		handler.NewGameHandler,
+		newAdminService, // 管理面（仅 internal listener 注册，见 server.registerPlayerServices）
 		// ── server：传输层构造（启停归属驱动方）──
 		// fx.As：构造函数返回具体类型（便于直接调 Server 字段/方法），仍以 transport.Server 进组。
 		fx.Annotate(server.NewHTTPServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
+		// gRPC 双面：Edge/Internal 各自独立 listener（fx.Out 自带 servers 组标签），
+		// 未启用的面为 nil，由 ActiveServers 在消费侧过滤。
+		server.NewGRPCServers,
 	),
 	fx.Invoke(
 		registerResources,

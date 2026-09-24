@@ -39,6 +39,14 @@ const (
 	ErrorReason_InvalidParams       ErrorReason = 1008 // 参数非法
 	ErrorReason_PasswordWrong       ErrorReason = 1009 // 口令错误
 	ErrorReason_ServerFrozen        ErrorReason = 1010 // 服务冻结（双库落盘失败，数据保护态）
+	ErrorReason_ClientVersionTooLow ErrorReason = 1011 // 客户端版本过低（M1：升级后方可登录）
+	// 管理面（P7：admin.game.v1.AdminService，仅内网 GM/运维工具可达）
+	// 号段紧接 1011 之后；管理面写操作校验失败一律拒单（不写审计、不改档）。
+	ErrorReason_AdminOperatorMissing       ErrorReason = 1012 // 操作人缺失（operator 必填；本轮由调用方自报）
+	ErrorReason_AdminIdempotencyKeyMissing ErrorReason = 1013 // 幂等键缺失（管理面写操作必填）
+	ErrorReason_AdminIdempotencyKeyReused  ErrorReason = 1014 // 幂等键复用（同键但参数摘要不同，拒绝改参重放）
+	ErrorReason_AdminOperationInFlight     ErrorReason = 1015 // 同键操作在途（首单 PENDING 未收尾，拒绝并发重复执行）
+	ErrorReason_AdminGrantCountExceeded    ErrorReason = 1016 // 单次发放超上限（R12：admin.max_grant_count，dry-run 同样受限）
 	// 匹配
 	ErrorReason_AlreadyInMatch ErrorReason = 2001 // 已在匹配中
 	ErrorReason_MatchNotFound  ErrorReason = 2002 // 匹配不存在
@@ -69,6 +77,12 @@ var (
 		1008: "InvalidParams",
 		1009: "PasswordWrong",
 		1010: "ServerFrozen",
+		1011: "ClientVersionTooLow",
+		1012: "AdminOperatorMissing",
+		1013: "AdminIdempotencyKeyMissing",
+		1014: "AdminIdempotencyKeyReused",
+		1015: "AdminOperationInFlight",
+		1016: "AdminGrantCountExceeded",
 		2001: "AlreadyInMatch",
 		2002: "MatchNotFound",
 		2003: "PartyNotFound",
@@ -82,28 +96,34 @@ var (
 		9001: "Internal",
 	}
 	ErrorReason_value = map[string]int32{
-		"None":                0,
-		"PlayerNotFound":      1001,
-		"PlayerAlreadyExists": 1002,
-		"InvalidToken":        1003,
-		"KickedOffline":       1004,
-		"TokenExpired":        1005,
-		"SessionNotFound":     1006,
-		"PlayerNotOnline":     1007,
-		"InvalidParams":       1008,
-		"PasswordWrong":       1009,
-		"ServerFrozen":        1010,
-		"AlreadyInMatch":      2001,
-		"MatchNotFound":       2002,
-		"PartyNotFound":       2003,
-		"PartyFull":           2004,
-		"AlreadyInParty":      2005,
-		"NotPartyLeader":      2006,
-		"NotInParty":          2007,
-		"BattleNotFound":      3001,
-		"BattleFull":          3002,
-		"BattleEnded":         3003,
-		"Internal":            9001,
+		"None":                       0,
+		"PlayerNotFound":             1001,
+		"PlayerAlreadyExists":        1002,
+		"InvalidToken":               1003,
+		"KickedOffline":              1004,
+		"TokenExpired":               1005,
+		"SessionNotFound":            1006,
+		"PlayerNotOnline":            1007,
+		"InvalidParams":              1008,
+		"PasswordWrong":              1009,
+		"ServerFrozen":               1010,
+		"ClientVersionTooLow":        1011,
+		"AdminOperatorMissing":       1012,
+		"AdminIdempotencyKeyMissing": 1013,
+		"AdminIdempotencyKeyReused":  1014,
+		"AdminOperationInFlight":     1015,
+		"AdminGrantCountExceeded":    1016,
+		"AlreadyInMatch":             2001,
+		"MatchNotFound":              2002,
+		"PartyNotFound":              2003,
+		"PartyFull":                  2004,
+		"AlreadyInParty":             2005,
+		"NotPartyLeader":             2006,
+		"NotInParty":                 2007,
+		"BattleNotFound":             3001,
+		"BattleFull":                 3002,
+		"BattleEnded":                3003,
+		"Internal":                   9001,
 	}
 )
 
@@ -138,7 +158,7 @@ var File_api_error_v1_errors_proto protoreflect.FileDescriptor
 
 const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\xba\x04\n" +
+	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\x8f\x06\n" +
 	"\vErrorReason\x12\b\n" +
 	"\x04None\x10\x00\x12\x19\n" +
 	"\x0ePlayerNotFound\x10\xe9\a\x1a\x04\xa8E\x94\x03\x12\x1e\n" +
@@ -150,7 +170,13 @@ const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\x0fPlayerNotOnline\x10\xef\a\x1a\x04\xa8E\x94\x03\x12\x18\n" +
 	"\rInvalidParams\x10\xf0\a\x1a\x04\xa8E\x90\x03\x12\x18\n" +
 	"\rPasswordWrong\x10\xf1\a\x1a\x04\xa8E\x91\x03\x12\x17\n" +
-	"\fServerFrozen\x10\xf2\a\x1a\x04\xa8E\xf7\x03\x12\x19\n" +
+	"\fServerFrozen\x10\xf2\a\x1a\x04\xa8E\xf7\x03\x12\x1e\n" +
+	"\x13ClientVersionTooLow\x10\xf3\a\x1a\x04\xa8E\xaa\x03\x12\x1f\n" +
+	"\x14AdminOperatorMissing\x10\xf4\a\x1a\x04\xa8E\x90\x03\x12%\n" +
+	"\x1aAdminIdempotencyKeyMissing\x10\xf5\a\x1a\x04\xa8E\x90\x03\x12$\n" +
+	"\x19AdminIdempotencyKeyReused\x10\xf6\a\x1a\x04\xa8E\x99\x03\x12!\n" +
+	"\x16AdminOperationInFlight\x10\xf7\a\x1a\x04\xa8E\x99\x03\x12\"\n" +
+	"\x17AdminGrantCountExceeded\x10\xf8\a\x1a\x04\xa8E\x90\x03\x12\x19\n" +
 	"\x0eAlreadyInMatch\x10\xd1\x0f\x1a\x04\xa8E\x99\x03\x12\x18\n" +
 	"\rMatchNotFound\x10\xd2\x0f\x1a\x04\xa8E\x94\x03\x12\x18\n" +
 	"\rPartyNotFound\x10\xd3\x0f\x1a\x04\xa8E\x94\x03\x12\x14\n" +

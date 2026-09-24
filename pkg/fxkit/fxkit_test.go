@@ -44,9 +44,12 @@ func TestNewEtcdClientMissingEndpoints(t *testing.T) {
 
 // TestNewEtcdClientOK 验证合法端点可构造客户端（惰性连接，不要求真 etcd）。
 func TestNewEtcdClientOK(t *testing.T) {
-	cfg := &fakeConf{reg: &configspb.Registry{
-		Etcd: &configspb.Registry_Etcd{Endpoints: []string{"127.0.0.1:1"}},
-	}}
+	cfg := &fakeConf{
+		runtime: testRuntime(),
+		reg: &configspb.Registry{
+			Etcd: &configspb.Registry_Etcd{Endpoints: []string{"127.0.0.1:1"}},
+		},
+	}
 	cli, err := NewEtcdClient(cfg)
 	if err != nil {
 		t.Fatalf("NewEtcdClient() 错误 = %v", err)
@@ -76,17 +79,16 @@ func TestNewRegistrarNilClient(t *testing.T) {
 	}
 }
 
-// TestRegistryOptionsNamespace 验证键前缀派生：显式配置优先，否则按环境隔离。
+// TestRegistryOptionsNamespace 验证键前缀的唯一来源：runtime.namespace 经框架
+// namespace.Derive 派生的 RegistryPrefix（不再读 registry.namespace，也不按 env 兜底）。
 func TestRegistryOptionsNamespace(t *testing.T) {
 	cases := []struct {
 		name string
 		cfg  *fakeConf
 		want string
 	}{
-		{"显式 namespace 优先", &fakeConf{reg: &configspb.Registry{Namespace: "/custom/ns"}}, "/custom/ns"},
-		{"按 runtime.env 隔离", &fakeConf{runtime: &configspb.Runtime{Env: "test"}}, "/atlas/services/test"},
-		{"env 缺省 default", &fakeConf{runtime: &configspb.Runtime{}}, "/atlas/services/default"},
-		{"配置段全缺", &fakeConf{}, "/atlas/services/default"},
+		{"按 runtime.namespace 派生", &fakeConf{runtime: &configspb.Runtime{Namespace: "test", Env: "prod"}}, "/atlas/services/test"},
+		{"env 不参与派生", &fakeConf{runtime: &configspb.Runtime{Namespace: "p5-a", Env: "test"}}, "/atlas/services/p5-a"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -101,15 +103,29 @@ func TestRegistryOptionsNamespace(t *testing.T) {
 	}
 }
 
+// TestRegistryOptionsRequiresNamespace 验证命名空间缺失即报错（R9：不回落 env/default）。
+func TestRegistryOptionsRequiresNamespace(t *testing.T) {
+	cfgs := []*fakeConf{
+		{},
+		{runtime: &configspb.Runtime{Env: "test"}},
+		{reg: &configspb.Registry{Ttl: "30s"}},
+	}
+	for i, cfg := range cfgs {
+		if _, err := RegistryOptions(cfg); err == nil {
+			t.Fatalf("第 %d 个配置缺少 runtime.namespace 时期望报错，实际为 nil", i)
+		}
+	}
+}
+
 // TestRegistryOptionsTTL 验证 ttl 映射：未配置交给底层默认值，非法值快速失败。
 func TestRegistryOptionsTTL(t *testing.T) {
 	for _, bad := range []string{"0s", "-1s", "abc", "30"} {
-		if _, err := RegistryOptions(&fakeConf{reg: &configspb.Registry{Ttl: bad}}); err == nil {
+		if _, err := RegistryOptions(&fakeConf{runtime: testRuntime(), reg: &configspb.Registry{Ttl: bad}}); err == nil {
 			t.Fatalf("ttl=%q 期望报错，实际为 nil", bad)
 		}
 	}
 
-	opts, err := RegistryOptions(&fakeConf{reg: &configspb.Registry{Ttl: "30s"}})
+	opts, err := RegistryOptions(&fakeConf{runtime: testRuntime(), reg: &configspb.Registry{Ttl: "30s"}})
 	if err != nil {
 		t.Fatalf("RegistryOptions() 错误 = %v", err)
 	}
@@ -117,7 +133,7 @@ func TestRegistryOptionsTTL(t *testing.T) {
 		t.Fatalf("TTL = %v, 期望 30s", opts.TTL)
 	}
 
-	opts, err = RegistryOptions(&fakeConf{})
+	opts, err = RegistryOptions(&fakeConf{runtime: testRuntime()})
 	if err != nil {
 		t.Fatalf("RegistryOptions() 错误 = %v", err)
 	}
@@ -126,18 +142,17 @@ func TestRegistryOptionsTTL(t *testing.T) {
 	}
 }
 
-// TestNewRedisClientAppliesNamespace 验证 redis 客户端的键命名空间与 actor 平面同源
-// （runtime.actor_namespace 优先、env 兜底）：共用同一 redis 的多套部署靠它隔离。
-// 客户端惰性连接，构造不需要真实 redis。
+// TestNewRedisClientAppliesNamespace 验证 redis 客户端的键命名空间唯一来源是
+// runtime.namespace（经框架 namespace.Derive 派生，与 actor subject / 业务 topic 同源）：
+// 共用同一 redis 的多套部署靠它隔离。客户端惰性连接，构造不需要真实 redis。
 func TestNewRedisClientAppliesNamespace(t *testing.T) {
 	tests := []struct {
 		name string
 		rt   *configspb.Runtime
 		want string
 	}{
-		{"actor_namespace 优先", &configspb.Runtime{Env: "test", ActorNamespace: "iso"}, "atlas:iso:gw:p1"},
-		{"缺省取 env", &configspb.Runtime{Env: "prod"}, "atlas:prod:gw:p1"},
-		{"两者都空取 default", &configspb.Runtime{}, "atlas:default:gw:p1"},
+		{"按 runtime.namespace 派生", &configspb.Runtime{Namespace: "iso", Env: "test"}, "atlas:iso:gw:p1"},
+		{"env 不参与派生", &configspb.Runtime{Namespace: "p5-a", Env: "prod"}, "atlas:p5-a:gw:p1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -153,3 +168,29 @@ func TestNewRedisClientAppliesNamespace(t *testing.T) {
 		})
 	}
 }
+
+// TestNewRedisClientRequiresNamespace 验证命名空间缺失即报错（R9：不回落 env/default）。
+func TestNewRedisClientRequiresNamespace(t *testing.T) {
+	cfg := &fakeRedisConf{data: &configspb.Data{Redis: &configspb.Data_Redis{Addrs: []string{"127.0.0.1:1"}}}}
+	if _, err := NewRedisClient(cfg); err == nil {
+		t.Fatal("缺 runtime.namespace 期望报错，实际为 nil")
+	}
+}
+
+// TestTopics 验证业务 topic 前缀与 actor/redis 同源（唯一来源 runtime.namespace），
+// 缺失即报错。
+func TestTopics(t *testing.T) {
+	topics, err := Topics(&fakeConf{runtime: &configspb.Runtime{Namespace: "p5-a", Env: "test"}})
+	if err != nil {
+		t.Fatalf("Topics() 错误 = %v", err)
+	}
+	if got := topics.Push("p1"); got != "atlas.p5-a.push.p1" {
+		t.Fatalf("Push = %q, 期望 atlas.p5-a.push.p1", got)
+	}
+	if _, err := Topics(&fakeConf{}); err == nil {
+		t.Fatal("缺 runtime.namespace 期望报错，实际为 nil")
+	}
+}
+
+// testRuntime 返回带命名空间的测试用服务身份。
+func testRuntime() *configspb.Runtime { return &configspb.Runtime{Namespace: "test"} }

@@ -7,13 +7,11 @@ import (
 
 	"github.com/google/uuid"
 
-	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	admingamev1 "github.com/huangyuCN/atlas-game-layout/api/admin/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
+	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
-	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // testAccount 生成本轮测试唯一账号（mongo 数据残留隔离）。
@@ -36,11 +34,12 @@ func TestE2ERegisterLogin(t *testing.T) {
 	account := testAccount(t, "alice")
 
 	// 注册。
-	reg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "爱丽丝"})
+	rawReg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "爱丽丝"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if reg.PlayerID == "" {
+	reg := replyOf[*gatewayv1.RegisterReply](t, rawReg)
+	if reg.GetPlayerId() == "" {
 		t.Fatal("注册回执缺少 player_id")
 	}
 	// 重复注册被拒。存量语义：注册临时实例自停并释放目录归属后，同账号重复注册
@@ -52,10 +51,10 @@ func TestE2ERegisterLogin(t *testing.T) {
 	}
 
 	// 登录（SDK 会话保管回执凭据）。
-	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.PlayerID, Password: "pw"}); err != nil {
+	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if sess.Token() == "" || sess.PlayerID() != reg.PlayerID {
+	if sess.Token() == "" || sess.PlayerID() != reg.GetPlayerId() {
 		t.Fatalf("登录凭据不符: token=%q player=%q", sess.Token(), sess.PlayerID())
 	}
 	// 心跳（Session 手动单次心跳：会话续租往返）。
@@ -63,27 +62,32 @@ func TestE2ERegisterLogin(t *testing.T) {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 
-	// 背包示例（grpc 直连 game 管理面）。
-	gcli, err := atlasgrpc.DialInsecure(ctx, atlasgrpc.WithEndpoint(game.GRPCURL))
+	// 背包校验（P7 接管）：旧 service Player 的 gRPC/REST 管理入口已按统一设计删除，
+	// 发放与查询改由管理面（admin.game.v1.AdminService，仅 internal 面可达）覆盖。
+	admin := dialAdmin(t, game.GRPCURL)
+	grant, err := admin.GrantItem(ctx, &admingamev1.GrantItemRequest{
+		Context:  adminCtx("e2e-m5", "m5-grant-"+uuid.NewString(), false),
+		PlayerId: reg.GetPlayerId(), ItemId: 1001, Count: 5,
+	})
 	if err != nil {
-		t.Fatalf("grpc dial: %v", err)
+		t.Fatalf("管理面 GrantItem: %v", err)
 	}
-	defer gcli.Close()
-	playerSvc := gamev1.NewPlayerClient(gcli)
-	if _, err := playerSvc.GrantItem(ctx, &gamev1.GrantItemRequest{PlayerId: sess.PlayerID(), ItemId: 1001, Count: 5, Reason: "e2e"}); err != nil {
-		t.Fatalf("GrantItem: %v", err)
+	if !grant.GetApplied() || grant.GetReplayed() || grant.GetAuditId() == "" {
+		t.Fatalf("管理面发放回执不符（applied=true/replayed=false/audit_id 非空）: %+v", grant)
 	}
-	bp, err := playerSvc.GetBackpack(ctx, &gamev1.GetBackpackRequest{PlayerId: sess.PlayerID()})
+	bag, err := admin.QueryBackpack(ctx, &admingamev1.QueryBackpackRequest{
+		Context: adminCtx("e2e-m5", "", false), PlayerId: reg.GetPlayerId(),
+	})
 	if err != nil {
-		t.Fatalf("GetBackpack: %v", err)
+		t.Fatalf("管理面 QueryBackpack: %v", err)
 	}
-	if len(bp.GetItems()) != 1 || bp.GetItems()[0].GetCount() != 5 {
-		t.Fatalf("背包不符: %+v", bp.GetItems())
+	if got := itemCount(bag.GetItems(), 1001); got != 5 {
+		t.Fatalf("背包道具 1001 数量 = %d, 期望 5", got)
 	}
 
 	// 登出 → 联动 PlayerActor 停止（Locator 移除）。
 	logoutFlow(t, ctx, sess)
-	waitActorStopped(t, game, reg.PlayerID)
+	waitActorStopped(t, game, reg.GetPlayerId())
 }
 
 // TestE2ECrossGatewayKick 验证跨 gateway 顶号（SDK 会话驱动）：旧端收 KickedNotify、
@@ -98,37 +102,44 @@ func TestE2ECrossGatewayKick(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	sessA, cliA := dialBizSession(t, gwA.TCPURL)
+	// 被挤下线原因经 SDK 会话接缝（SessionProtocol.Kicked）取得：接缝按推送信封的帧头版本
+	// 选解码器（S0.5 修订 1），故断言的是「版本分派后解出的原因枚举名」，不是裸字节。
+	kicked := make(chan string, 1)
+	sessA, _ := dialBizSessionWith(t, gwA.TCPURL, []sdkclient.SessionOption{
+		sdkclient.WithOnKicked(func(reason string) {
+			select {
+			case kicked <- reason:
+			default:
+			}
+		}),
+	})
 	account := testAccount(t, "bob")
 
-	regA, err := sessA.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
+	rawRegA, err := sessA.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if _, err := sessA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.PlayerID, Password: "pw"}); err != nil {
+	playerA := replyOf[*gatewayv1.RegisterReply](t, rawRegA).GetPlayerId()
+	if _, err := sessA.Login(ctx, &gatewayv1.LoginRequest{PlayerId: playerA, Password: "pw"}); err != nil {
 		t.Fatalf("A 登录: %v", err)
 	}
 	sessTokenBeforeKick := sessA.Token() // 快照：顶号后验证旧凭据被服务端拒绝
-	kicked := make(chan struct{}, 1)
-	cliA.On(consts.PushOpKickedOffline, func(operation string, payload []byte) {
-		var kn gatewayv1.KickedNotify
-		if err := protojson.Unmarshal(payload, &kn); err == nil && kn.GetReason() == gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE {
-			kicked <- struct{}{}
-		}
-	})
 
 	// B 登录同一账号：A 旧连接被挤下线，PlayerActor 由新会话接管（不停止）。
 	sessB, _ := dialBizSession(t, gwB.TCPURL)
-	if _, err := sessB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: regA.PlayerID, Password: "pw"}); err != nil {
+	if _, err := sessB.Login(ctx, &gatewayv1.LoginRequest{PlayerId: playerA, Password: "pw"}); err != nil {
 		t.Fatalf("B 登录: %v", err)
 	}
 	select {
-	case <-kicked:
+	case reason := <-kicked:
+		if want := gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE.String(); reason != want {
+			t.Fatalf("被挤下线原因 = %q, 期望 %q（接缝须按帧头版本解码，ver=2 不得静默丢失）", reason, want)
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("A 旧连接未收到被挤下线通知")
 	}
 	// A 旧凭据被服务端拒绝（Kicked 后 SDK 已自动清凭据，Restore 显式携带旧凭据）。
-	if _, err := sessA.Restore(ctx, sessTokenBeforeKick, regA.PlayerID); err == nil {
+	if _, err := sessA.Restore(ctx, sessTokenBeforeKick, playerA); err == nil {
 		t.Fatal("A 旧凭据恢复应被服务端拒绝")
 	}
 	// B 会话与 actor 均存活（会话续租往返）。

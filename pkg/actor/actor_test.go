@@ -1,11 +1,12 @@
 package actor
 
 import (
-	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	"errors"
 	"testing"
 
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
+	"github.com/huangyuCN/atlas/namespace"
 )
 
 // TestNewRuntimeValidation 验证装配参数校验（无需外部服务）。
@@ -14,9 +15,11 @@ func TestNewRuntimeValidation(t *testing.T) {
 		name string
 		opts Options
 	}{
-		{"空 NodeID", Options{EtcdEndpoints: []string{"x"}, NatsURL: "nats://x"}},
-		{"空 EtcdEndpoints", Options{NodeID: "n1", NatsURL: "nats://x"}},
-		{"空 NatsURL", Options{NodeID: "n1", EtcdEndpoints: []string{"x"}}},
+		{"空 NodeID", Options{EtcdEndpoints: []string{"x"}, NatsURL: "nats://x", Namespace: "test"}},
+		{"空 EtcdEndpoints", Options{NodeID: "n1", NatsURL: "nats://x", Namespace: "test"}},
+		{"空 NatsURL", Options{NodeID: "n1", EtcdEndpoints: []string{"x"}, Namespace: "test"}},
+		{"缺命名空间", Options{NodeID: "n1", EtcdEndpoints: []string{"x"}, NatsURL: "nats://x"}},
+		{"非法命名空间", Options{NodeID: "n1", EtcdEndpoints: []string{"x"}, NatsURL: "nats://x", Namespace: "e2e.1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -24,6 +27,30 @@ func TestNewRuntimeValidation(t *testing.T) {
 				t.Fatal("NewRuntime() 期望参数校验错误，实际为 nil")
 			}
 		})
+	}
+}
+
+// TestDeriveOptions 验证命名空间派生（R9）：合法 token 产出 actor 两面前缀，
+// 缺失即报 namespace.ErrInvalid（不回落 env/default）。
+func TestDeriveOptions(t *testing.T) {
+	opts := Options{NodeID: "n1", EtcdEndpoints: []string{"x"}, NatsURL: "nats://x", Namespace: "p5-a"}
+	derived, err := deriveOptions(opts)
+	if err != nil {
+		t.Fatalf("deriveOptions() 错误 = %v", err)
+	}
+	if got := derived.Namespace.String(); got != "p5-a" {
+		t.Errorf("Namespace = %q, 期望 p5-a", got)
+	}
+	if got := derived.ClusterSubjectPrefix; got != "atlas_actor.p5-a" {
+		t.Errorf("ClusterSubjectPrefix = %q, 期望 atlas_actor.p5-a", got)
+	}
+	if got := derived.EtcdDirectory; got != "/atlas/actors/p5-a" {
+		t.Errorf("EtcdDirectory = %q, 期望 /atlas/actors/p5-a", got)
+	}
+
+	opts.Namespace = ""
+	if _, err := deriveOptions(opts); !errors.Is(err, namespace.ErrInvalid) {
+		t.Fatalf("缺命名空间应返回 namespace.ErrInvalid，实际 %v", err)
 	}
 }
 
@@ -93,26 +120,4 @@ func mustPID(t *testing.T, typ, uid string) types.PID {
 		t.Fatalf("NewPID(%s,%s): %v", typ, uid, err)
 	}
 	return pid
-}
-
-// TestNamespaceOf 验证 actor 命名空间取值优先级：runtime.actor_namespace 优先，
-// 缺省取 runtime.env（两者都空时由 types.NormalizeNamespace 归一为 default）。
-func TestNamespaceOf(t *testing.T) {
-	tests := []struct {
-		name string
-		rt   *configspb.Runtime
-		want string
-	}{
-		{"显式 actor_namespace 优先", &configspb.Runtime{Env: "test", ActorNamespace: "iso"}, "iso"},
-		{"缺省取 env", &configspb.Runtime{Env: "prod"}, "prod"},
-		{"两者都空", &configspb.Runtime{}, ""},
-		{"runtime 为 nil", nil, ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := NamespaceOf(tt.rt); got != tt.want {
-				t.Fatalf("NamespaceOf() = %q, want %q", got, tt.want)
-			}
-		})
-	}
 }

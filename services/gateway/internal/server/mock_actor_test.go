@@ -21,6 +21,7 @@ import (
 // 消息为具体对象直传（生成的桩 switch 直接命中），回执直接返回对象（同节点形态）；
 // 注册/登录恒成功（player_id 取 PID uid）；加入战斗按 joinOK 裁决；帧输入/补帧记录投递。
 type mockActorRuntime struct {
+	loginReqs     []*gamev1.LoginReq                   // 登录投递记录（版本门槛用例断言"未触达 actor"）
 	logoutMsgs    []*gamev1.LogoutMsg                  // 登出投递记录
 	matchEnters   []*gamev1.EnterMatchQueueReq         // 入队投递记录
 	matchCanceled bool                                 // 取消投递记录
@@ -73,6 +74,7 @@ func (m *mockActorRuntime) askGame(pid types.PID, req any) (any, error) {
 			Player:   &commonv1.PlayerSummary{PlayerId: pid.UID(), Nickname: r.GetAccount()},
 		}, nil
 	case *gamev1.LoginReq:
+		m.loginReqs = append(m.loginReqs, r)
 		return &gamev1.LoginReply{
 			Player: &commonv1.PlayerSummary{PlayerId: pid.UID(), Nickname: r.GetPlayerId()},
 		}, nil

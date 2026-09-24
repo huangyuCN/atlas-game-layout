@@ -11,7 +11,6 @@
 package battlev1
 
 import (
-	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -455,7 +454,7 @@ var File_api_battle_v1_battle_proto protoreflect.FileDescriptor
 
 const file_api_battle_v1_battle_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/battle/v1/battle.proto\x12\tbattle.v1\x1a\x1cgoogle/api/annotations.proto\"l\n" +
+	"\x1aapi/battle/v1/battle.proto\x12\tbattle.v1\"l\n" +
 	"\x13CreateBattleRequest\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1d\n" +
 	"\n" +
@@ -480,10 +479,7 @@ const file_api_battle_v1_battle_proto_rawDesc = "" +
 	"\rGetStateReply\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12#\n" +
 	"\rcurrent_frame\x18\x02 \x01(\x04R\fcurrentFrame\x12!\n" +
-	"\fplayer_count\x18\x03 \x01(\rR\vplayerCount2\xd4\x01\n" +
-	"\x06Battle\x12d\n" +
-	"\fCreateBattle\x12\x1e.battle.v1.CreateBattleRequest\x1a\x1c.battle.v1.CreateBattleReply\"\x16\x82\xd3\xe4\x93\x02\x10:\x01*\"\v/v1/battles\x12d\n" +
-	"\tGetBattle\x12\x1b.battle.v1.GetBattleRequest\x1a\x19.battle.v1.GetBattleReply\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/battles/{battle_id}B?Z=github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1b\x06proto3"
+	"\fplayer_count\x18\x03 \x01(\rR\vplayerCountB?Z=github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1b\x06proto3"
 
 var (
 	file_api_battle_v1_battle_proto_rawDescOnce sync.Once
@@ -510,12 +506,8 @@ var file_api_battle_v1_battle_proto_goTypes = []any{
 }
 var file_api_battle_v1_battle_proto_depIdxs = []int32{
 	4, // 0: battle.v1.BattleSettledEvent.players:type_name -> battle.v1.PlayerResult
-	0, // 1: battle.v1.Battle.CreateBattle:input_type -> battle.v1.CreateBattleRequest
-	2, // 2: battle.v1.Battle.GetBattle:input_type -> battle.v1.GetBattleRequest
-	1, // 3: battle.v1.Battle.CreateBattle:output_type -> battle.v1.CreateBattleReply
-	3, // 4: battle.v1.Battle.GetBattle:output_type -> battle.v1.GetBattleReply
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -534,7 +526,7 @@ func file_api_battle_v1_battle_proto_init() {
 			NumEnums:      0,
 			NumMessages:   8,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   0,
 		},
 		GoTypes:           file_api_battle_v1_battle_proto_goTypes,
 		DependencyIndexes: file_api_battle_v1_battle_proto_depIdxs,

@@ -28,7 +28,7 @@ func ErrPlayerNotFound(format string, args ...interface{}) *errors.Error {
 	return errors.New(404, "PLAYER_NOT_FOUND", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1001",
 		"biz_reason": "PlayerNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonPlayerNotFound 返回当前错误的 reason 常量值。
@@ -51,7 +51,7 @@ func NewPlayerNotFound(message string) *errors.Error {
 	return errors.New(404, "PLAYER_NOT_FOUND", message).WithMetadata(map[string]string{
 		"biz_code":   "1001",
 		"biz_reason": "PlayerNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapPlayerNotFound 以指定错误作为 cause，创建一个带 message 的错误。
@@ -76,7 +76,7 @@ func ErrPlayerAlreadyExists(format string, args ...interface{}) *errors.Error {
 	return errors.New(409, "PLAYER_ALREADY_EXISTS", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1002",
 		"biz_reason": "PlayerAlreadyExists",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonPlayerAlreadyExists 返回当前错误的 reason 常量值。
@@ -99,7 +99,7 @@ func NewPlayerAlreadyExists(message string) *errors.Error {
 	return errors.New(409, "PLAYER_ALREADY_EXISTS", message).WithMetadata(map[string]string{
 		"biz_code":   "1002",
 		"biz_reason": "PlayerAlreadyExists",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapPlayerAlreadyExists 以指定错误作为 cause，创建一个带 message 的错误。
@@ -124,7 +124,7 @@ func ErrInvalidToken(format string, args ...interface{}) *errors.Error {
 	return errors.New(401, "INVALID_TOKEN", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1003",
 		"biz_reason": "InvalidToken",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonInvalidToken 返回当前错误的 reason 常量值。
@@ -147,7 +147,7 @@ func NewInvalidToken(message string) *errors.Error {
 	return errors.New(401, "INVALID_TOKEN", message).WithMetadata(map[string]string{
 		"biz_code":   "1003",
 		"biz_reason": "InvalidToken",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapInvalidToken 以指定错误作为 cause，创建一个带 message 的错误。
@@ -172,7 +172,7 @@ func ErrKickedOffline(format string, args ...interface{}) *errors.Error {
 	return errors.New(401, "KICKED_OFFLINE", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1004",
 		"biz_reason": "KickedOffline",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonKickedOffline 返回当前错误的 reason 常量值。
@@ -195,7 +195,7 @@ func NewKickedOffline(message string) *errors.Error {
 	return errors.New(401, "KICKED_OFFLINE", message).WithMetadata(map[string]string{
 		"biz_code":   "1004",
 		"biz_reason": "KickedOffline",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapKickedOffline 以指定错误作为 cause，创建一个带 message 的错误。
@@ -220,7 +220,7 @@ func ErrTokenExpired(format string, args ...interface{}) *errors.Error {
 	return errors.New(401, "TOKEN_EXPIRED", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1005",
 		"biz_reason": "TokenExpired",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonTokenExpired 返回当前错误的 reason 常量值。
@@ -243,7 +243,7 @@ func NewTokenExpired(message string) *errors.Error {
 	return errors.New(401, "TOKEN_EXPIRED", message).WithMetadata(map[string]string{
 		"biz_code":   "1005",
 		"biz_reason": "TokenExpired",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapTokenExpired 以指定错误作为 cause，创建一个带 message 的错误。
@@ -268,7 +268,7 @@ func ErrSessionNotFound(format string, args ...interface{}) *errors.Error {
 	return errors.New(404, "SESSION_NOT_FOUND", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1006",
 		"biz_reason": "SessionNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonSessionNotFound 返回当前错误的 reason 常量值。
@@ -291,7 +291,7 @@ func NewSessionNotFound(message string) *errors.Error {
 	return errors.New(404, "SESSION_NOT_FOUND", message).WithMetadata(map[string]string{
 		"biz_code":   "1006",
 		"biz_reason": "SessionNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapSessionNotFound 以指定错误作为 cause，创建一个带 message 的错误。
@@ -316,7 +316,7 @@ func ErrPlayerNotOnline(format string, args ...interface{}) *errors.Error {
 	return errors.New(404, "PLAYER_NOT_ONLINE", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1007",
 		"biz_reason": "PlayerNotOnline",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonPlayerNotOnline 返回当前错误的 reason 常量值。
@@ -339,7 +339,7 @@ func NewPlayerNotOnline(message string) *errors.Error {
 	return errors.New(404, "PLAYER_NOT_ONLINE", message).WithMetadata(map[string]string{
 		"biz_code":   "1007",
 		"biz_reason": "PlayerNotOnline",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapPlayerNotOnline 以指定错误作为 cause，创建一个带 message 的错误。
@@ -364,7 +364,7 @@ func ErrInvalidParams(format string, args ...interface{}) *errors.Error {
 	return errors.New(400, "INVALID_PARAMS", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1008",
 		"biz_reason": "InvalidParams",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonInvalidParams 返回当前错误的 reason 常量值。
@@ -387,7 +387,7 @@ func NewInvalidParams(message string) *errors.Error {
 	return errors.New(400, "INVALID_PARAMS", message).WithMetadata(map[string]string{
 		"biz_code":   "1008",
 		"biz_reason": "InvalidParams",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapInvalidParams 以指定错误作为 cause，创建一个带 message 的错误。
@@ -412,7 +412,7 @@ func ErrPasswordWrong(format string, args ...interface{}) *errors.Error {
 	return errors.New(401, "PASSWORD_WRONG", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1009",
 		"biz_reason": "PasswordWrong",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonPasswordWrong 返回当前错误的 reason 常量值。
@@ -435,7 +435,7 @@ func NewPasswordWrong(message string) *errors.Error {
 	return errors.New(401, "PASSWORD_WRONG", message).WithMetadata(map[string]string{
 		"biz_code":   "1009",
 		"biz_reason": "PasswordWrong",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapPasswordWrong 以指定错误作为 cause，创建一个带 message 的错误。
@@ -460,7 +460,7 @@ func ErrServerFrozen(format string, args ...interface{}) *errors.Error {
 	return errors.New(503, "SERVER_FROZEN", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "1010",
 		"biz_reason": "ServerFrozen",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonServerFrozen 返回当前错误的 reason 常量值。
@@ -483,12 +483,302 @@ func NewServerFrozen(message string) *errors.Error {
 	return errors.New(503, "SERVER_FROZEN", message).WithMetadata(map[string]string{
 		"biz_code":   "1010",
 		"biz_reason": "ServerFrozen",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapServerFrozen 以指定错误作为 cause，创建一个带 message 的错误。
 func WrapServerFrozen(cause error, format string, args ...interface{}) *errors.Error {
 	return ErrServerFrozen(format, args...).WithCause(cause)
+}
+
+// 客户端版本过低（M1：升级后方可登录）
+func IsClientVersionTooLow(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "CLIENT_VERSION_TOO_LOW" || e.Code != 426 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1011"
+}
+
+// 客户端版本过低（M1：升级后方可登录）
+func ErrClientVersionTooLow(format string, args ...interface{}) *errors.Error {
+	return errors.New(426, "CLIENT_VERSION_TOO_LOW", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1011",
+		"biz_reason": "ClientVersionTooLow",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonClientVersionTooLow 返回当前错误的 reason 常量值。
+func ReasonClientVersionTooLow() string {
+	return "CLIENT_VERSION_TOO_LOW"
+}
+
+// CodeClientVersionTooLow 返回当前错误对应的 HTTP 状态码。
+func CodeClientVersionTooLow() int {
+	return 426
+}
+
+// BizCodeClientVersionTooLow 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeClientVersionTooLow() int32 {
+	return 1011
+}
+
+// NewClientVersionTooLow 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewClientVersionTooLow(message string) *errors.Error {
+	return errors.New(426, "CLIENT_VERSION_TOO_LOW", message).WithMetadata(map[string]string{
+		"biz_code":   "1011",
+		"biz_reason": "ClientVersionTooLow",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapClientVersionTooLow 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapClientVersionTooLow(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrClientVersionTooLow(format, args...).WithCause(cause)
+}
+
+// 管理面（P7：admin.game.v1.AdminService，仅内网 GM/运维工具可达）
+// 号段紧接 1011 之后；管理面写操作校验失败一律拒单（不写审计、不改档）。
+func IsAdminOperatorMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "ADMIN_OPERATOR_MISSING" || e.Code != 400 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1012"
+}
+
+// 管理面（P7：admin.game.v1.AdminService，仅内网 GM/运维工具可达）
+// 号段紧接 1011 之后；管理面写操作校验失败一律拒单（不写审计、不改档）。
+func ErrAdminOperatorMissing(format string, args ...interface{}) *errors.Error {
+	return errors.New(400, "ADMIN_OPERATOR_MISSING", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1012",
+		"biz_reason": "AdminOperatorMissing",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonAdminOperatorMissing 返回当前错误的 reason 常量值。
+func ReasonAdminOperatorMissing() string {
+	return "ADMIN_OPERATOR_MISSING"
+}
+
+// CodeAdminOperatorMissing 返回当前错误对应的 HTTP 状态码。
+func CodeAdminOperatorMissing() int {
+	return 400
+}
+
+// BizCodeAdminOperatorMissing 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeAdminOperatorMissing() int32 {
+	return 1012
+}
+
+// NewAdminOperatorMissing 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewAdminOperatorMissing(message string) *errors.Error {
+	return errors.New(400, "ADMIN_OPERATOR_MISSING", message).WithMetadata(map[string]string{
+		"biz_code":   "1012",
+		"biz_reason": "AdminOperatorMissing",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapAdminOperatorMissing 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapAdminOperatorMissing(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrAdminOperatorMissing(format, args...).WithCause(cause)
+}
+
+// 幂等键缺失（管理面写操作必填）
+func IsAdminIdempotencyKeyMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "ADMIN_IDEMPOTENCY_KEY_MISSING" || e.Code != 400 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1013"
+}
+
+// 幂等键缺失（管理面写操作必填）
+func ErrAdminIdempotencyKeyMissing(format string, args ...interface{}) *errors.Error {
+	return errors.New(400, "ADMIN_IDEMPOTENCY_KEY_MISSING", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1013",
+		"biz_reason": "AdminIdempotencyKeyMissing",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonAdminIdempotencyKeyMissing 返回当前错误的 reason 常量值。
+func ReasonAdminIdempotencyKeyMissing() string {
+	return "ADMIN_IDEMPOTENCY_KEY_MISSING"
+}
+
+// CodeAdminIdempotencyKeyMissing 返回当前错误对应的 HTTP 状态码。
+func CodeAdminIdempotencyKeyMissing() int {
+	return 400
+}
+
+// BizCodeAdminIdempotencyKeyMissing 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeAdminIdempotencyKeyMissing() int32 {
+	return 1013
+}
+
+// NewAdminIdempotencyKeyMissing 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewAdminIdempotencyKeyMissing(message string) *errors.Error {
+	return errors.New(400, "ADMIN_IDEMPOTENCY_KEY_MISSING", message).WithMetadata(map[string]string{
+		"biz_code":   "1013",
+		"biz_reason": "AdminIdempotencyKeyMissing",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapAdminIdempotencyKeyMissing 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapAdminIdempotencyKeyMissing(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrAdminIdempotencyKeyMissing(format, args...).WithCause(cause)
+}
+
+// 幂等键复用（同键但参数摘要不同，拒绝改参重放）
+func IsAdminIdempotencyKeyReused(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "ADMIN_IDEMPOTENCY_KEY_REUSED" || e.Code != 409 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1014"
+}
+
+// 幂等键复用（同键但参数摘要不同，拒绝改参重放）
+func ErrAdminIdempotencyKeyReused(format string, args ...interface{}) *errors.Error {
+	return errors.New(409, "ADMIN_IDEMPOTENCY_KEY_REUSED", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1014",
+		"biz_reason": "AdminIdempotencyKeyReused",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonAdminIdempotencyKeyReused 返回当前错误的 reason 常量值。
+func ReasonAdminIdempotencyKeyReused() string {
+	return "ADMIN_IDEMPOTENCY_KEY_REUSED"
+}
+
+// CodeAdminIdempotencyKeyReused 返回当前错误对应的 HTTP 状态码。
+func CodeAdminIdempotencyKeyReused() int {
+	return 409
+}
+
+// BizCodeAdminIdempotencyKeyReused 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeAdminIdempotencyKeyReused() int32 {
+	return 1014
+}
+
+// NewAdminIdempotencyKeyReused 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewAdminIdempotencyKeyReused(message string) *errors.Error {
+	return errors.New(409, "ADMIN_IDEMPOTENCY_KEY_REUSED", message).WithMetadata(map[string]string{
+		"biz_code":   "1014",
+		"biz_reason": "AdminIdempotencyKeyReused",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapAdminIdempotencyKeyReused 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapAdminIdempotencyKeyReused(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrAdminIdempotencyKeyReused(format, args...).WithCause(cause)
+}
+
+// 同键操作在途（首单 PENDING 未收尾，拒绝并发重复执行）
+func IsAdminOperationInFlight(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "ADMIN_OPERATION_IN_FLIGHT" || e.Code != 409 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1015"
+}
+
+// 同键操作在途（首单 PENDING 未收尾，拒绝并发重复执行）
+func ErrAdminOperationInFlight(format string, args ...interface{}) *errors.Error {
+	return errors.New(409, "ADMIN_OPERATION_IN_FLIGHT", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1015",
+		"biz_reason": "AdminOperationInFlight",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonAdminOperationInFlight 返回当前错误的 reason 常量值。
+func ReasonAdminOperationInFlight() string {
+	return "ADMIN_OPERATION_IN_FLIGHT"
+}
+
+// CodeAdminOperationInFlight 返回当前错误对应的 HTTP 状态码。
+func CodeAdminOperationInFlight() int {
+	return 409
+}
+
+// BizCodeAdminOperationInFlight 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeAdminOperationInFlight() int32 {
+	return 1015
+}
+
+// NewAdminOperationInFlight 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewAdminOperationInFlight(message string) *errors.Error {
+	return errors.New(409, "ADMIN_OPERATION_IN_FLIGHT", message).WithMetadata(map[string]string{
+		"biz_code":   "1015",
+		"biz_reason": "AdminOperationInFlight",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapAdminOperationInFlight 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapAdminOperationInFlight(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrAdminOperationInFlight(format, args...).WithCause(cause)
+}
+
+// 单次发放超上限（R12：admin.max_grant_count，dry-run 同样受限）
+func IsAdminGrantCountExceeded(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "ADMIN_GRANT_COUNT_EXCEEDED" || e.Code != 400 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "1016"
+}
+
+// 单次发放超上限（R12：admin.max_grant_count，dry-run 同样受限）
+func ErrAdminGrantCountExceeded(format string, args ...interface{}) *errors.Error {
+	return errors.New(400, "ADMIN_GRANT_COUNT_EXCEEDED", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "1016",
+		"biz_reason": "AdminGrantCountExceeded",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonAdminGrantCountExceeded 返回当前错误的 reason 常量值。
+func ReasonAdminGrantCountExceeded() string {
+	return "ADMIN_GRANT_COUNT_EXCEEDED"
+}
+
+// CodeAdminGrantCountExceeded 返回当前错误对应的 HTTP 状态码。
+func CodeAdminGrantCountExceeded() int {
+	return 400
+}
+
+// BizCodeAdminGrantCountExceeded 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeAdminGrantCountExceeded() int32 {
+	return 1016
+}
+
+// NewAdminGrantCountExceeded 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewAdminGrantCountExceeded(message string) *errors.Error {
+	return errors.New(400, "ADMIN_GRANT_COUNT_EXCEEDED", message).WithMetadata(map[string]string{
+		"biz_code":   "1016",
+		"biz_reason": "AdminGrantCountExceeded",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapAdminGrantCountExceeded 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapAdminGrantCountExceeded(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrAdminGrantCountExceeded(format, args...).WithCause(cause)
 }
 
 // 匹配
@@ -508,7 +798,7 @@ func ErrAlreadyInMatch(format string, args ...interface{}) *errors.Error {
 	return errors.New(409, "ALREADY_IN_MATCH", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "2001",
 		"biz_reason": "AlreadyInMatch",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonAlreadyInMatch 返回当前错误的 reason 常量值。
@@ -531,7 +821,7 @@ func NewAlreadyInMatch(message string) *errors.Error {
 	return errors.New(409, "ALREADY_IN_MATCH", message).WithMetadata(map[string]string{
 		"biz_code":   "2001",
 		"biz_reason": "AlreadyInMatch",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapAlreadyInMatch 以指定错误作为 cause，创建一个带 message 的错误。
@@ -556,7 +846,7 @@ func ErrMatchNotFound(format string, args ...interface{}) *errors.Error {
 	return errors.New(404, "MATCH_NOT_FOUND", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "2002",
 		"biz_reason": "MatchNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonMatchNotFound 返回当前错误的 reason 常量值。
@@ -579,7 +869,7 @@ func NewMatchNotFound(message string) *errors.Error {
 	return errors.New(404, "MATCH_NOT_FOUND", message).WithMetadata(map[string]string{
 		"biz_code":   "2002",
 		"biz_reason": "MatchNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapMatchNotFound 以指定错误作为 cause，创建一个带 message 的错误。
@@ -604,7 +894,7 @@ func ErrPartyNotFound(format string, args ...interface{}) *errors.Error {
 	return errors.New(404, "PARTY_NOT_FOUND", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "2003",
 		"biz_reason": "PartyNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonPartyNotFound 返回当前错误的 reason 常量值。
@@ -627,7 +917,7 @@ func NewPartyNotFound(message string) *errors.Error {
 	return errors.New(404, "PARTY_NOT_FOUND", message).WithMetadata(map[string]string{
 		"biz_code":   "2003",
 		"biz_reason": "PartyNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapPartyNotFound 以指定错误作为 cause，创建一个带 message 的错误。
@@ -652,7 +942,7 @@ func ErrPartyFull(format string, args ...interface{}) *errors.Error {
 	return errors.New(409, "PARTY_FULL", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "2004",
 		"biz_reason": "PartyFull",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonPartyFull 返回当前错误的 reason 常量值。
@@ -675,7 +965,7 @@ func NewPartyFull(message string) *errors.Error {
 	return errors.New(409, "PARTY_FULL", message).WithMetadata(map[string]string{
 		"biz_code":   "2004",
 		"biz_reason": "PartyFull",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapPartyFull 以指定错误作为 cause，创建一个带 message 的错误。
@@ -700,7 +990,7 @@ func ErrAlreadyInParty(format string, args ...interface{}) *errors.Error {
 	return errors.New(409, "ALREADY_IN_PARTY", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "2005",
 		"biz_reason": "AlreadyInParty",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonAlreadyInParty 返回当前错误的 reason 常量值。
@@ -723,7 +1013,7 @@ func NewAlreadyInParty(message string) *errors.Error {
 	return errors.New(409, "ALREADY_IN_PARTY", message).WithMetadata(map[string]string{
 		"biz_code":   "2005",
 		"biz_reason": "AlreadyInParty",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapAlreadyInParty 以指定错误作为 cause，创建一个带 message 的错误。
@@ -748,7 +1038,7 @@ func ErrNotPartyLeader(format string, args ...interface{}) *errors.Error {
 	return errors.New(403, "NOT_PARTY_LEADER", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "2006",
 		"biz_reason": "NotPartyLeader",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonNotPartyLeader 返回当前错误的 reason 常量值。
@@ -771,7 +1061,7 @@ func NewNotPartyLeader(message string) *errors.Error {
 	return errors.New(403, "NOT_PARTY_LEADER", message).WithMetadata(map[string]string{
 		"biz_code":   "2006",
 		"biz_reason": "NotPartyLeader",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapNotPartyLeader 以指定错误作为 cause，创建一个带 message 的错误。
@@ -796,7 +1086,7 @@ func ErrNotInParty(format string, args ...interface{}) *errors.Error {
 	return errors.New(404, "NOT_IN_PARTY", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "2007",
 		"biz_reason": "NotInParty",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonNotInParty 返回当前错误的 reason 常量值。
@@ -819,7 +1109,7 @@ func NewNotInParty(message string) *errors.Error {
 	return errors.New(404, "NOT_IN_PARTY", message).WithMetadata(map[string]string{
 		"biz_code":   "2007",
 		"biz_reason": "NotInParty",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapNotInParty 以指定错误作为 cause，创建一个带 message 的错误。
@@ -844,7 +1134,7 @@ func ErrBattleNotFound(format string, args ...interface{}) *errors.Error {
 	return errors.New(404, "BATTLE_NOT_FOUND", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "3001",
 		"biz_reason": "BattleNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonBattleNotFound 返回当前错误的 reason 常量值。
@@ -867,7 +1157,7 @@ func NewBattleNotFound(message string) *errors.Error {
 	return errors.New(404, "BATTLE_NOT_FOUND", message).WithMetadata(map[string]string{
 		"biz_code":   "3001",
 		"biz_reason": "BattleNotFound",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapBattleNotFound 以指定错误作为 cause，创建一个带 message 的错误。
@@ -892,7 +1182,7 @@ func ErrBattleFull(format string, args ...interface{}) *errors.Error {
 	return errors.New(409, "BATTLE_FULL", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "3002",
 		"biz_reason": "BattleFull",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonBattleFull 返回当前错误的 reason 常量值。
@@ -915,7 +1205,7 @@ func NewBattleFull(message string) *errors.Error {
 	return errors.New(409, "BATTLE_FULL", message).WithMetadata(map[string]string{
 		"biz_code":   "3002",
 		"biz_reason": "BattleFull",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapBattleFull 以指定错误作为 cause，创建一个带 message 的错误。
@@ -940,7 +1230,7 @@ func ErrBattleEnded(format string, args ...interface{}) *errors.Error {
 	return errors.New(409, "BATTLE_ENDED", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "3003",
 		"biz_reason": "BattleEnded",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonBattleEnded 返回当前错误的 reason 常量值。
@@ -963,7 +1253,7 @@ func NewBattleEnded(message string) *errors.Error {
 	return errors.New(409, "BATTLE_ENDED", message).WithMetadata(map[string]string{
 		"biz_code":   "3003",
 		"biz_reason": "BattleEnded",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapBattleEnded 以指定错误作为 cause，创建一个带 message 的错误。
@@ -988,7 +1278,7 @@ func ErrInternal(format string, args ...interface{}) *errors.Error {
 	return errors.New(500, "INTERNAL", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
 		"biz_code":   "9001",
 		"biz_reason": "Internal",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // ReasonInternal 返回当前错误的 reason 常量值。
@@ -1011,7 +1301,7 @@ func NewInternal(message string) *errors.Error {
 	return errors.New(500, "INTERNAL", message).WithMetadata(map[string]string{
 		"biz_code":   "9001",
 		"biz_reason": "Internal",
-	})
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
 }
 
 // WrapInternal 以指定错误作为 cause，创建一个带 message 的错误。
@@ -1078,6 +1368,24 @@ func matchKnown(e *errors.Error) (*errors.Error, bool) {
 		return e, true
 	}
 	if IsServerFrozen(e) {
+		return e, true
+	}
+	if IsClientVersionTooLow(e) {
+		return e, true
+	}
+	if IsAdminOperatorMissing(e) {
+		return e, true
+	}
+	if IsAdminIdempotencyKeyMissing(e) {
+		return e, true
+	}
+	if IsAdminIdempotencyKeyReused(e) {
+		return e, true
+	}
+	if IsAdminOperationInFlight(e) {
+		return e, true
+	}
+	if IsAdminGrantCountExceeded(e) {
 		return e, true
 	}
 	if IsAlreadyInMatch(e) {

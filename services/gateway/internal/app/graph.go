@@ -49,12 +49,15 @@ var Module = fx.Module("gateway",
 		fxkit.Topics[*conf.Bootstrap], // 业务 topic 命名空间（与 actor 平面同源）
 		fxkit.NewPublisher,            // 业务事件发布入口（连接 + 命名空间收口）
 		NewNatsConn,
-		// ── server：五协议传输层构造（启停归属驱动方）──
+		// ── server：五协议传输层 + gRPC edge 面构造（启停归属驱动方）──
 		server.NewHTTPServer,
 		server.NewTCPServer,
 		server.NewWSServer,
 		server.NewKCPServer,
 		server.NewUDPServer,
+		// gRPC 双面：本轮只启用 edge 面（暂不注册域服务），internal 面留空不启用；
+		// fx.Out 自带 servers 组标签，未启用的面为 nil。
+		server.NewGRPCServers,
 		newServerSet,
 		// ── 会话 + actor 集群客户端 ──
 		newSessionManager,
@@ -128,7 +131,8 @@ func newGateway(
 	if err != nil {
 		return nil, fmt.Errorf("gateway: 透传路由表合并失败: %w", err)
 	}
-	g := server.NewGateway(instanceID, table, sess, actors, meter, nc, pub, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	g := server.NewGateway(instanceID, table, sess, actors, meter, nc, pub, tcpSrv, wsSrv, kcpSrv, udpSrv,
+		server.NewVersionGate(cfg.GetRuntime()))
 	// 通道绑定副作用（Gateway 会话模型的领域知识，装配声明——不进注解协议）：
 	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道（battle 帧推送寻址）。
 	g.Relay().WithChannelBinding("/battle.v1.BattleService/JoinBattle", relay.Slot(session.ChannelBattle))

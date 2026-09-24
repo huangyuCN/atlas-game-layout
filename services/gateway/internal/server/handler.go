@@ -7,13 +7,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	gamev1actor "github.com/huangyuCN/atlas-game-layout/api/game/v1/actor"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
+	"github.com/huangyuCN/atlas/contrib/actor/opcall"
 	"strconv"
 	"time"
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	libsession "github.com/huangyuCN/atlas-game-layout/lib/session"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
@@ -90,13 +92,14 @@ type Gateway struct {
 	instanceID string
 	sess       *session.Manager
 	actors     *actorclient.Client
-	players    *gamev1.PlayerServiceClusterClient // 生成的玩家域集群互调 client
+	players    *gamev1actor.PlayerServiceClusterClient // 生成的玩家域集群互调 client
 	nc         *nats.Conn
 	pub        *pkgnats.Publisher // 业务事件发布入口（连接 + topic 命名空间收口）
 	pushers    map[transport.Kind]pushServer
 	udpSrv     *udpt.Server // UDP 按 peer 寻址（无 connID 语义）
 	relay      *Relay       // 业务 op 透传引擎（表由注解生成，见 relay.go）
 	meter      metrics.Collector
+	gate       VersionGate // 客户端版本门槛（M1；装配期注入，见 version_gate.go）
 }
 
 // onSessionsExpired 异常下线联动撮合域（会话过期清扫回调）：
@@ -123,12 +126,13 @@ func NewGateway(
 	pub *pkgnats.Publisher,
 	tcpSrv, wsSrv, kcpSrv pushServer,
 	udpSrv *udpt.Server,
+	gate VersionGate,
 ) *Gateway {
 	g := &Gateway{
 		instanceID: instanceID,
 		sess:       sess,
 		actors:     actors,
-		players:    gamev1.NewPlayerServiceClusterClient(actors.PlayerInvoker()),
+		players:    gamev1actor.NewPlayerServiceClusterClient(actors.PlayerInvoker()),
 		nc:         nc,
 		pub:        pub,
 		pushers: map[transport.Kind]pushServer{
@@ -138,6 +142,7 @@ func NewGateway(
 		},
 		udpSrv: udpSrv,
 		meter:  meter,
+		gate:   gate,
 	}
 	// 透传引擎与 Gateway 共用连接摘取、会话管理器与指标采集器。
 	g.relay = NewRelay(table, sess, actors, meter, func(ctx context.Context) *session.Conn {
@@ -156,7 +161,7 @@ func (g *Gateway) Relay() *Relay { return g.relay }
 // 透传路径同构，全部 op 的 actor 日志都能带 request_id（与客户端 SDK 调试日志对应）。
 func (g *Gateway) requestOptions(ctx context.Context) []core.SendOption {
 	if id := requestIDOf(ctx); id != "" {
-		return []core.SendOption{core.WithHeader(relay.MetadataRequestID, id)}
+		return []core.SendOption{core.WithHeader(opcall.MetadataRequestID, id)}
 	}
 	return nil
 }
@@ -200,6 +205,10 @@ func (g *Gateway) Login(ctx context.Context, req *gatewayv1.LoginRequest) (*gate
 	if playerID == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("玩家与口令不能为空")
 	}
+	// M1 版本门槛：先于业务裁决，低版本客户端不产生 actor 调用。
+	if err := g.gate.Check(ctx, req.GetClientVersion()); err != nil {
+		return nil, err
+	}
 	token, err := libsession.NewToken()
 	if err != nil {
 		return nil, errorv1.ErrInternal("签发会话令牌失败")
@@ -242,6 +251,10 @@ func (g *Gateway) Resume(ctx context.Context, req *gatewayv1.ResumeRequest) (*ga
 	playerID := req.GetPlayerId()
 	if playerID == "" || req.GetToken() == "" {
 		return nil, errorv1.ErrInvalidParams("恢复凭据与玩家 ID 不能为空")
+	}
+	// M1 版本门槛：重连与登录同一口径（避免用旧版本绕过升级要求）。
+	if err := g.gate.Check(ctx, req.GetClientVersion()); err != nil {
+		return nil, err
 	}
 	sess, ok := g.sess.LocalSession(playerID)
 	if !ok || sess.Token != req.GetToken() {
@@ -333,7 +346,7 @@ func (g *Gateway) pushKicked(sess *session.Session) {
 	}
 	for _, c := range []*session.Conn{sess.Battle, sess.Biz} {
 		if c != nil {
-			_ = c.Send(consts.PushOpKickedOffline, payload)
+			_ = c.Send(gatewayv1opclient.SessionPushOps.KickedNotify, payload)
 		}
 	}
 }

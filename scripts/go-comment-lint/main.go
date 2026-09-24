@@ -38,6 +38,22 @@ var skipDir = map[string]bool{
 	"third_party": true, "node_modules": true, "bin": true,
 }
 
+// isGeneratedSource 报告源码是否为代码生成物（含 "Code generated ... DO NOT EDIT" 标记）。
+// 生成物一律跳过注释检查；整目录皆为生成物时也不要求手写包注释。
+func isGeneratedSource(src []byte) bool {
+	head := string(src)
+	if len(head) > 2048 {
+		head = head[:2048]
+	}
+	return strings.Contains(head, "Code generated") && strings.Contains(head, "DO NOT EDIT")
+}
+
+// isGeneratedFile 报告文件是否为代码生成物（读不到按非生成物处理）。
+func isGeneratedFile(path string) bool {
+	src, err := os.ReadFile(path)
+	return err == nil && isGeneratedSource(src)
+}
+
 // violation 是单条违规记录。
 type violation struct {
 	file   string // 相对根目录的文件路径
@@ -155,11 +171,7 @@ func scanFile(path, pkgName string, isTest, isMain bool) {
 	if err != nil {
 		return
 	}
-	head := string(src)
-	if len(head) > 2048 {
-		head = head[:2048]
-	}
-	if strings.Contains(head, "Code generated") && strings.Contains(head, "DO NOT EDIT") {
+	if isGeneratedSource(src) {
 		return
 	}
 	f, err := parser.ParseFile(fset, path, src, parser.ParseComments)
@@ -290,6 +302,9 @@ func main() {
 		if isMainPkg[dir] || pkgName == "" {
 			continue
 		}
+		if allGeneratedInDir(files, dir) {
+			continue // 整目录都是生成物：不要求手写包注释（生成物目录由生成器负责文档）
+		}
 		hasDoc := false
 		for _, path := range files {
 			if filepath.Dir(path) != dir || strings.HasSuffix(path, "_test.go") {
@@ -325,4 +340,19 @@ func main() {
 	if len(out) > 0 {
 		os.Exit(1)
 	}
+}
+
+// allGeneratedInDir 报告目录下所有非测试 Go 文件是否都是生成物（无文件时返回 false）。
+func allGeneratedInDir(files []string, dir string) bool {
+	found := false
+	for _, path := range files {
+		if filepath.Dir(path) != dir || strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		found = true
+		if !isGeneratedFile(path) {
+			return false
+		}
+	}
+	return found
 }

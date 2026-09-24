@@ -24,10 +24,15 @@ type Options struct {
 	EtcdEndpoints []string
 	NatsURL       string
 	RedisAddrs    []string
-	// Namespace 是注册中心键前缀（可选）：嵌入式/测试形态用它把实例与常驻进程隔离，
-	// 并避免上一次运行残留的实例键（租约未过期）导致注册冲突；
-	// 缺省按 runtime.env 派生（/atlas/services/<env>）。
+	// Namespace 是命名空间 token（如 e2e-1790，**不是**注册键前缀路径）：嵌入式/测试形态用它
+	// 把实例与常驻进程隔离，并避免上一次运行残留的实例键（租约未过期）导致注册冲突。
+	// 五面前缀（注册键/actor subject/业务 topic/redis 键/etcd 目录）全由框架 namespace.Derive
+	// 按该 token 派生；**必填**，缺失即装配失败（R9：不回落 default/env）。
 	Namespace string
+	// MinClientVersion/MinClientVersionMode 是 M1 客户端版本门槛（可选）：
+	// 缺省 0 值 = 空门槛 + OFF（不校验）；集成测试用 ENFORCE/NEGOTIATE 形态验证门槛链路。
+	MinClientVersion     string
+	MinClientVersionMode configspb.MinClientVersionMode
 }
 
 // Gateway 是装配完成的 gateway 实例句柄。
@@ -59,7 +64,7 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 	}
 	inst, urls, err := bootstrap.Boot(ctx, cfg, gwapp.Module, &h,
 		serverutil.SchemeTCP, serverutil.SchemeWS, serverutil.SchemeKCP,
-		serverutil.SchemeUDP, serverutil.SchemeHTTP)
+		serverutil.SchemeUDP, serverutil.SchemeHTTP, serverutil.SchemeGRPCEdge)
 	if err != nil {
 		return nil, err
 	}
@@ -86,21 +91,25 @@ func (g *Gateway) Stop(ctx context.Context) error {
 // 装配图只认 *conf.Bootstrap 一种输入，两种驱动形态因此共享全部构造函数。
 // 实例 ID 加 gw- 前缀（会话路由与跨实例踢人依赖该约定）；
 // 监听地址固定随机端口（进程内形态不做端口管理）。
-// newBootstrap 合成进程内形态配置；返回 error 的唯一来源是 actor 命名空间派生非法。
+// newBootstrap 合成进程内形态配置；返回 error 的唯一来源是命名空间缺失/非法（R9）。
 func newBootstrap(o Options) (*conf.Bootstrap, error) {
-	actorNS, err := bootstrap.ActorNamespaceOf(o.Namespace)
-	if err != nil {
+	// R9 严格模式：命名空间缺失/非法即装配失败（不回落 default/env）。
+	if err := bootstrap.RequireNamespace(o.Namespace); err != nil {
 		return nil, err
 	}
 	const randomPort = "127.0.0.1:0"
 	return &conf.Bootstrap{
-		Runtime: &configspb.Runtime{Name: "gateway", Id: "gw-" + o.ID, ActorNamespace: actorNS},
+		Runtime: &configspb.Runtime{
+			Name: "gateway", Id: "gw-" + o.ID, Namespace: o.Namespace,
+			MinClientVersion:     o.MinClientVersion,
+			MinClientVersionMode: o.MinClientVersionMode,
+		},
 		Registry: &configspb.Registry{
-			Etcd:      &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
-			Namespace: o.Namespace,
+			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
 		},
 		Server: &configspb.Server{
-			Grpc:      &configspb.Server_GRPC{Addr: randomPort},
+			// gRPC 只启用 edge 面（本轮暂不注册域服务）；internal 面留空 = 不启用（P7 管理面再启用）。
+			Grpc:      &configspb.Server_GRPC{EdgeAddr: randomPort},
 			Http:      &configspb.Server_HTTP{Addr: randomPort},
 			Tcp:       &configspb.Server_TCP{Addr: randomPort},
 			Websocket: &configspb.Server_WebSocket{Addr: randomPort},

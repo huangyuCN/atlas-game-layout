@@ -22,6 +22,9 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:   relay.UidField,
 		IsTell:      false,
 		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
 		NewRequest:  func() proto.Message { return new(JoinBattleReq) },
 		NewReply:    func() proto.Message { return new(JoinBattleReply) },
 		UidOf: func(req any) (string, bool) {
@@ -41,6 +44,9 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:   relay.UidField,
 		IsTell:      true,
 		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
 		NewRequest:  func() proto.Message { return new(FrameInputReq) },
 		NewReply:    nil, // returns Empty 即 Tell，无回执
 		UidOf: func(req any) (string, bool) {
@@ -60,6 +66,9 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:   relay.UidField,
 		IsTell:      false,
 		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
 		NewRequest:  func() proto.Message { return new(SyncFramesReq) },
 		NewReply:    func() proto.Message { return new(SyncFramesReply) },
 		UidOf: func(req any) (string, bool) {
@@ -79,6 +88,9 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:   relay.UidField,
 		IsTell:      false,
 		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
 		NewRequest:  func() proto.Message { return new(CreateBattleRequest) },
 		NewReply:    func() proto.Message { return new(CreateBattleReply) },
 		UidOf: func(req any) (string, bool) {
@@ -98,6 +110,9 @@ var BattleServiceRouteTable = relay.Table{
 		UidSource:   relay.UidField,
 		IsTell:      false,
 		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
 		NewRequest:  func() proto.Message { return new(GetStateReq) },
 		NewReply:    func() proto.Message { return new(GetStateReply) },
 		UidOf: func(req any) (string, bool) {
@@ -107,5 +122,54 @@ var BattleServiceRouteTable = relay.Table{
 			}
 			return r.BattleId, r.BattleId != ""
 		},
+	},
+}
+
+// BattleServiceLifecycleTable 是 BattleService 的 op 生命周期表（含 INTERNAL op；供能力协商与废弃提示）。
+var BattleServiceLifecycleTable = relay.LifecycleTable{
+	"/battle.v1.BattleService/JoinBattle": {
+		Operation:   "/battle.v1.BattleService/JoinBattle",
+		Service:     "battle.v1.BattleService",
+		Method:      "JoinBattle",
+		Access:      relay.AccessClient,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/battle.v1.BattleService/SendFrameInput": {
+		Operation:   "/battle.v1.BattleService/SendFrameInput",
+		Service:     "battle.v1.BattleService",
+		Method:      "SendFrameInput",
+		Access:      relay.AccessClient,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/battle.v1.BattleService/SyncFrames": {
+		Operation:   "/battle.v1.BattleService/SyncFrames",
+		Service:     "battle.v1.BattleService",
+		Method:      "SyncFrames",
+		Access:      relay.AccessClient,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/battle.v1.BattleService/Create": {
+		Operation:   "/battle.v1.BattleService/Create",
+		Service:     "battle.v1.BattleService",
+		Method:      "Create",
+		Access:      relay.AccessInternal,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/battle.v1.BattleService/GetState": {
+		Operation:   "/battle.v1.BattleService/GetState",
+		Service:     "battle.v1.BattleService",
+		Method:      "GetState",
+		Access:      relay.AccessInternal,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
 	},
 }

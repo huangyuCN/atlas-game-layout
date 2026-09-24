@@ -19,6 +19,7 @@ package gatewayv1
 
 import (
 	v1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
+	_ "github.com/huangyuCN/atlas/api/atlas/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -190,9 +191,15 @@ func (x *RegisterReply) GetPlayerId() string {
 
 // LoginRequest 登录：凭注册回执的玩家 ID 建立会话。
 type LoginRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PlayerId      string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
-	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	PlayerId string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Password string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	// client_version 是客户端 semver 版本（M1 协议演进）：网关按 runtime.min_client_version
+	// 与 runtime.min_client_version_mode 决定是否拒绝；Resume 需复述同一版本。
+	ClientVersion string `protobuf:"bytes,3,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
+	// client_end 是客户端端标识（M5 预留位：多端会话维度——同一玩家多端并存时的端区分）。
+	// 本轮行为仍**单端**（新登录顶掉旧会话，client_end 只登记不参与裁决）；多端归属下一轮。
+	ClientEnd     string `protobuf:"bytes,4,opt,name=client_end,json=clientEnd,proto3" json:"client_end,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -237,6 +244,20 @@ func (x *LoginRequest) GetPlayerId() string {
 func (x *LoginRequest) GetPassword() string {
 	if x != nil {
 		return x.Password
+	}
+	return ""
+}
+
+func (x *LoginRequest) GetClientVersion() string {
+	if x != nil {
+		return x.ClientVersion
+	}
+	return ""
+}
+
+func (x *LoginRequest) GetClientEnd() string {
+	if x != nil {
+		return x.ClientEnd
 	}
 	return ""
 }
@@ -306,9 +327,13 @@ func (x *LoginReply) GetPlayer() *v1.PlayerSummary {
 // ResumeRequest 断线重连恢复会话：凭据与玩家 ID 经请求体携带（各传输形态一致），
 // 服务端按路由表校验归属后重新绑定连接。
 type ResumeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
-	PlayerId      string                 `protobuf:"bytes,2,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Token    string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	PlayerId string                 `protobuf:"bytes,2,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	// client_version 与 Login 同义：恢复会话时复述客户端版本，门槛判定口径一致。
+	ClientVersion string `protobuf:"bytes,3,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
+	// client_end 与 Login 同义（M5 预留位：多端会话维度，本轮不参与裁决）。
+	ClientEnd     string `protobuf:"bytes,4,opt,name=client_end,json=clientEnd,proto3" json:"client_end,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -353,6 +378,20 @@ func (x *ResumeRequest) GetToken() string {
 func (x *ResumeRequest) GetPlayerId() string {
 	if x != nil {
 		return x.PlayerId
+	}
+	return ""
+}
+
+func (x *ResumeRequest) GetClientVersion() string {
+	if x != nil {
+		return x.ClientVersion
+	}
+	return ""
+}
+
+func (x *ResumeRequest) GetClientEnd() string {
+	if x != nil {
+		return x.ClientEnd
 	}
 	return ""
 }
@@ -615,24 +654,30 @@ var File_api_gateway_v1_session_proto protoreflect.FileDescriptor
 const file_api_gateway_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"\x1capi/gateway/v1/session.proto\x12\n" +
-	"gateway.v1\x1a\x1aapi/common/v1/common.proto\"c\n" +
+	"gateway.v1\x1a\x18api/atlas/v1/route.proto\x1a\x1aapi/common/v1/common.proto\"c\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
 	"\aaccount\x18\x01 \x01(\tR\aaccount\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1a\n" +
 	"\bnickname\x18\x03 \x01(\tR\bnickname\",\n" +
 	"\rRegisterReply\x12\x1b\n" +
-	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"G\n" +
+	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"\x8d\x01\n" +
 	"\fLoginRequest\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"q\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12%\n" +
+	"\x0eclient_version\x18\x03 \x01(\tR\rclientVersion\x12\x1d\n" +
+	"\n" +
+	"client_end\x18\x04 \x01(\tR\tclientEnd\"q\n" +
 	"\n" +
 	"LoginReply\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x120\n" +
-	"\x06player\x18\x03 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"B\n" +
+	"\x06player\x18\x03 \x01(\v2\x18.common.v1.PlayerSummaryR\x06player\"\x88\x01\n" +
 	"\rResumeRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1b\n" +
-	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\"*\n" +
+	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\x12%\n" +
+	"\x0eclient_version\x18\x03 \x01(\tR\rclientVersion\x12\x1d\n" +
+	"\n" +
+	"client_end\x18\x04 \x01(\tR\tclientEnd\"*\n" +
 	"\vResumeReply\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"\"\n" +
 	"\x10HeartbeatRequest\x12\x0e\n" +
@@ -640,19 +685,19 @@ const file_api_gateway_v1_session_proto_rawDesc = "" +
 	"\x0eHeartbeatReply\x12-\n" +
 	"\x13server_time_unix_ms\x18\x01 \x01(\x04R\x10serverTimeUnixMs\"\x0f\n" +
 	"\rLogoutRequest\"\r\n" +
-	"\vLogoutReply\"@\n" +
+	"\vLogoutReply\"F\n" +
 	"\fKickedNotify\x120\n" +
-	"\x06reason\x18\x01 \x01(\x0e2\x18.gateway.v1.KickedReasonR\x06reason*w\n" +
+	"\x06reason\x18\x01 \x01(\x0e2\x18.gateway.v1.KickedReasonR\x06reason:\x04\xd8\xd5\"\x01*w\n" +
 	"\fKickedReason\x12\x1d\n" +
 	"\x19KICKED_REASON_UNSPECIFIED\x10\x00\x12%\n" +
 	"!KICKED_REASON_LOGGED_IN_ELSEWHERE\x10\x01\x12!\n" +
-	"\x1dKICKED_REASON_SESSION_EXPIRED\x10\x022\xcb\x02\n" +
+	"\x1dKICKED_REASON_SESSION_EXPIRED\x10\x022\xd3\x02\n" +
 	"\aSession\x12B\n" +
 	"\bRegister\x12\x1b.gateway.v1.RegisterRequest\x1a\x19.gateway.v1.RegisterReply\x129\n" +
 	"\x05Login\x12\x18.gateway.v1.LoginRequest\x1a\x16.gateway.v1.LoginReply\x12<\n" +
 	"\x06Resume\x12\x19.gateway.v1.ResumeRequest\x1a\x17.gateway.v1.ResumeReply\x12<\n" +
 	"\x06Logout\x12\x19.gateway.v1.LogoutRequest\x1a\x17.gateway.v1.LogoutReply\x12E\n" +
-	"\tHeartbeat\x12\x1c.gateway.v1.HeartbeatRequest\x1a\x1a.gateway.v1.HeartbeatReplyBAZ?github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1b\x06proto3"
+	"\tHeartbeat\x12\x1c.gateway.v1.HeartbeatRequest\x1a\x1a.gateway.v1.HeartbeatReply\x1a\x06\xca\xd5\"\x02\x10\x01BAZ?github.com/huangyuCN/atlas-game-layout/api/gateway/v1;gatewayv1b\x06proto3"
 
 var (
 	file_api_gateway_v1_session_proto_rawDescOnce sync.Once

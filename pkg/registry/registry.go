@@ -6,30 +6,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	etcdreg "github.com/huangyuCN/atlas/contrib/registry/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// NamespacePrefix 是注册中心键前缀的默认根：最终前缀为 <根>/<环境>。
-const NamespacePrefix = "/atlas/services"
-
-// NamespaceOf 派生注册中心键前缀：显式配置优先，否则按环境隔离。
-// 隔离是必需的——实例键为 <前缀>/<服务名>/<实例 ID>，多套部署共用同一 etcd 时，
-// 前缀与实例 ID 相同会让后注册者覆盖前者的端点，并在注销时删除对方的注册。
-func NamespaceOf(namespace, env string) string {
-	if namespace != "" {
-		return namespace
-	}
-	if env == "" {
-		env = consts.EnvDefault
-	}
-	return NamespacePrefix + "/" + env
-}
-
 // Options 是注册器构造选项（来自服务配置）。
 type Options struct {
-	// Namespace 是 etcd 中服务注册的键前缀（默认 <NamespacePrefix>/<环境>）。
+	// Namespace 是注册中心键前缀，取 namespace.Derived.RegistryPrefix（形如 /atlas/services/test）：
+	// 实例键为 <Namespace>/<服务名>/<实例 ID>。**必填**——多套部署共用同一 etcd 时，
+	// 前缀与实例 ID 都相同会让后注册者覆盖前者的端点、并在注销时删掉对方的注册，
+	// 故缺失即构造失败（R9：不回落 env/default，前缀唯一来源是配置字段 runtime.namespace）。
 	Namespace string
 	// TTL 是注册租约的存活时间（默认 15s，心跳自动续租）。
 	TTL time.Duration
@@ -41,10 +27,10 @@ func NewEtcd(client *clientv3.Client, opts Options) (*etcdreg.Registry, error) {
 	if client == nil {
 		return nil, fmt.Errorf("registry: etcd 客户端不能为空")
 	}
-	eo := make([]etcdreg.Option, 0, 2)
-	if opts.Namespace != "" {
-		eo = append(eo, etcdreg.Namespace(opts.Namespace))
+	if opts.Namespace == "" {
+		return nil, fmt.Errorf("registry: 键前缀不能为空（取 namespace.Derive 的 RegistryPrefix，配置字段 runtime.namespace）")
 	}
+	eo := []etcdreg.Option{etcdreg.Namespace(opts.Namespace)}
 	if opts.TTL > 0 {
 		eo = append(eo, etcdreg.RegisterTTL(opts.TTL))
 	}

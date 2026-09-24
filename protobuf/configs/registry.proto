@@ -1,4 +1,7 @@
 // 公共配置：服务注册中心。
+//
+// 缺省约定（唯一规则）见 docs/config.md：etcd.endpoints 是必需参数（为空即不装配注册中心，
+// 构造期报错）；ttl 为空 = 不覆盖底层默认（15s）。
 syntax = "proto3";
 
 package atlas.configs;
@@ -10,10 +13,10 @@ message Registry {
     repeated string endpoints = 1;
   }
   Etcd etcd = 1;
-  // namespace 是注册中心键前缀；缺省按环境隔离（/atlas/services/<runtime.env>）。
-  // 同一 etcd 被多套部署共用时必须隔离：键为 <namespace>/<服务名>/<实例 ID>，
-  // 前缀相同且实例 ID 相同时，后注册者会覆盖前者的端点，注销时还会删掉对方的注册。
-  string namespace = 2;
+  // 号 2 原为 namespace（注册中心键前缀）：与 runtime.namespace 重复且 YAML 中从未出现，
+  // 已删除——键前缀统一由 runtime.namespace 经 atlas/namespace.Derive 派生，本段不再有命名空间字段。
+  reserved 2;
+  reserved "namespace";
   // ttl 是注册租约的存活时间（time.ParseDuration 字符串，如 15s；空 = 底层默认 15s），
   // 心跳自动续租。
   string ttl = 3;

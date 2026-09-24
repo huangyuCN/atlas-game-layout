@@ -1,23 +1,19 @@
 // Package server 负责 matcher 服务的传输层构造：
-// gRPC（入队/取消/查询）+ HTTP（健康/规则查询）。
-// 启动参数来自 server.grpc / server.http 配置（字段见 protobuf/configs/server.proto）；
-// 中间件与过滤器由 pkg/middleware 经 fx 注入（业务可用 fx.Decorate 追加）；
+// gRPC 双面（Matcher 服务注册在 internal 面）+ HTTP（健康/规则查询）。
+// 启动参数来自 server.grpc / server.http 配置（字段见 protobuf/configs/server.proto，
+// 缺省约定见 docs/config.md）；中间件与过滤器由 pkg/middleware 经 fx 注入（业务可用 fx.Decorate 追加）；
 // 依赖装配见 internal/app；服务启停归属驱动方
 // （进程形态与进程内形态均由 atlas.App 驱动启停）。
 package server
 
 import (
-	"context"
-	"net/http"
-
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
-	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
-	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
-	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
+	"github.com/huangyuCN/atlas/transport"
 	atlashttp "github.com/huangyuCN/atlas/transport/http"
+	"go.uber.org/fx"
 )
 
 // NewHTTPServer 构造 HTTP 服务端（健康检查 + 规则查询）。
@@ -29,35 +25,32 @@ func NewHTTPServer(cfg *conf.Bootstrap,
 	}
 	// /health 用裸 HandleFunc 注册：探针不进中间件链（不记日志、不打点），避免噪声。
 	srv.HandleFunc("/health", serverutil.HealthHandler(cfg.GetRuntime().GetName()))
-	// 管理接口走 Route + ctx.Middleware：与生成代码同构，因此享有中间件链。
-	srv.Route("/").GET("/v1/matcher/rules", rulesHandler())
 	return srv, nil
 }
 
-// rulesHandler 返回撮合规则查询处理器（响应经 atlas 响应编码器）。
-func rulesHandler() func(ctx atlashttp.Context) error {
-	return func(ctx atlashttp.Context) error {
-		h := ctx.Middleware(func(context.Context, interface{}) (interface{}, error) {
-			return map[string]any{
-				"rulesets": []string{biz.DefaultMatchmakerName},
-				"rule":     infra.RuleDescription,
-			}, nil
-		})
-		out, err := h(ctx, nil)
-		if err != nil {
-			return err
-		}
-		return ctx.Result(http.StatusOK, out)
-	}
+// GRPCServerSet 是 matcher 两个 gRPC 面的服务端集合（未启用的面为 nil）：
+// 以 transport.Server 进 fx 的 servers 值组，由 atlas.App 统一启停与注册。
+type GRPCServerSet struct {
+	fx.Out
+
+	Edge     transport.Server `group:"servers"`
+	Internal transport.Server `group:"servers"`
 }
 
-// NewGRPCServer 构造 gRPC 服务端并注册撮合服务。
-func NewGRPCServer(cfg *conf.Bootstrap, svc *handler.MatcherHandler,
-	mws serverutil.Middlewares) (*atlasgrpc.Server, error) {
-	srv, err := serverutil.GRPCServer(cfg.GetServer().GetGrpc(), mws)
+// NewGRPCServers 构造 matcher 的两个 gRPC 面并注册 Matcher 服务：
+// Matcher 是**服务间**调用（game 的 PlayerActor → matcher，battle 直连测试），故注册到
+// internal listener；edge 面本轮不注册域服务（客户端 op 走 gateway 的 actor 平面转发，
+// 不经 matcher 的 Edge 接口），面本身按配置启用/留空。
+// 两面各自独立地址与生命周期（server.grpc.edge_addr / internal_addr，空 = 不启用该面），
+// 都挂 opgrpc 一元拦截器（入站 metadata→ctx、错误→status，挂载点见 serverutil.GRPCServers）。
+func NewGRPCServers(cfg *conf.Bootstrap, svc *handler.MatcherHandler,
+	mws serverutil.Middlewares) (GRPCServerSet, error) {
+	faces, err := serverutil.GRPCServers(cfg.GetServer().GetGrpc(), mws)
 	if err != nil {
-		return nil, err
+		return GRPCServerSet{}, err
 	}
-	matcherv1.RegisterMatcherServer(srv, svc)
-	return srv, nil
+	if faces.Internal != nil {
+		matcherv1.RegisterMatcherServer(faces.Internal, svc)
+	}
+	return GRPCServerSet{Edge: faces.Edge.Transport(), Internal: faces.Internal.Transport()}, nil
 }

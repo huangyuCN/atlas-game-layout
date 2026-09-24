@@ -134,7 +134,7 @@ func TestHTTPOptionsPathPrefix(t *testing.T) {
 // TestGRPCOptionsUnset 验证未配置任何字段时不追加选项。
 func TestGRPCOptionsUnset(t *testing.T) {
 	for _, c := range []*configspb.Server_GRPC{nil, {}} {
-		opts, err := GRPCOptions(c)
+		opts, err := GRPCOptions(c, "")
 		if err != nil {
 			t.Fatalf("GRPCOptions(%v) 错误 = %v", c, err)
 		}
@@ -146,10 +146,10 @@ func TestGRPCOptionsUnset(t *testing.T) {
 
 // TestGRPCOptionsBadDuration 验证非法时长在启动期报错。
 func TestGRPCOptionsBadDuration(t *testing.T) {
-	if _, err := GRPCOptions(&configspb.Server_GRPC{Timeout: "1"}); err == nil {
+	if _, err := GRPCOptions(&configspb.Server_GRPC{Timeout: "1"}, ""); err == nil {
 		t.Fatal("timeout=1（无单位）期望报错，实际为 nil")
 	}
-	if _, err := GRPCOptions(&configspb.Server_GRPC{StreamTimeout: "-1s"}); err == nil {
+	if _, err := GRPCOptions(&configspb.Server_GRPC{StreamTimeout: "-1s"}, ""); err == nil {
 		t.Fatal("stream_timeout=-1s 期望报错，实际为 nil")
 	}
 }
@@ -164,8 +164,8 @@ func TestGRPCOptionsServiceToggles(t *testing.T) {
 	assertServiceAbsent(t, base, "Reflection", "Metadata", "Channelz")
 
 	opts, err := GRPCOptions(&configspb.Server_GRPC{
-		Addr: "127.0.0.1:0", Timeout: "1s", Reflection: true, Metadata: true, Admin: true,
-	})
+		EdgeAddr: "127.0.0.1:0", Timeout: "1s", Reflection: true, Metadata: true, Admin: true,
+	}, "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("GRPCOptions() 错误 = %v", err)
 	}
@@ -409,10 +409,11 @@ func TestGRPCServerAppliesStreamMiddleware(t *testing.T) {
 			return next(ctx, req)
 		}
 	}
-	srv, err := GRPCServer(&configspb.Server_GRPC{Addr: "127.0.0.1:0"}, Middlewares{mw})
+	faces, err := GRPCServers(&configspb.Server_GRPC{EdgeAddr: "127.0.0.1:0"}, Middlewares{mw})
 	if err != nil {
-		t.Fatalf("GRPCServer() 错误 = %v", err)
+		t.Fatalf("GRPCServers() 错误 = %v", err)
 	}
+	srv := faces.Edge
 	desc := &grpc.ServiceDesc{
 		ServiceName: "test.v1.Streamer",
 		HandlerType: (*streamerServer)(nil),

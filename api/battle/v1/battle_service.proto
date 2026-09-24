@@ -75,12 +75,14 @@ service BattleService {
 
 // FrameBroadcast 服务端推送：帧广播下行（op 为消息完整名）。
 message FrameBroadcast {
+  option (atlas.route.v1.push) = true;
   string battle_id = 1;
   atlas.game.lockstep.LockstepFrame frame = 2;
 }
 
 // BattleEndNotify 服务端推送：战斗结束通知。
 message BattleEndNotify {
+  option (atlas.route.v1.push) = true;
   string battle_id = 1;
   string winner_player_id = 2;
 }

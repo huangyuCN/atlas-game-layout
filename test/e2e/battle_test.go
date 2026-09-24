@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
 	"sync"
 	"testing"
 	"time"
@@ -9,7 +10,6 @@ import (
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	battleassemble "github.com/huangyuCN/atlas-game-layout/services/battle/assemble"
@@ -28,7 +28,7 @@ import (
 type battleClient struct {
 	sess     *sdkclient.Session
 	cli      *sdkclient.Client
-	battle   *battlev1.BattleServiceOpClient
+	battle   *battlev1opclient.BattleService
 	playerID string
 	token    string
 
@@ -45,7 +45,7 @@ func newBattleClient(t *testing.T, ctx context.Context, gw *gwassemble.Gateway) 
 	c := &battleClient{
 		sess:     sess,
 		cli:      cli,
-		battle:   battlev1.NewBattleServiceOpClient(cli),
+		battle:   battlev1opclient.NewBattleService(cli),
 		playerID: sess.PlayerID(),
 		token:    sess.Token(),
 	}
@@ -57,7 +57,7 @@ func newBattleClient(t *testing.T, ctx context.Context, gw *gwassemble.Gateway) 
 func (c *battleClient) watchNotifies() {
 	h := func(operation string, payload []byte) {
 		switch operation {
-		case consts.PushOpFrameBroadcast:
+		case battlev1opclient.BattleServicePushOps.FrameBroadcast:
 			var fb battlev1.FrameBroadcast
 			if err := protojson.Unmarshal(payload, &fb); err != nil {
 				return
@@ -65,7 +65,7 @@ func (c *battleClient) watchNotifies() {
 			c.mu.Lock()
 			c.frames = append(c.frames, &fb)
 			c.mu.Unlock()
-		case consts.PushOpBattleEnd:
+		case battlev1opclient.BattleServicePushOps.BattleEndNotify:
 			var end battlev1.BattleEndNotify
 			if err := protojson.Unmarshal(payload, &end); err != nil {
 				return
@@ -75,8 +75,8 @@ func (c *battleClient) watchNotifies() {
 			c.mu.Unlock()
 		}
 	}
-	c.cli.On(consts.PushOpFrameBroadcast, h)
-	c.cli.On(consts.PushOpBattleEnd, h)
+	c.cli.On(battlev1opclient.BattleServicePushOps.FrameBroadcast, h)
+	c.cli.On(battlev1opclient.BattleServicePushOps.BattleEndNotify, h)
 }
 
 // joinBattle 加入战斗（战斗 actor 懒激活期间重试）。
@@ -169,7 +169,7 @@ func startMatcherForBattle(t *testing.T, ctx context.Context) *matcherassemble.M
 		EtcdEndpoints: []string{itEtcdEndpoints},
 		NatsURL:       itNatsURL,
 		RedisAddrs:    []string{itRedisAddr},
-		Namespace:     itNamespace,
+		Namespace:     itNS,
 	})
 	if err != nil {
 		t.Fatalf("matcher 装配: %v", err)
@@ -392,7 +392,7 @@ func newBattleClientWithToken(t *testing.T, ctx context.Context, gw *gwassemble.
 	c := &battleClient{
 		sess:     sess,
 		cli:      cli,
-		battle:   battlev1.NewBattleServiceOpClient(cli),
+		battle:   battlev1opclient.NewBattleService(cli),
 		playerID: prev.playerID,
 		token:    prev.token,
 	}

@@ -211,9 +211,9 @@ func TestHTTPMutualTLS(t *testing.T) {
 func TestGRPCTLSHandshake(t *testing.T) {
 	pki := newTestPKI(t)
 	opts, err := GRPCOptions(&configspb.Server_GRPC{
-		Addr: "127.0.0.1:0",
-		Tls:  &configspb.Server_TLS{Enabled: true, CertFile: pki.serverCert, KeyFile: pki.serverKey},
-	})
+		EdgeAddr: "127.0.0.1:0",
+		Tls:      &configspb.Server_TLS{Enabled: true, CertFile: pki.serverCert, KeyFile: pki.serverKey},
+	}, "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("GRPCOptions() 错误 = %v", err)
 	}

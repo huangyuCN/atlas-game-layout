@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 	"testing"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
@@ -92,7 +92,7 @@ func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 // newGWEnvMeter 同 newGWEnvWithRedis，但注入指定指标采集器（业务打点断言用）。
 func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Collector) *gwEnv {
 	t.Helper()
-	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{redisAddr}})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{redisAddr}, Namespace: testNamespace})
 	if err != nil {
 		t.Fatalf("redis client: %v", err)
 	}
@@ -109,7 +109,7 @@ func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Co
 	sess := session.NewManager(session.NewRedisStore(cli), id, session.Options{TTL: 30 * time.Second})
 	mock := newMockActorRuntime()
 	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), meter, nc, testPublisher(nc),
-		push, new(fakePusher), kcpPush, udpSrv)
+		push, new(fakePusher), kcpPush, udpSrv, VersionGate{})
 	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
 	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))
 	cfg := &conf.Bootstrap{
@@ -362,7 +362,7 @@ func TestKickSameInstance(t *testing.T) {
 		t.Fatal("二次登录应签发新令牌")
 	}
 	// 旧连接（connID=1）收到被挤下线推送。
-	if !hasPush(env.push.snapshot(), 1, consts.PushOpKickedOffline) {
+	if !hasPush(env.push.snapshot(), 1, gatewayv1opclient.SessionPushOps.KickedNotify) {
 		t.Fatalf("旧连接未收到挤下线推送: %+v", env.push.snapshot())
 	}
 	// 会话令牌已被新登录覆盖（旧凭据失效）。

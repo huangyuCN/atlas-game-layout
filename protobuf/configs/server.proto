@@ -1,8 +1,9 @@
-// 公共配置：传输层启动参数（gRPC 服务间调用、HTTP 健康/管理）。
+// 公共配置：传输层启动参数（gRPC 双面 edge/internal、HTTP 健康/管理、客户端四协议接入）。
 //
-// 空值约定：字符串为空、数值为 0、optional 字段未设置，一律表示「交给底层默认值，不覆盖」——
-// 避免「不配就变行为」与「配了等于没配」。时长字段统一为字符串（time.ParseDuration，如 30s/1m），
-// 解析失败在启动期直接报错。
+// 缺省约定（唯一规则）见 docs/config.md：**必需参数非空 = 该能力启用；可选参数为空 = 不覆盖底层默认；
+// 节点缺失 ≡ 其全部参数为空**。本文件的必需参数是监听地址——server.grpc 的 edge_addr/internal_addr
+// 为空即该面不启用，server.tcp/websocket/kcp/udp 的 addr 为空即该协议不启用。
+// 时长字段统一为字符串（time.ParseDuration，如 30s/1m），解析失败在启动期直接报错。
 syntax = "proto3";
 
 package atlas.configs;
@@ -35,10 +36,12 @@ message Server {
     NETWORK_UNIX = 3;
   }
   message GRPC {
-    // network 是网络类型；未设置 = 底层默认 tcp。
+    // network 是网络类型；未设置 = 底层默认 tcp（两面共用）。
     optional Network network = 1;
-    // addr 是监听地址 host:port；空 = 随机端口。
-    string addr = 2;
+    // edge_addr 是 **edge 面**监听地址 host:port（不可信区）：客户端 op 经网关转发到域 `rpc/`
+    // 平面的 Edge 接口（access=CLIENT）。空 = 不启用该面（必需参数，缺省约定见 docs/config.md）。
+    // 号 2 由原 addr 改名保留：protojson 不忽略未知字段，旧 `addr:` 键会解组失败而非静默回落。
+    string edge_addr = 2;
     // timeout 是单次 RPC 超时（如 1s）；空 = 底层默认。
     string timeout = 3;
     // stream_timeout 是流式 RPC 超时；空或 0 = 不限制。
@@ -51,8 +54,15 @@ message Server {
     bool metadata = 7;
     // admin 是否注册 admin 服务。
     bool admin = 8;
-    // tls 是 TLS 配置；不配 = 明文。
+    // tls 是 TLS 配置；未启用（缺失或 enabled=false）即明文（缺省约定见 docs/config.md）。
     TLS tls = 9;
+    // max_inflight 是并发在途请求上限（M4 预留位：过载背压，本轮不实现，0 = 不限制）。
+    uint32 max_inflight = 10;
+    // internal_addr 是 **internal 面**监听地址 host:port（可信区）：服务间 gRPC 调用 +
+    // P7 管理面 AdminService。空 = 不启用该面（必需参数，缺省约定见 docs/config.md）；
+    // 与 edge_addr 相同即装配期报错（两个面必须互相独立）——**端口 `:0` 例外**：
+    // 进程内/测试形态两面各写随机端口（内核分配必然不同），不算冲突（见 docs/config.md）。
+    string internal_addr = 11;
   }
   message HTTP {
     // network 是网络类型；未设置 = 底层默认 tcp。
@@ -67,12 +77,14 @@ message Server {
     optional bool strict_slash = 5;
     // max_request_body 是请求体上限（字节）；0 = 底层默认。
     int64 max_request_body = 6;
-    // tls 是 TLS 配置；不配 = 明文。
+    // tls 是 TLS 配置；未启用（缺失或 enabled=false）即明文（缺省约定见 docs/config.md）。
     TLS tls = 7;
+    // max_inflight 是并发在途请求上限（M4 预留位：过载背压，本轮不实现，0 = 不限制）。
+    uint32 max_inflight = 8;
   }
   // TCP 是 TCP 业务通道启动参数（客户端长连接接入）。
   message TCP {
-    // addr 是监听地址 host:port；空 = 随机端口。
+    // addr 是监听地址 host:port；空 = 该协议不启用（必需参数，缺省约定见 docs/config.md）。
     string addr = 1;
     // no_delay 是否关闭 Nagle 算法（TCP_NODELAY）；未设置 = 底层默认。
     optional bool no_delay = 2;
@@ -92,12 +104,12 @@ message Server {
     int32 max_conns = 9;
     // max_body_size 是单帧最大字节数；0 = 底层默认。
     int64 max_body_size = 10;
-    // tls 是 TLS 配置；不配 = 明文。
+    // tls 是 TLS 配置；未启用（缺失或 enabled=false）即明文（缺省约定见 docs/config.md）。
     TLS tls = 11;
   }
   // WebSocket 是 WebSocket 单通道启动参数（业务与战斗共用一条连接）。
   message WebSocket {
-    // addr 是监听地址 host:port；空 = 随机端口。
+    // addr 是监听地址 host:port；空 = 该协议不启用（必需参数，缺省约定见 docs/config.md）。
     string addr = 1;
     // path 是 WS 挂载路径（如 /ws）；空 = "/"。
     string path = 2;
@@ -119,12 +131,12 @@ message Server {
     int64 max_body_size = 10;
     // subprotocols 是协商的子协议列表；空 = 不限定。
     repeated string subprotocols = 11;
-    // tls 是 TLS 配置；不配 = 明文。
+    // tls 是 TLS 配置；未启用（缺失或 enabled=false）即明文（缺省约定见 docs/config.md）。
     TLS tls = 12;
   }
   // KCP 是 KCP 战斗通道启动参数（可靠 UDP）。
   message KCP {
-    // addr 是监听地址 host:port；空 = 随机端口。
+    // addr 是监听地址 host:port；空 = 该协议不启用（必需参数，缺省约定见 docs/config.md）。
     string addr = 1;
     // block_crypt 是加密口令（字节数不足底层最小长度会启动失败）；空 = 不加密。
     string block_crypt = 2;
@@ -153,7 +165,7 @@ message Server {
   }
   // UDP 是 UDP 战斗通道启动参数（不可靠、低延迟）。
   message UDP {
-    // addr 是监听地址 host:port；空 = 随机端口。
+    // addr 是监听地址 host:port；空 = 该协议不启用（必需参数，缺省约定见 docs/config.md）。
     string addr = 1;
     // pool_size 是读写缓冲池大小；0 = 底层默认。
     int32 pool_size = 2;
@@ -168,8 +180,8 @@ message Server {
   }
   GRPC grpc = 1;
   HTTP http = 2;
-  // tcp/websocket/kcp/udp 是客户端接入通道：不配该节 = 该协议不启用
-  // （网关只启动与注册已声明的协议）。
+  // tcp/websocket/kcp/udp 是客户端接入通道：节点缺失或 addr 为空 = 该协议不启用
+  // （不监听端口、不注册 handler；网关只启动与注册已声明的协议）。
   TCP tcp = 3;
   WebSocket websocket = 4;
   KCP kcp = 5;

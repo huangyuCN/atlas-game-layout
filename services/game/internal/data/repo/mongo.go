@@ -2,7 +2,6 @@ package repo
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	atlaslog "github.com/huangyuCN/atlas/log"
@@ -25,7 +24,7 @@ type MongoPlayerRepo struct {
 // NewMongoPlayerRepo 构造 mongo 持久化（含索引初始化）。
 func NewMongoPlayerRepo(ctx context.Context, cli *mongo.Client) (*MongoPlayerRepo, error) {
 	if err := cli.EnsureIndexes(ctx, playerCollection, []mongo.Index{
-		{Keys: map[string]int{"account": 1}, Unique: true, Name: "uniq_account"},
+		{Keys: bson.D{{Key: "account", Value: 1}}, Unique: true, Name: "uniq_account"},
 	}); err != nil {
 		return nil, err
 	}
@@ -109,15 +108,7 @@ func (r *MongoPlayerRepo) Upsert(ctx context.Context, p *models.Player) error {
 
 // findOne 按过滤条件读取单个玩家文档；不存在返回 ErrPlayerNotFound。
 func (r *MongoPlayerRepo) findOne(ctx context.Context, filter bson.M) (*models.Player, error) {
-	var p models.Player
-	err := r.coll.FindOne(ctx, filter).Decode(&p)
-	if errors.Is(err, mongodriver.ErrNoDocuments) {
-		return nil, ErrPlayerNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("repo: 查询玩家失败: %w", err)
-	}
-	return &p, nil
+	return findOneDoc[models.Player](ctx, r.coll, filter, "玩家", ErrPlayerNotFound)
 }
 
 // optionsUpsert 构造 $set 更新的 upsert 选项。

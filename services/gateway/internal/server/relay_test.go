@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
 	"testing"
 	"time"
 
@@ -10,11 +11,11 @@ import (
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/transport"
+	"github.com/huangyuCN/atlas/transport/frame"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -61,14 +62,16 @@ func TestJoinBattleBindsBattleChannel(t *testing.T) {
 	// 绑定后推送经战斗通道下发（业务通道不重复下发）。
 	pctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := PublishPush(pctx, testPublisher(pub), "p-1", consts.PushOpMatchStarted, []byte(`{"match_id":"m-1"}`)); err != nil {
+	if err := PublishPush(pctx, testPublisher(pub), "p-1", gamev1opclient.PlayerServicePushOps.MatchStartedNotify, []byte(`{"match_id":"m-1"}`)); err != nil {
 		t.Fatalf("PublishPush: %v", err)
 	}
-	if !waitFor(2*time.Second, func() bool { return hasPush(env.kcp.snapshot(), 77, consts.PushOpMatchStarted) }) {
+	if !waitFor(2*time.Second, func() bool {
+		return hasPush(env.kcp.snapshot(), 77, gamev1opclient.PlayerServicePushOps.MatchStartedNotify)
+	}) {
 		t.Fatalf("战斗通道未收到推送: %+v", env.kcp.snapshot())
 	}
 	time.Sleep(200 * time.Millisecond)
-	if hasPush(env.push.snapshot(), 1, consts.PushOpMatchStarted) {
+	if hasPush(env.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify) {
 		t.Fatal("推送应仅经战斗通道下发")
 	}
 }
@@ -275,19 +278,48 @@ func TestRelayTCPWireForward(t *testing.T) {
 	}
 }
 
-// TestIdempotencyID 验证投递去重键的注入决策：
-// 注解声明 IDEMPOTENT 且客户端携带 ID → 注入；缺注解或缺 ID → 不注入（零开销原路径）。
-func TestIdempotencyID(t *testing.T) {
+// TestRelayPlan 验证透传投递计划的组装：网关会话身份 → 发起者；
+// 帧头请求 ID → 观测头（所有 op）与去重键（仅注解声明 IDEMPOTENT 的 op）。
+// 去重键的取舍单点收敛在 opcall.PlanFor（core.SendOption 不透明，故在计划层断言）。
+func TestRelayPlan(t *testing.T) {
+	r := &Relay{}
 	idempotent := relay.RouteEntry{Idempotency: relay.Idempotent}
 	none := relay.RouteEntry{Idempotency: relay.IdempotencyNone}
 
-	if got := idempotencyID(idempotent, "req-1"); got != "req-1" {
-		t.Fatalf("声明幂等且携带 ID 应注入, got %q", got)
+	plan, err := r.planFor(requestIDCtx(transport.KindTCP, opEnterMatch, 1, "", "req-1"), idempotent, "p-1")
+	if err != nil {
+		t.Fatalf("planFor: %v", err)
 	}
-	if got := idempotencyID(idempotent, ""); got != "" {
-		t.Fatalf("客户端未携带 ID 不应注入, got %q", got)
+	if !plan.HasSender || plan.Sender.String() != "player:p-1" {
+		t.Fatalf("发起者应为网关会话身份, got %+v", plan)
 	}
-	if got := idempotencyID(none, "req-1"); got != "" {
-		t.Fatalf("注解未声明不应注入, got %q", got)
+	if plan.RequestID != "req-1" || plan.DedupKey != "req-1" {
+		t.Fatalf("声明幂等且携带请求 ID 应观测 + 去重, got %+v", plan)
 	}
+
+	plan, err = r.planFor(requestIDCtx(transport.KindTCP, opEnterMatch, 1, "", "req-1"), none, "p-1")
+	if err != nil {
+		t.Fatalf("planFor: %v", err)
+	}
+	if plan.RequestID != "req-1" || plan.DedupKey != "" {
+		t.Fatalf("未声明幂等只注入观测头, got %+v", plan)
+	}
+
+	plan, err = r.planFor(connCtx(transport.KindTCP, opEnterMatch, 1, ""), idempotent, "p-1")
+	if err != nil {
+		t.Fatalf("planFor: %v", err)
+	}
+	if plan.RequestID != "" || plan.DedupKey != "" {
+		t.Fatalf("客户端未携带请求 ID 不应注入, got %+v", plan)
+	}
+}
+
+// requestIDCtx 在 connCtx 基础上注入帧请求 ID（Atlas-Frame-Request-Id），
+// 用于验证「帧头 → ctx → 投递计划」单向链的取值。
+func requestIDCtx(kind transport.Kind, op string, connID uint64, frameToken, requestID string) context.Context {
+	ctx := connCtx(kind, op, connID, frameToken)
+	if tr, ok := transport.FromServerContext(ctx); ok && tr.RequestHeader() != nil {
+		tr.RequestHeader().Set(frame.RequestHeaderKeyRequestID, requestID)
+	}
+	return ctx
 }

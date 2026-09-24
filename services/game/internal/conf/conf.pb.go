@@ -33,6 +33,8 @@ type Bootstrap struct {
 	Log      *configs.Log           `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
 	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
 	Observability *configs.Observability `protobuf:"bytes,6,opt,name=observability,proto3" json:"observability,omitempty"`
+	// admin 是管理面（GM/运维）配置：仅 internal listener 可达，见 server.grpc.internal_addr。
+	Admin         *Admin `protobuf:"bytes,7,opt,name=admin,proto3" json:"admin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -109,18 +111,75 @@ func (x *Bootstrap) GetObservability() *configs.Observability {
 	return nil
 }
 
+func (x *Bootstrap) GetAdmin() *Admin {
+	if x != nil {
+		return x.Admin
+	}
+	return nil
+}
+
+// Admin 是管理面（GM/运维）配置。
+type Admin struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// max_grant_count 是单次发放上限（R12）：缺省或 0 回退默认 100，
+	// **不提供「关闭上限」**；dry-run 同样受限（超限即拒单，不写审计、不改档）。
+	MaxGrantCount uint32 `protobuf:"varint,1,opt,name=max_grant_count,json=maxGrantCount,proto3" json:"max_grant_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Admin) Reset() {
+	*x = Admin{}
+	mi := &file_services_game_internal_conf_conf_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Admin) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Admin) ProtoMessage() {}
+
+func (x *Admin) ProtoReflect() protoreflect.Message {
+	mi := &file_services_game_internal_conf_conf_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Admin.ProtoReflect.Descriptor instead.
+func (*Admin) Descriptor() ([]byte, []int) {
+	return file_services_game_internal_conf_conf_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Admin) GetMaxGrantCount() uint32 {
+	if x != nil {
+		return x.MaxGrantCount
+	}
+	return 0
+}
+
 var File_services_game_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_game_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"&services/game/internal/conf/conf.proto\x12\tgame.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xb4\x02\n" +
+	"&services/game/internal/conf/conf.proto\x12\tgame.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xdc\x02\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
 	"\x06server\x18\x03 \x01(\v2\x15.atlas.configs.ServerR\x06server\x12'\n" +
 	"\x04data\x18\x04 \x01(\v2\x13.atlas.configs.DataR\x04data\x12$\n" +
 	"\x03log\x18\x05 \x01(\v2\x12.atlas.configs.LogR\x03log\x12B\n" +
-	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservabilityBIZGgithub.com/huangyuCN/atlas-game-layout/services/game/internal/conf;confb\x06proto3"
+	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x12&\n" +
+	"\x05admin\x18\a \x01(\v2\x10.game.conf.AdminR\x05admin\"/\n" +
+	"\x05Admin\x12&\n" +
+	"\x0fmax_grant_count\x18\x01 \x01(\rR\rmaxGrantCountBIZGgithub.com/huangyuCN/atlas-game-layout/services/game/internal/conf;confb\x06proto3"
 
 var (
 	file_services_game_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -134,28 +193,30 @@ func file_services_game_internal_conf_conf_proto_rawDescGZIP() []byte {
 	return file_services_game_internal_conf_conf_proto_rawDescData
 }
 
-var file_services_game_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_services_game_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_services_game_internal_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil),             // 0: game.conf.Bootstrap
-	(*configs.Runtime)(nil),       // 1: atlas.configs.Runtime
-	(*configs.Registry)(nil),      // 2: atlas.configs.Registry
-	(*configs.Server)(nil),        // 3: atlas.configs.Server
-	(*configs.Data)(nil),          // 4: atlas.configs.Data
-	(*configs.Log)(nil),           // 5: atlas.configs.Log
-	(*configs.Observability)(nil), // 6: atlas.configs.Observability
+	(*Admin)(nil),                 // 1: game.conf.Admin
+	(*configs.Runtime)(nil),       // 2: atlas.configs.Runtime
+	(*configs.Registry)(nil),      // 3: atlas.configs.Registry
+	(*configs.Server)(nil),        // 4: atlas.configs.Server
+	(*configs.Data)(nil),          // 5: atlas.configs.Data
+	(*configs.Log)(nil),           // 6: atlas.configs.Log
+	(*configs.Observability)(nil), // 7: atlas.configs.Observability
 }
 var file_services_game_internal_conf_conf_proto_depIdxs = []int32{
-	1, // 0: game.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
-	2, // 1: game.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
-	3, // 2: game.conf.Bootstrap.server:type_name -> atlas.configs.Server
-	4, // 3: game.conf.Bootstrap.data:type_name -> atlas.configs.Data
-	5, // 4: game.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	6, // 5: game.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	2, // 0: game.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
+	3, // 1: game.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
+	4, // 2: game.conf.Bootstrap.server:type_name -> atlas.configs.Server
+	5, // 3: game.conf.Bootstrap.data:type_name -> atlas.configs.Data
+	6, // 4: game.conf.Bootstrap.log:type_name -> atlas.configs.Log
+	7, // 5: game.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	1, // 6: game.conf.Bootstrap.admin:type_name -> game.conf.Admin
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_services_game_internal_conf_conf_proto_init() }
@@ -169,7 +230,7 @@ func file_services_game_internal_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_services_game_internal_conf_conf_proto_rawDesc), len(file_services_game_internal_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

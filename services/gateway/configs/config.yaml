@@ -1,16 +1,35 @@
 runtime:
   name: gateway
   # id 缺省取 <服务名>-<主机名>：注册实例 ID、actor NodeID 与指标 service_instance_id 三处同源，
-  # 且必须每进程唯一（actor NodeID 决定 NATS 节点 subject atlas_actor.<env>.node.<id>.*，
+  # 且必须每进程唯一（actor NodeID 决定 NATS 节点 subject atlas_actor.<ns>.node.<id>.*，
   # 同主机的多个服务不得共用）；同主机同服务的双进程需在此显式配唯一 id。
   # version 缺省取构建注入版本（lib/version，Makefile/CI 经 -ldflags 写入）；需要时在此覆盖
-  env: test        # 命名空间来源：链路资源 deployment.environment.name、注册中心键前缀 /atlas/services/<env>、
-                   # actor 平面 NATS subject（atlas_actor.<env>.*）与业务 topic 前缀（atlas.<env>.push|event|gw.*）
+  env: test        # **仅标签**：链路资源 deployment.environment.name 与指标 env 标签；
+                   # 命名空间由 runtime.namespace 派生，env 不参与任何前缀派生。
+  # namespace 是**唯一命名空间字段**：注册中心键前缀 /atlas/services/<ns>、actor subject 前缀
+  # atlas_actor.<ns>、业务 topic 前缀 atlas.<ns>、redis 键前缀 atlas:<ns>:、etcd 目录 /atlas/actors/<ns>
+  # 五面全由它派生（框架 namespace.Derive）。**必须显式配置，缺失即启动失败**（严格模式 R9）；
+  # 取值限 [A-Za-z0-9_-]，非法字符同样启动失败。缺省约定与五面派生表见 docs/config.md。
+  namespace: test
+  # 客户端版本门槛（M1 协议演进）：登录入口在网关，故该字段只在网关生效——
+  # OFF=不校验（缺省）；NEGOTIATE=只记录并暴露客户端版本、不拒绝（灰度期）；ENFORCE=低于 min_client_version 的登录被拒（带明确 reason）。
+  min_client_version: 0.1.0
+  min_client_version_mode: MIN_CLIENT_VERSION_MODE_NEGOTIATE
 registry:
   etcd:
     endpoints:
       - 127.0.0.1:12379
 server:
+  # gRPC 是**两个互相独立的面**（缺省约定见 docs/config.md：地址为空 = 该面不启用）：
+  #   edge_addr（不可信区）：gateway 的 edge 面本轮**暂不注册域服务**（客户端 op 走下面四协议
+  #     通道与 actor 平面转发），只保留面本身与 opgrpc 拦截器，供后续网关侧接入使用；
+  #   internal_addr（可信区）：服务间 gRPC + P7 管理面 AdminService——本轮**留空 = 不启用**。
+  # 端口取 10081：10080 已被上面的 http 健康面占用（两面地址相同会被装配期拒绝）。
+  grpc:
+    edge_addr: 0.0.0.0:10081
+    # internal_addr: 0.0.0.0:10082   # 留空 = 不启用 internal 面（P7 管理面再启用）
+    timeout: 30s                  # 单次 RPC 超时；Atlas 默认 1s，本模板显式放宽到 30s
+    reflection: true              # 调试/测试开启；生产应关闭（会暴露服务清单，两面同享该开关）
   http:
     addr: 0.0.0.0:10080
     timeout: 30s                  # 单次请求 handler 总执行时间（与 Atlas 默认 30s 相同，显式写出便于调整）
@@ -24,8 +43,9 @@ server:
     #   key_file: configs/tls/server.key
     #   ca_file: configs/tls/ca.crt   # 配了即校验客户端证书（client_auth=true 时强制要求）
     #   client_auth: false
-  # 四协议接入通道：不配该节 = 该协议不启用（不监听端口、不注册 handler），
-  # 模板按部署形态只暴露需要的通道。除 addr 外的参数均为注释示例（不配 = 底层默认）。
+  # 四协议接入通道：节点缺失或 addr 为空 = 该协议不启用（不监听端口、不注册 handler），
+  # 模板按部署形态只暴露需要的通道。除 addr 外的参数均为注释示例
+  # （空 = 不覆盖底层默认；缺省约定唯一规则见 docs/config.md）。
   tcp:
     addr: 0.0.0.0:9001
     # no_delay: true              # 关闭 Nagle 算法（TCP_NODELAY）

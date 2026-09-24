@@ -49,7 +49,7 @@ func TestSessionOptionsOf(t *testing.T) {
 
 // TestNewSessionManagerPropagatesError 验证非法租期让装配失败（fx 启动期暴露，不进运行期）。
 func TestNewSessionManagerPropagatesError(t *testing.T) {
-	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{"127.0.0.1:1"}})
+	cli, err := pkredis.NewClient(pkredis.Options{Addrs: []string{"127.0.0.1:1"}, Namespace: "test"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

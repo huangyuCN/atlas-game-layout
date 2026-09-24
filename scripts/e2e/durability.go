@@ -14,10 +14,9 @@ package main
 import (
 	"context"
 	"fmt"
+	gamev1actor "github.com/huangyuCN/atlas-game-layout/api/game/v1/actor"
 	"os/exec"
 	"time"
-
-	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
@@ -45,19 +44,22 @@ func containerAction(ctx context.Context, action, container string) error {
 // snapshotTTL 查询快照 key 的 TTL；PERSIST 过返回 -1ns，键不存在返回 -2ns
 // （go-redis 语义；直接返回 Duration，避免秒级截断把负值归零）。
 func snapshotTTL(ctx context.Context, redisAddr, playerID string) (time.Duration, error) {
-	rc, err := pkgredis.NewClient(pkgredis.Options{Addrs: []string{redisAddr}})
+	rc, err := pkgredis.NewClient(pkgredis.Options{Addrs: []string{redisAddr}, Namespace: e2eNS})
 	if err != nil {
 		return 0, err
 	}
 	defer rc.Close()
-	return rc.Raw().TTL(ctx, pkredis.NewKeys(actorNamespace()).PlayerSnapshot(playerID)).Result()
+	return rc.Raw().TTL(ctx, rc.Keys().PlayerSnapshot(playerID)).Result()
 }
 
 // assertPersistedTTL 轮询等待快照 key PERSIST（TTL = -1ns：未落库权威副本语义）。
 // Logout 是异步 Tell：actor 侧下线落库（含 mongo 30s 服务选择超时的重试）在后台
 // 完成，PERSIST 生效有延迟，必须轮询。
 func assertPersistedTTL(ctx context.Context, redisAddr, playerID, what string) error {
-	deadline := time.Now().Add(150 * time.Second)
+	// 轮询窗口：mongo 处于 pause（连接挂起而非拒绝）时，下线落库的每次 mongo 尝试
+	// 都要等驱动 server-selection 超时（默认 30s），stopFlush 3 次尝试 ⇒ 最坏 ~95s，
+	// 再加 actor 邮箱排队与 redis 写，留 300s 余量（原先 150s 在挂起注入下会误报）。
+	deadline := time.Now().Add(300 * time.Second)
 	var last time.Duration
 	for {
 		d, err := snapshotTTL(ctx, redisAddr, playerID)
@@ -91,7 +93,7 @@ func assertExpiringTTL(ctx context.Context, redisAddr, playerID, what string) er
 func grantItems(ctx context.Context, mw middlewareAddrs, playerID string, itemID, count uint32) error {
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID: "e2e-admin", ServiceName: consts.ServiceGame,
-		Namespace:     actorNamespace(),
+		Namespace:     e2eDerived.Namespace,
 		EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL,
 	})
 	if err != nil {
@@ -101,11 +103,11 @@ func grantItems(ctx context.Context, mw middlewareAddrs, playerID string, itemID
 		return fmt.Errorf("e2e: 管理面运行时启动失败: %w", err)
 	}
 	defer func() { _ = rt.Shutdown(ctx) }()
-	pid, err := types.NewPID(consts.ActorTypePlayer, playerID)
+	pid, err := types.NewPID(gamev1actor.PlayerServiceActorType, playerID)
 	if err != nil {
 		return fmt.Errorf("e2e: 构造玩家 PID 失败: %w", err)
 	}
-	cli := gamev1.NewPlayerServiceClusterClient(rt)
+	cli := gamev1actor.NewPlayerServiceClusterClient(rt)
 	if _, err := cli.GrantItem(ctx, pid, &gamev1.GrantItemReq{ItemId: itemID, Count: count}); err != nil {
 		return fmt.Errorf("e2e: 发放道具失败（item=%d×%d）: %w", itemID, count, err)
 	}

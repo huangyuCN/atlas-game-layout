@@ -16,7 +16,7 @@ import (
 // 组件级行为由 services/battle/assemble 与 test/e2e 兜底）。
 func TestGraphStaticValidation(t *testing.T) {
 	cfg := &conf.Bootstrap{
-		Runtime: &configspb.Runtime{Name: "battle", Id: "graph-test"},
+		Runtime: &configspb.Runtime{Name: "battle", Id: "graph-test", Namespace: "test"},
 	}
 	if err := fx.ValidateApp(
 		fx.Supply(cfg),

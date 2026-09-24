@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/huangyuCN/atlas/namespace"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -47,8 +48,9 @@ type Options struct {
 	Password string
 	// DB 是数据库编号（仅 single/sentinel 形态；cluster 按 key 哈希分片，不支持 DB 选择）。
 	DB int
-	// Namespace 是业务键命名空间（空 = consts.EnvDefault）：共用同一 redis 的
-	// 多套部署靠它隔离会话路由/玩家快照/撮合票据，键形态 atlas:<ns>:<域>:<id>。
+	// Namespace 是业务键命名空间 token（配置字段 runtime.namespace，如 test；**必填**）：
+	// 键形态 atlas:<ns>:<域>:<id>，前缀由框架 namespace.Derive 派生（RedisKeyPrefix）。
+	// 缺失或非法即构造失败（R9 严格模式：不回落任何缺省）。
 	Namespace string
 }
 
@@ -65,7 +67,18 @@ func (c *Client) Keys() Keys { return c.keys }
 //   - ModeSingle：直连 Addrs[0]（必须恰好 1 个地址）；
 //   - ModeSentinel：经哨兵发现主库（MasterName + Addrs），主从切换自动跟随；
 //   - ModeCluster：集群分片客户端（Addrs 为任一节点引导地址）。
+//
+// 命名空间先于建连校验（缺失即失败，且不留下未关闭的底层客户端）：
+// 五面派生唯一来源是框架 namespace.Derive，本包不提供任何缺省兜底（R9）。
 func NewClient(opts Options) (*Client, error) {
+	derived, err := namespace.Derive(opts.Namespace)
+	if err != nil {
+		return nil, fmt.Errorf("redis: %w", err)
+	}
+	keys, err := NewKeys(derived)
+	if err != nil {
+		return nil, err
+	}
 	var inner goredis.UniversalClient
 	switch opts.Mode {
 	case ModeSingle:
@@ -102,7 +115,7 @@ func NewClient(opts Options) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("redis: 未知形态 %s", opts.Mode)
 	}
-	return &Client{inner: inner, keys: NewKeys(opts.Namespace)}, nil
+	return &Client{inner: inner, keys: keys}, nil
 }
 
 // Close 关闭客户端。

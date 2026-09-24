@@ -22,7 +22,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"os"
 	"strings"
 	"time"
@@ -33,26 +32,31 @@ import (
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	pkgredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
-	pkgregistry "github.com/huangyuCN/atlas-game-layout/pkg/registry"
 	battleassemble "github.com/huangyuCN/atlas-game-layout/services/battle/assemble"
 	gameassemble "github.com/huangyuCN/atlas-game-layout/services/game/assemble"
 	gwassemble "github.com/huangyuCN/atlas-game-layout/services/gateway/assemble"
 	matcherassemble "github.com/huangyuCN/atlas-game-layout/services/matcher/assemble"
+	"github.com/huangyuCN/atlas/namespace"
 	"go.opentelemetry.io/otel"
 )
 
-// e2eNamespace 是本次运行独占的注册中心键前缀：与常驻进程（按 runtime.env 派生）
-// 隔离，也不会命中上一次运行残留的实例键（租约未过期）导致注册冲突。
-var e2eNamespace = fmt.Sprintf("%s/e2e-%d", pkgregistry.NamespacePrefix, time.Now().UnixNano())
+// e2eNS 是本次运行独占的命名空间 token（形如 e2e-<纳秒>）：与常驻进程
+// （runtime.namespace: test）隔离，也不会命中上一次运行残留的实例键（租约未过期）
+// 导致注册冲突。路径形态的前缀（/atlas/services/<ns> 等）一律由框架 namespace.Derive 拼，
+// 代码里不再出现路径字面量。
+var e2eNS = fmt.Sprintf("e2e-%d", time.Now().UnixNano())
 
-// actorNamespace 派生本次运行独占的命名空间（actor 平面 / 业务 topic / redis 键共用）：
-// 取注册中心前缀的叶子段，与进程内装配（assemble → newBootstrap）同源。
-func actorNamespace() string {
-	ns, err := bootstrap.ActorNamespaceOf(e2eNamespace)
+// e2eDerived 是本次运行的五面派生结果（注册键前缀 / actor subject / 业务 topic /
+// redis 键 / etcd 目录全由它取），与四服务进程内装配（assemble → newBootstrap）同源。
+var e2eDerived = mustDerive(e2eNS)
+
+// mustDerive 派生本次运行的命名空间；token 由本脚本生成，非法即 panic（夹具兜底）。
+func mustDerive(ns string) namespace.Derived {
+	derived, err := namespace.Derive(ns)
 	if err != nil {
-		panic(err) // 前缀由本脚本生成（/atlas/services/e2e-<纳秒>），不会非法
+		panic(err)
 	}
-	return ns
+	return derived
 }
 
 // middlewareAddrs 是中间件地址集（默认与 deploy/docker-compose 端口约定一致）。
@@ -107,7 +111,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 	game, err := gameassemble.New(ctx, gameassemble.Options{
 		NodeID: "game-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL,
 		RedisAddrs: []string{mw.redisAddr}, MongoURI: mw.mongoURI, MongoDB: mw.mongoDB,
-		Namespace: e2eNamespace,
+		Namespace: e2eNS,
 	})
 	if err != nil {
 		return rollback("game", err)
@@ -116,7 +120,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 
 	gw, err := gwassemble.New(ctx, gwassemble.Options{
 		ID: "e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddrs: []string{mw.redisAddr},
-		Namespace: e2eNamespace,
+		Namespace: e2eNS,
 	})
 	if err != nil {
 		return rollback("gateway", err)
@@ -126,7 +130,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 	bat, err := battleassemble.New(ctx, battleassemble.Options{
 		NodeID: "battle-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL,
 		MongoURI: mw.mongoURI, MongoDB: mw.mongoDB,
-		Namespace: e2eNamespace,
+		Namespace: e2eNS,
 	})
 	if err != nil {
 		return rollback("battle", err)
@@ -135,7 +139,7 @@ func startStack(mw middlewareAddrs) (*stack, error) {
 
 	m, err := matcherassemble.New(ctx, matcherassemble.Options{
 		NodeID: "matcher-e2e", EtcdEndpoints: mw.etcdEndpoints, NatsURL: mw.natsURL, RedisAddrs: []string{mw.redisAddr},
-		Namespace: e2eNamespace,
+		Namespace: e2eNS,
 	})
 	if err != nil {
 		return rollback("matcher", err)
@@ -153,7 +157,7 @@ func probeMiddlewares(mw middlewareAddrs) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	rc, err := pkgredis.NewClient(pkgredis.Options{Addrs: []string{mw.redisAddr}})
+	rc, err := pkgredis.NewClient(pkgredis.Options{Addrs: []string{mw.redisAddr}, Namespace: e2eNS})
 	if err != nil {
 		return fmt.Errorf("redis 构造失败: %w", err)
 	}

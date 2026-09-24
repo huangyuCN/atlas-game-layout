@@ -23,6 +23,15 @@ enum ErrorReason {
   InvalidParams = 1008 [(atlas.errors.code) = 400];       // 参数非法
   PasswordWrong = 1009 [(atlas.errors.code) = 401];       // 口令错误
   ServerFrozen = 1010 [(atlas.errors.code) = 503];        // 服务冻结（双库落盘失败，数据保护态）
+  ClientVersionTooLow = 1011 [(atlas.errors.code) = 426]; // 客户端版本过低（M1：升级后方可登录）
+
+  // 管理面（P7：admin.game.v1.AdminService，仅内网 GM/运维工具可达）
+  // 号段紧接 1011 之后；管理面写操作校验失败一律拒单（不写审计、不改档）。
+  AdminOperatorMissing = 1012 [(atlas.errors.code) = 400];       // 操作人缺失（operator 必填；本轮由调用方自报）
+  AdminIdempotencyKeyMissing = 1013 [(atlas.errors.code) = 400]; // 幂等键缺失（管理面写操作必填）
+  AdminIdempotencyKeyReused = 1014 [(atlas.errors.code) = 409];  // 幂等键复用（同键但参数摘要不同，拒绝改参重放）
+  AdminOperationInFlight = 1015 [(atlas.errors.code) = 409];     // 同键操作在途（首单 PENDING 未收尾，拒绝并发重复执行）
+  AdminGrantCountExceeded = 1016 [(atlas.errors.code) = 400];    // 单次发放超上限（R12：admin.max_grant_count，dry-run 同样受限）
 
   // 匹配
   AlreadyInMatch = 2001 [(atlas.errors.code) = 409]; // 已在匹配中

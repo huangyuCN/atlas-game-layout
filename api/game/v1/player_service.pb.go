@@ -1506,22 +1506,22 @@ const file_api_game_v1_player_service_proto_rawDesc = "" +
 	"\rQueuePartyReq\x12\x18\n" +
 	"\aruleset\x18\x01 \x01(\tR\aruleset\".\n" +
 	"\x0fPartyQueueReply\x12\x1b\n" +
-	"\tticket_id\x18\x01 \x01(\tR\bticketId\"\x87\x01\n" +
+	"\tticket_id\x18\x01 \x01(\tR\bticketId\"\x8d\x01\n" +
 	"\x12MatchStartedNotify\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1b\n" +
 	"\tbattle_id\x18\x02 \x01(\tR\bbattleId\x12\x1d\n" +
 	"\n" +
 	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12\x1a\n" +
-	"\bendpoint\x18\x04 \x01(\tR\bendpoint\"e\n" +
+	"\bendpoint\x18\x04 \x01(\tR\bendpoint:\x04\xd8\xd5\"\x01\"k\n" +
 	"\x11MatchFailedNotify\x12\x1b\n" +
 	"\tticket_id\x18\x01 \x01(\tR\bticketId\x123\n" +
-	"\x06reason\x18\x02 \x01(\x0e2\x1b.matcher.v1.MatchFailReasonR\x06reason\"\xa1\x01\n" +
+	"\x06reason\x18\x02 \x01(\x0e2\x1b.matcher.v1.MatchFailReasonR\x06reason:\x04\xd8\xd5\"\x01\"\xa7\x01\n" +
 	"\x11PartyRosterNotify\x12\x19\n" +
 	"\bparty_id\x18\x01 \x01(\tR\apartyId\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12\x1d\n" +
 	"\n" +
 	"player_ids\x18\x03 \x03(\tR\tplayerIds\x125\n" +
-	"\x06reason\x18\x04 \x01(\x0e2\x1d.matcher.v1.PartyRosterReasonR\x06reason*\x91\x01\n" +
+	"\x06reason\x18\x04 \x01(\x0e2\x1d.matcher.v1.PartyRosterReasonR\x06reason:\x04\xd8\xd5\"\x01*\x91\x01\n" +
 	"\fLogoutReason\x12\x1d\n" +
 	"\x19LOGOUT_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14LOGOUT_REASON_LOGOUT\x10\x01\x12%\n" +

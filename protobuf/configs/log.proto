@@ -1,4 +1,7 @@
-// 公共配置：日志（级别/格式，装配见 pkg/log）。
+// 公共配置：日志（级别/格式/文件输出，装配见 pkg/log）。
+//
+// 缺省约定（唯一规则）见 docs/config.md：level/format 为空 = 不覆盖底层默认（info/text）；
+// file 为空 = 仅 stdout。
 syntax = "proto3";
 
 package atlas.configs;

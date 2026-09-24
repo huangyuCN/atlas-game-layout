@@ -3,10 +3,10 @@ package actor
 import (
 	"context"
 	"fmt"
+	gamev1actor "github.com/huangyuCN/atlas-game-layout/api/game/v1/actor"
 
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/services/game/internal/biz"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
@@ -17,12 +17,12 @@ import (
 // 业务错误直接以 Go error 返回（code/reason 经集群 error 通道往返保留），
 // 调用方按 atlas errors.Reason 判定还原语义。
 type PlayerClient struct {
-	cli *gamev1.PlayerServiceClusterClient
+	cli *gamev1actor.PlayerServiceClusterClient
 }
 
 // NewPlayerClient 构造玩家状态访问客户端。
 func NewPlayerClient(rt *pkgactor.Runtime) *PlayerClient {
-	return &PlayerClient{cli: gamev1.NewPlayerServiceClusterClient(rt)}
+	return &PlayerClient{cli: gamev1actor.NewPlayerServiceClusterClient(rt)}
 }
 
 // GrantItem 实现 biz.PlayerStateAccess（聚合根 undo 写）。
@@ -66,7 +66,7 @@ func (c *PlayerClient) GetPlayer(ctx context.Context, playerID string) (*commonv
 
 // playerPID 以玩家 ID 构造 PlayerActor PID（懒激活 + 跨节点透明）。
 func (c *PlayerClient) playerPID(playerID string) (types.PID, error) {
-	pid, err := types.NewPID(consts.ActorTypePlayer, playerID)
+	pid, err := types.NewPID(gamev1actor.PlayerServiceActorType, playerID)
 	if err != nil {
 		return types.PID{}, fmt.Errorf("actor: 非法玩家 ID %q: %w", playerID, err)
 	}

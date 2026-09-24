@@ -12,7 +12,6 @@ package gamev1
 
 import (
 	v1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
-	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -367,7 +366,7 @@ var File_api_game_v1_player_proto protoreflect.FileDescriptor
 
 const file_api_game_v1_player_proto_rawDesc = "" +
 	"\n" +
-	"\x18api/game/v1/player.proto\x12\agame.v1\x1a\x1aapi/common/v1/common.proto\x1a\x1cgoogle/api/annotations.proto\"/\n" +
+	"\x18api/game/v1/player.proto\x12\agame.v1\x1a\x1aapi/common/v1/common.proto\"/\n" +
 	"\x10GetPlayerRequest\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\"B\n" +
 	"\x0eGetPlayerReply\x120\n" +
@@ -384,11 +383,7 @@ const file_api_game_v1_player_proto_rawDesc = "" +
 	"\aitem_id\x18\x02 \x01(\rR\x06itemId\x12\x14\n" +
 	"\x05count\x18\x03 \x01(\rR\x05count\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x10\n" +
-	"\x0eGrantItemReply2\xc6\x02\n" +
-	"\x06Player\x12`\n" +
-	"\tGetPlayer\x12\x19.game.v1.GetPlayerRequest\x1a\x17.game.v1.GetPlayerReply\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/players/{player_id}\x12o\n" +
-	"\vGetBackpack\x12\x1b.game.v1.GetBackpackRequest\x1a\x19.game.v1.GetBackpackReply\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/players/{player_id}/backpack\x12i\n" +
-	"\tGrantItem\x12\x19.game.v1.GrantItemRequest\x1a\x17.game.v1.GrantItemReply\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/players/{player_id}/itemsB;Z9github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1b\x06proto3"
+	"\x0eGrantItemReplyB;Z9github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1b\x06proto3"
 
 var (
 	file_api_game_v1_player_proto_rawDescOnce sync.Once
@@ -416,14 +411,8 @@ var file_api_game_v1_player_proto_goTypes = []any{
 var file_api_game_v1_player_proto_depIdxs = []int32{
 	7, // 0: game.v1.GetPlayerReply.player:type_name -> common.v1.PlayerSummary
 	2, // 1: game.v1.GetBackpackReply.items:type_name -> game.v1.BackpackItem
-	0, // 2: game.v1.Player.GetPlayer:input_type -> game.v1.GetPlayerRequest
-	3, // 3: game.v1.Player.GetBackpack:input_type -> game.v1.GetBackpackRequest
-	5, // 4: game.v1.Player.GrantItem:input_type -> game.v1.GrantItemRequest
-	1, // 5: game.v1.Player.GetPlayer:output_type -> game.v1.GetPlayerReply
-	4, // 6: game.v1.Player.GetBackpack:output_type -> game.v1.GetBackpackReply
-	6, // 7: game.v1.Player.GrantItem:output_type -> game.v1.GrantItemReply
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -442,7 +431,7 @@ func file_api_game_v1_player_proto_init() {
 			NumEnums:      0,
 			NumMessages:   7,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   0,
 		},
 		GoTypes:           file_api_game_v1_player_proto_goTypes,
 		DependencyIndexes: file_api_game_v1_player_proto_depIdxs,

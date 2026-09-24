@@ -13,7 +13,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/actor"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
-	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/repo"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/infra"
@@ -52,11 +51,12 @@ var Module = fx.Module("battle",
 		infra.NewNatsSettlePublisher,
 		notifierOf,
 		publisherOf,
-		handler.NewBattleHandler,
 		// ── server：传输层构造（启停归属驱动方）──
 		// fx.As：构造函数返回具体类型（便于直接调 Server 字段/方法），仍以 transport.Server 进组。
 		fx.Annotate(server.NewHTTPServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
-		fx.Annotate(server.NewGRPCServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
+		// gRPC 双面：Edge/Internal 各自独立 listener（fx.Out 自带 servers 组标签），
+		// 未启用的面为 nil，由 ActiveServers 在消费侧过滤。
+		server.NewGRPCServers,
 	),
 	fx.Invoke(
 		registerResources,

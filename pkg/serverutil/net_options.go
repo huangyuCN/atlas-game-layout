@@ -66,13 +66,14 @@ func pairOption[T any](field string, a, b int64, mk func(int, int) T, out []T) (
 	return append(out, mk(int(a), int(b))), nil
 }
 
-// netServer 是客户端接入协议服务端的公共构造骨架：配置节缺失（absent）表示该协议未启用，
-// 返回 nil 而不是错误——装配层按「nil = 未启用」决定不进启停组、不注册 handler；
+// netServer 是客户端接入协议服务端的公共构造骨架：节点缺失、或其必需参数（addr）为空，
+// 都表示该协议未启用，返回 nil 而不是错误——装配层按「nil = 未启用」决定不进启停组、
+// 不注册 handler（唯一缺省约定与「节点缺失 ≡ 其全部参数为空」见 docs/config.md）；
 // 其余情况映射选项后构造，错误统一包装。
-func netServer[S any, O any](what string, absent bool, opts func() ([]O, error),
+func netServer[S any, O any](what string, enabled bool, opts func() ([]O, error),
 	ctor func(...O) (S, error)) (S, error) {
 	var zero S
-	if absent {
+	if !enabled {
 		return zero, nil
 	}
 	o, err := opts()
@@ -263,33 +264,33 @@ func UDPOptions(c *configspb.Server_UDP) ([]udpt.ServerOption, error) {
 }
 
 // TCPServer 按 server.tcp 配置构造 TCP 服务端（handler 注册由调用方完成）；
-// 配置节缺失表示该协议未启用，返回 nil。
+// 节点缺失或 addr 为空表示该协议未启用，返回 nil（必需参数语义见 docs/config.md）。
 func TCPServer(c *configspb.Server_TCP) (*tcpt.Server, error) {
-	return netServer("TCP 服务端", c == nil, func() ([]tcpt.ServerOption, error) {
+	return netServer("TCP 服务端", c.GetAddr() != "", func() ([]tcpt.ServerOption, error) {
 		return TCPOptions(c)
 	}, tcpt.NewServer)
 }
 
 // WSServer 按 server.websocket 配置构造 WebSocket 服务端（handler 注册由调用方完成）；
-// 配置节缺失表示该协议未启用，返回 nil。
+// 节点缺失或 addr 为空表示该协议未启用，返回 nil。
 func WSServer(c *configspb.Server_WebSocket) (*wst.Server, error) {
-	return netServer("WebSocket 服务端", c == nil, func() ([]wst.ServerOption, error) {
+	return netServer("WebSocket 服务端", c.GetAddr() != "", func() ([]wst.ServerOption, error) {
 		return WSOptions(c)
 	}, wst.NewServer)
 }
 
 // KCPServer 按 server.kcp 配置构造 KCP 服务端（handler 注册由调用方完成）；
-// 配置节缺失表示该协议未启用，返回 nil。
+// 节点缺失或 addr 为空表示该协议未启用，返回 nil。
 func KCPServer(c *configspb.Server_KCP) (*kcpt.Server, error) {
-	return netServer("KCP 服务端", c == nil, func() ([]kcpt.ServerOption, error) {
+	return netServer("KCP 服务端", c.GetAddr() != "", func() ([]kcpt.ServerOption, error) {
 		return KCPOptions(c)
 	}, kcpt.NewServer)
 }
 
 // UDPServer 按 server.udp 配置构造 UDP 服务端（handler 注册由调用方完成）；
-// 配置节缺失表示该协议未启用，返回 nil。
+// 节点缺失或 addr 为空表示该协议未启用，返回 nil。
 func UDPServer(c *configspb.Server_UDP) (*udpt.Server, error) {
-	return netServer("UDP 服务端", c == nil, func() ([]udpt.ServerOption, error) {
+	return netServer("UDP 服务端", c.GetAddr() != "", func() ([]udpt.ServerOption, error) {
 		return UDPOptions(c)
 	}, udpt.NewServer)
 }

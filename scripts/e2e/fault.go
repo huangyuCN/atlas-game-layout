@@ -4,14 +4,13 @@ package main
 import (
 	"context"
 	"fmt"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 	"time"
 
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // runFault 验证「排队中杀进程」的异常下线兜底：
@@ -94,8 +93,17 @@ func runKick(ctx context.Context, a addrs) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// 1) A 注册登录，挂接被挤下线推送。
-	a1, err := newBizPlayer(a.tcp, sdkclient.WithAutoReconnect(false))
+	// 1) A 注册登录，挂接被挤下线推送：原因经 SDK 会话接缝（SessionProtocol.Kicked）取得——
+	// 接缝按推送信封的帧头版本选解码器（S0.5 修订 1），ver=2 下不得静默丢失原因。
+	kicked := make(chan string, 1)
+	a1, err := newBizPlayerWith(a.tcp, []sdkclient.SessionOption{
+		sdkclient.WithOnKicked(func(reason string) {
+			select {
+			case kicked <- reason:
+			default:
+			}
+		}),
+	}, sdkclient.WithAutoReconnect(false))
 	if err != nil {
 		return err
 	}
@@ -103,13 +111,6 @@ func runKick(ctx context.Context, a addrs) error {
 		return err
 	}
 	staleToken := a1.sess.Token()
-	kicked := make(chan *gatewayv1.KickedNotify, 1)
-	a1.cli.On(consts.PushOpKickedOffline, func(_ string, payload []byte) {
-		var kn gatewayv1.KickedNotify
-		if protojson.Unmarshal(payload, &kn) == nil {
-			push(kicked, &kn)
-		}
-	})
 
 	// 2) B 同账号新登录：挤下 A。
 	b1, err := newBizPlayer(a.tcp, sdkclient.WithAutoReconnect(false))
@@ -120,8 +121,12 @@ func runKick(ctx context.Context, a addrs) error {
 		return fmt.Errorf("B 顶号登录: %w", err)
 	}
 	select {
-	case kn := <-kicked:
-		fmt.Printf("[顶号] A 收到被挤下线通知 ok（reason=%s）\n", kn.GetReason())
+	case reason := <-kicked:
+		want := gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE.String()
+		if reason != want {
+			return fmt.Errorf("A 收到的被挤下线原因 = %q，期望 %q（接缝须按帧头版本解码）", reason, want)
+		}
+		fmt.Printf("[顶号] A 收到被挤下线通知 ok（reason=%s）\n", reason)
 	case <-time.After(3 * time.Second):
 		return fmt.Errorf("A 未收到被挤下线通知")
 	}
@@ -140,7 +145,7 @@ func runKick(ctx context.Context, a addrs) error {
 		return err
 	}
 	var rep gatewayv1.ResumeReply
-	if err := p3.cli.Invoke(ctx, sdkclient.OpSessionResume,
+	if err := p3.cli.Invoke(ctx, gatewayv1opclient.SessionProtocolOps.Resume,
 		&gatewayv1.ResumeRequest{Token: b1Token, PlayerId: b1ID}, &rep); err != nil {
 		return fmt.Errorf("Resume 恢复失败: %w", err)
 	}
@@ -161,7 +166,7 @@ func assertKickedRejected(ctx context.Context, a1 *player, staleToken string) er
 		return fmt.Errorf("A 被顶号后业务请求应被拒")
 	}
 	var rep gatewayv1.ResumeReply
-	err := a1.cli.Invoke(ctx, sdkclient.OpSessionResume,
+	err := a1.cli.Invoke(ctx, gatewayv1opclient.SessionProtocolOps.Resume,
 		&gatewayv1.ResumeRequest{Token: staleToken, PlayerId: a1.id}, &rep)
 	if err == nil {
 		return fmt.Errorf("A 被顶号后旧凭据 Resume 应被拒")

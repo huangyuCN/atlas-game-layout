@@ -5,12 +5,12 @@ package infra
 import (
 	"context"
 	"fmt"
+	battlev1actor "github.com/huangyuCN/atlas-game-layout/api/battle/v1/actor"
 	"strings"
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
@@ -188,11 +188,11 @@ func NewBattleActorStarter(rt *pkgactor.Runtime) *BattleActorStarter {
 // Start 实现 biz.BattleStarter：经生成的 client stub 懒激活战斗 actor（开局）。
 // 业务错误直接透传（code/reason 经集群 error 通道往返保留）。
 func (s *BattleActorStarter) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
-	pid, err := types.NewPID(consts.ActorTypeBattle, battleID)
+	pid, err := types.NewPID(battlev1actor.BattleServiceActorType, battleID)
 	if err != nil {
 		return fmt.Errorf("infra: 非法战斗 ID %q: %w", battleID, err)
 	}
-	cli := battlev1.NewBattleServiceClusterClient(s.rt)
+	cli := battlev1actor.NewBattleServiceClusterClient(s.rt)
 	if _, err := cli.Create(ctx, pid, &battlev1.CreateBattleRequest{
 		MatchId:   matchID,
 		PlayerIds: playerIDs,

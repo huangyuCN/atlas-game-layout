@@ -27,15 +27,18 @@ type Options struct {
 	// SinkOverride 是成局观察方的测试注入点
 	//（nil 时用默认组合：nats 发布 + actor 开局调用，见 internal/app newSink）。
 	SinkOverride biz.MatchEventSink
-	// Namespace 是注册中心键前缀（可选）：嵌入式/测试形态用它把实例与常驻进程隔离，
-	// 并避免上一次运行残留的实例键（租约未过期）导致注册冲突；
-	// 缺省按 runtime.env 派生（/atlas/services/<env>）。
+	// Namespace 是命名空间 token（如 e2e-1790，**不是**注册键前缀路径）：嵌入式/测试形态用它
+	// 把实例与常驻进程隔离，并避免上一次运行残留的实例键（租约未过期）导致注册冲突。
+	// 五面前缀（注册键/actor subject/业务 topic/redis 键/etcd 目录）全由框架 namespace.Derive
+	// 按该 token 派生；**必填**，缺失即装配失败（R9：不回落 default/env）。
 	Namespace string
 }
 
 // Matcher 是装配完成的 matcher 服务句柄。
 type Matcher struct {
-	GRPCURL string             // host:port（battle/测试直连用）
+	// GRPCURL 是 internal 面（可信区：Matcher 服务注册在此，服务间调用与测试直连用）的 host:port；
+	// edge 面本轮不注册域服务（客户端 op 经 gateway 的 actor 平面转发）。
+	GRPCURL string
 	Service matchmaker.Service // 撮合运行时 API（测试/观测用）
 	stop    func(ctx context.Context) error
 }
@@ -57,7 +60,8 @@ func New(ctx context.Context, o Options) (*Matcher, error) {
 		return nil, err
 	}
 	inst, urls, err := bootstrap.Boot(ctx, cfg,
-		fx.Options(matcherapp.Module, overrideSink(o.SinkOverride)), &h, serverutil.SchemeGRPC)
+		fx.Options(matcherapp.Module, overrideSink(o.SinkOverride)), &h,
+		serverutil.SchemeGRPC, serverutil.SchemeGRPCEdge)
 	if err != nil {
 		return nil, err
 	}
@@ -86,21 +90,21 @@ func overrideSink(override biz.MatchEventSink) fx.Option {
 
 // 装配图只认 *conf.Bootstrap 一种输入，两种驱动形态因此共享全部构造函数。
 // 监听地址固定随机端口（进程内形态不做端口管理）。
-// newBootstrap 合成进程内形态配置；返回 error 的唯一来源是 actor 命名空间派生非法。
+// newBootstrap 合成进程内形态配置；返回 error 的唯一来源是命名空间缺失/非法（R9）。
 func newBootstrap(o Options) (*conf.Bootstrap, error) {
-	actorNS, err := bootstrap.ActorNamespaceOf(o.Namespace)
-	if err != nil {
+	// R9 严格模式：命名空间缺失/非法即装配失败（不回落 default/env）。
+	if err := bootstrap.RequireNamespace(o.Namespace); err != nil {
 		return nil, err
 	}
 	const randomPort = "127.0.0.1:0"
 	return &conf.Bootstrap{
-		Runtime: &configspb.Runtime{Name: "matcher", Id: o.NodeID, ActorNamespace: actorNS},
+		Runtime: &configspb.Runtime{Name: "matcher", Id: o.NodeID, Namespace: o.Namespace},
 		Registry: &configspb.Registry{
-			Etcd:      &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
-			Namespace: o.Namespace,
+			Etcd: &configspb.Registry_Etcd{Endpoints: o.EtcdEndpoints},
 		},
 		Server: &configspb.Server{
-			Grpc: &configspb.Server_GRPC{Addr: randomPort},
+			// 两个 gRPC 面都显式写 127.0.0.1:0（随机端口）：空 = 不启用该面，不能靠留空。
+			Grpc: &configspb.Server_GRPC{EdgeAddr: randomPort, InternalAddr: randomPort},
 			Http: &configspb.Server_HTTP{Addr: randomPort},
 		},
 		Data: &configspb.Data{

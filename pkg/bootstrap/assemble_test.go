@@ -1,12 +1,15 @@
 package bootstrap
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	"github.com/huangyuCN/atlas/namespace"
 )
 
 // testBootstrap 是手写的测试配置：内嵌 Runtime 提供 proto.Message，
@@ -48,7 +51,7 @@ func writeConf(t *testing.T, dir, content string) {
 // 因此无论是否配置 registry.etcd，bootstrap 均产出固定数量的模块。
 func TestAssembleLoaded(t *testing.T) {
 	cfg := &testBootstrap{
-		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1"},
+		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1", Namespace: "test"},
 		lg:      &configspb.Log{Level: "error"},
 	}
 	opts, err := AssembleLoaded(cfg)
@@ -64,7 +67,7 @@ func TestAssembleLoaded(t *testing.T) {
 // 含 registry.etcd 的配置同样只产出固定模块（etcd 由服务模块自行声明）。
 func TestAssembleLoadedIgnoresRegistry(t *testing.T) {
 	cfg := &testBootstrap{
-		Runtime: &configspb.Runtime{Name: "demo"},
+		Runtime: &configspb.Runtime{Name: "demo", Namespace: "test"},
 		reg: &configspb.Registry{
 			Etcd: &configspb.Registry_Etcd{Endpoints: []string{"127.0.0.1:12379"}},
 		},
@@ -83,6 +86,38 @@ func TestAssembleLoadedMissingRuntime(t *testing.T) {
 	cfg := &testBootstrap{Runtime: &configspb.Runtime{}}
 	if _, err := AssembleLoaded(cfg); err == nil {
 		t.Fatal("AssembleLoaded() 期望缺少 runtime.name 错误，实际为 nil")
+	}
+}
+
+// TestRequireNamespace 验证 R9 严格模式的校验点：runtime.namespace 缺失/非法一律报错
+// （不回落 default/env、不静默归一），合法 token 放行；错误可判定且含字段全名与示例值。
+func TestRequireNamespace(t *testing.T) {
+	for _, bad := range []string{"", "e2e.1790", "/atlas/services/test", "a b"} {
+		err := RequireNamespace(bad)
+		if err == nil {
+			t.Fatalf("RequireNamespace(%q) 期望报错，实际为 nil", bad)
+		}
+		if !errors.Is(err, namespace.ErrInvalid) {
+			t.Errorf("RequireNamespace(%q) 应可用 errors.Is(err, namespace.ErrInvalid) 判定，实际 %v", bad, err)
+		}
+		if !strings.Contains(err.Error(), "runtime.namespace") || !strings.Contains(err.Error(), "test") {
+			t.Errorf("错误信息应含字段全名 runtime.namespace 与示例值 test，实际 %v", err)
+		}
+	}
+	if err := RequireNamespace("test"); err != nil {
+		t.Fatalf("RequireNamespace(test) 期望放行，实际 %v", err)
+	}
+}
+
+// TestAssembleLoadedRequiresNamespace 验证进程形态的 R9 校验点在 AssembleLoaded 内生效：
+// runtime.namespace 缺失即装配失败（配置里删掉该字段的回归门禁）。
+func TestAssembleLoadedRequiresNamespace(t *testing.T) {
+	cfg := &testBootstrap{
+		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1"},
+		lg:      &configspb.Log{Level: "error"},
+	}
+	if _, err := AssembleLoaded(cfg); err == nil {
+		t.Fatal("AssembleLoaded() 期望缺少 runtime.namespace 错误，实际为 nil")
 	}
 }
 
@@ -113,14 +148,15 @@ func TestAssembleMissingFile(t *testing.T) {
 // id 取 `<服务名>-<主机名>`（注册实例 ID、actor NodeID、指标 service_instance_id 三处同源；
 // 带服务前缀是因为 actor NodeID 要**每进程**唯一——同主机跑多个服务时主机名会撞，
 // 撞了会共用 NATS 节点 subject，见 AGENTS.md「注册中心身份与隔离」），
-// env 取 default（注册中心键前缀按它隔离）。
+// env 取 default（**仅标签**：不参与任何键前缀派生——注册中心键前缀、actor subject、
+// 业务 topic 的隔离一律由 runtime.namespace 派生，见 docs/config.md 与 R9/R10）。
 func TestAssembleLoadedFillsIdentity(t *testing.T) {
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		t.Skip("无法获取主机名")
 	}
 	cfg := &testBootstrap{
-		Runtime: &configspb.Runtime{Name: "demo"},
+		Runtime: &configspb.Runtime{Name: "demo", Namespace: "test"},
 		lg:      &configspb.Log{Level: "error"},
 	}
 	if _, err := AssembleLoaded(cfg); err != nil {
@@ -138,7 +174,7 @@ func TestAssembleLoadedFillsIdentity(t *testing.T) {
 // TestAssembleLoadedKeepsIdentity 验证已显式配置的身份不被回填覆盖。
 func TestAssembleLoadedKeepsIdentity(t *testing.T) {
 	cfg := &testBootstrap{
-		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1", Env: "prod"},
+		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1", Env: "prod", Namespace: "test"},
 		lg:      &configspb.Log{Level: "error"},
 	}
 	if _, err := AssembleLoaded(cfg); err != nil {

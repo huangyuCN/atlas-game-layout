@@ -3,15 +3,17 @@ package e2e
 import (
 	"context"
 	"fmt"
+	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	admingamev1 "github.com/huangyuCN/atlas-game-layout/api/admin/game/v1"
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/scripts/sdksession"
 	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 )
 
@@ -46,7 +48,7 @@ func TestE2EWSAuth(t *testing.T) {
 	seedBattle(t, ctx, battleSvc, "b-1", sess.PlayerID())
 
 	// 战斗 op 经同一连接透传（连接绑定身份）。
-	battle := battlev1.NewBattleServiceOpClient(cli)
+	battle := battlev1opclient.NewBattleService(cli)
 	join, err := battle.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("JoinBattle: %v", err)
@@ -71,7 +73,7 @@ func TestE2EKCPBattle(t *testing.T) {
 	seedBattle(t, ctx, battle, "b-1", playerID)
 
 	cli := dialBattleChannel(t, sdkclient.DialKCP, gw.KCPURL, token)
-	bcli := battlev1.NewBattleServiceOpClient(cli)
+	bcli := battlev1opclient.NewBattleService(cli)
 	join, err := bcli.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("kcp JoinBattle: %v", err)
@@ -96,7 +98,7 @@ func TestE2EUDPBattle(t *testing.T) {
 	seedBattle(t, ctx, battle, "b-1", playerID)
 
 	cli := dialBattleChannel(t, sdkclient.DialUDP, gw.UDPURL, token)
-	bcli := battlev1.NewBattleServiceOpClient(cli)
+	bcli := battlev1opclient.NewBattleService(cli)
 	join, err := bcli.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: "b-1"})
 	if err != nil {
 		t.Fatalf("udp JoinBattle: %v", err)
@@ -106,14 +108,14 @@ func TestE2EUDPBattle(t *testing.T) {
 	}
 }
 
-// TestE2EHTTPHealth 验证 http 健康检查（gateway 与 game）与 game 玩家 REST 管理接口。
+// TestE2EHTTPHealth 验证 http 健康检查（gateway 与 game）与 game 管理面的玩家查询。
 func TestE2EHTTPHealth(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
 	}
 	game := newGame(t)
 	gw := newGateway(t, "a")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	// gateway 健康检查。
@@ -125,38 +127,56 @@ func TestE2EHTTPHealth(t *testing.T) {
 		t.Fatalf("game 健康检查: body=%q err=%v", body, err)
 	}
 
-	// game 玩家 REST 管理接口：注册建档后查询。
-	token, playerID := loginViaTCP(t, ctx, gw.TCPURL)
-	_ = token
-	body, err := httpGet(ctx, "http://"+game.HTTPURL+"/v1/players/"+playerID)
-	if err != nil || !strings.Contains(body, `"playerId"`) {
-		t.Fatalf("GetPlayer REST: body=%q err=%v", body, err)
+	// 玩家查询（P7 接管）：旧 service Player 的 REST 入口已删除，改由管理面 QueryPlayer 覆盖。
+	sess, _ := dialBizSession(t, gw.TCPURL)
+	loginFlow(t, ctx, sess)
+	rep, err := dialAdmin(t, game.GRPCURL).QueryPlayer(ctx, &admingamev1.QueryPlayerRequest{
+		Context: adminCtx("e2e-health", "", false), PlayerId: sess.PlayerID(),
+	})
+	if err != nil {
+		t.Fatalf("管理面 QueryPlayer: %v", err)
+	}
+	if rep.GetPlayerId() != sess.PlayerID() || rep.GetLevel() != 1 || rep.GetNickname() == "" {
+		t.Fatalf("管理面玩家投影不符: %+v", rep)
 	}
 }
 
 // dialBizSession 拨号 TCP 业务通道并绑定 SDK 会话（返回会话与底层客户端，推送订阅用）。
 func dialBizSession(t *testing.T, tcpURL string, opts ...sdkclient.Option) (*sdkclient.Session, *sdkclient.Client) {
 	t.Helper()
-	sess := sdkclient.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
+	return dialBizSessionWith(t, tcpURL, nil, opts...)
+}
+
+// dialBizSessionWith 在 dialBizSession 基础上追加**会话级**选项（如 WithOnKicked 接缝回调：
+// 推送原因经 SessionProtocol 按帧头版本解码，见 SDK 接缝 S0.5 修订 1）。
+func dialBizSessionWith(t *testing.T, tcpURL string, sessOpts []sdkclient.SessionOption, opts ...sdkclient.Option) (*sdkclient.Session, *sdkclient.Client) {
+	t.Helper()
+	sess := sdksession.NewSession(append([]sdkclient.SessionOption{
+		sdkclient.WithSessionHeartbeatInterval(0),
+	}, sessOpts...)...)
 	cli, err := sdkclient.Dial(tcpURL, append(testDialOpts(sess), opts...)...)
 	if err != nil {
 		t.Fatalf("tcp 拨号: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	sess.Bind(cli)
+	if err := sess.Bind(cli); err != nil {
+		t.Fatalf("会话绑定: %v", err)
+	}
 	return sess, cli
 }
 
 // dialWSSession 拨号 WS 单通道并绑定 SDK 会话（业务与战斗共用连接）。
 func dialWSSession(t *testing.T, wsURL string, opts ...sdkclient.Option) (*sdkclient.Session, *sdkclient.Client) {
 	t.Helper()
-	sess := sdkclient.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
+	sess := sdksession.NewSession(sdkclient.WithSessionHeartbeatInterval(0))
 	cli, err := sdkclient.DialWS(wsURL, "", append(testDialOpts(sess), opts...)...)
 	if err != nil {
 		t.Fatalf("ws 拨号: %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
-	sess.Bind(cli)
+	if err := sess.Bind(cli); err != nil {
+		t.Fatalf("会话绑定: %v", err)
+	}
 	return sess, cli
 }
 
@@ -177,26 +197,40 @@ func testDialOpts(sess *sdkclient.Session) []sdkclient.Option {
 	return append([]sdkclient.Option{sdkclient.WithHeartbeatInterval(5 * time.Second)}, sess.ChannelOptions()...)
 }
 
+// replyOf 断言 SDK 会话回执的具体生成类型（any → 模板生成的会话 DTO）。回执类型由接缝 op
+// 与生成物共同决定，类型不符即契约漂移，直接失败而不是静默取零值。
+func replyOf[T any](t *testing.T, raw any) T {
+	t.Helper()
+	typed, ok := raw.(T)
+	if !ok {
+		var zero T
+		t.Fatalf("会话回执类型不符：期望 %T", zero)
+	}
+	return typed
+}
+
 // loginFlow 跑注册 → 登录 → 心跳（不登出）；凭据存入会话（Token/PlayerID 取用）。
 func loginFlow(t *testing.T, ctx context.Context, sess *sdkclient.Session) {
 	t.Helper()
 	account := testAccount(t, "auth")
-	reg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "集成"})
+	rawReg, err := sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: "集成"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if reg.PlayerID == "" {
+	reg := replyOf[*gatewayv1.RegisterReply](t, rawReg)
+	if reg.GetPlayerId() == "" {
 		t.Fatal("注册回执缺少 player_id")
 	}
-	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.PlayerID, Password: "pw"}); err != nil {
+	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	hb, err := sess.Heartbeat(ctx)
+	rawHb, err := sess.Heartbeat(ctx)
 	if err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
-	if st, perr := strconv.ParseInt(hb.ServerTimeUnixMs, 10, 64); perr != nil || st == 0 {
-		t.Fatal("心跳回执缺 server_time")
+	hb := replyOf[*gatewayv1.HeartbeatReply](t, rawHb)
+	if hb.GetServerTimeUnixMs() == 0 {
+		t.Fatal("心跳回执缺 server_time（生成 DTO 的 server_time_unix_ms 为 0）")
 	}
 }
 

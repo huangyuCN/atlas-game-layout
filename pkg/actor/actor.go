@@ -11,12 +11,12 @@ import (
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
-	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas/contrib/actor/cluster"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	etcdlocator "github.com/huangyuCN/atlas/contrib/locator/etcd"
 	"github.com/huangyuCN/atlas/metrics"
+	"github.com/huangyuCN/atlas/namespace"
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -32,10 +32,11 @@ type Options struct {
 	EtcdEndpoints []string
 	// NatsURL 是集群传输 NATS 地址。
 	NatsURL string
-	// Namespace 是 actor 平面命名空间（NATS subject 前缀与 etcd 目录前缀；空 = default）。
-	// 与注册中心的环境隔离同源（装配层传 runtime.env）：两套共用同一 NATS/etcd 的部署
-	// 若不隔离会静默串台——互相收到对方的节点消息与广播主题。
-	Namespace string
+	// Namespace 是命名空间 token（配置字段 runtime.namespace 经框架 namespace.Derive 归一后的值）：
+	// actor NATS subject 前缀（atlas_actor.<ns>）与 etcd 目录前缀（/atlas/actors/<ns>）同由它派生。
+	// **必填**——两套共用同一 NATS/etcd 的部署若不隔离会静默串台（互相收到对方的节点消息与
+	// 广播主题）；缺失或非法即构造失败（R9：不回落 env/default）。
+	Namespace namespace.Namespace
 	// Discovery 是可选的服务发现（懒激活选节点；nil 时懒激活退化到本机）。
 	Discovery registry.Discovery
 	// Tracer 是可选的链路追踪器（core.Tracer 适配，如 contrib/actor/observe/otel
@@ -51,19 +52,6 @@ type Options struct {
 	claimer nodeClaimer
 }
 
-// NamespaceOf 返回生效的 actor 平面命名空间：`runtime.actor_namespace` 优先，
-// 缺省取 `runtime.env`（再空则 default，由 types.NormalizeNamespace 归一）。
-// 四服务装配与进程内形态都经它取值，避免两处规则漂移。
-func NamespaceOf(r *configspb.Runtime) string {
-	if r == nil {
-		return ""
-	}
-	if ns := r.GetActorNamespace(); ns != "" {
-		return ns
-	}
-	return r.GetEnv()
-}
-
 // Runtime 是 actor 集群运行时封装。
 type Runtime struct {
 	inner   *cluster.Runtime
@@ -77,7 +65,7 @@ type Runtime struct {
 
 // NewRuntime 装配集群运行时（惰性：Start 前不建任何连接）。
 func NewRuntime(opts Options) (*Runtime, error) {
-	ns, err := runtimeNamespace(opts)
+	derived, err := deriveOptions(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -85,12 +73,12 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	ec, loc, err := newLocator(opts, ns)
+	ec, loc, err := newLocator(opts, derived)
 	if err != nil {
 		nc.Close()
 		return nil, err
 	}
-	inner, err := newClusterRuntime(opts, ns, nc, loc)
+	inner, err := newClusterRuntime(opts, derived, nc, loc)
 	if err != nil {
 		nc.Close()
 		_ = ec.Close()
@@ -98,37 +86,38 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	}
 	claimer := opts.claimer
 	if claimer == nil {
-		claimer = etcdNodeClaimer{ec: ec, prefix: "/atlas/actors/" + ns, ttl: nodeLeaseTTL}
+		claimer = etcdNodeClaimer{ec: ec, prefix: derived.EtcdDirectory, ttl: nodeLeaseTTL}
 	}
 	return &Runtime{inner: inner, nc: nc, ec: ec, nodeID: opts.NodeID, claimer: claimer}, nil
 }
 
-// runtimeNamespace 校验必填项并归一 actor 平面命名空间（空 = default；非法值启动期报错）。
-func runtimeNamespace(opts Options) (string, error) {
+// deriveOptions 校验必填项并派生命名空间五面：命名空间缺失或非法即报错
+// （R9 严格模式：不回落 env/default；唯一派生点是框架 namespace.Derive）。
+func deriveOptions(opts Options) (namespace.Derived, error) {
 	if opts.NodeID == "" {
-		return "", fmt.Errorf("actor: NodeID 不能为空")
+		return namespace.Derived{}, fmt.Errorf("actor: NodeID 不能为空")
 	}
 	if len(opts.EtcdEndpoints) == 0 {
-		return "", fmt.Errorf("actor: EtcdEndpoints 不能为空")
+		return namespace.Derived{}, fmt.Errorf("actor: EtcdEndpoints 不能为空")
 	}
 	if opts.NatsURL == "" {
-		return "", fmt.Errorf("actor: NatsURL 不能为空")
+		return namespace.Derived{}, fmt.Errorf("actor: NatsURL 不能为空")
 	}
-	ns, err := types.NormalizeNamespace(opts.Namespace)
+	derived, err := namespace.Derive(opts.Namespace.String())
 	if err != nil {
-		return "", fmt.Errorf("actor: 命名空间非法: %w", err)
+		return namespace.Derived{}, fmt.Errorf("actor: %w", err)
 	}
-	return ns, nil
+	return derived, nil
 }
 
-// newLocator 构造 etcd 客户端与 locator：目录前缀按命名空间分层，
+// newLocator 构造 etcd 客户端与 locator：目录前缀取 Derived.EtcdDirectory（/atlas/actors/<ns>），
 // 使共用同一 etcd 的两套部署不争同一条 PID 归属记录（节点归属键复用同一前缀）。
-func newLocator(opts Options, ns string) (*clientv3.Client, *etcdlocator.Locator, error) {
+func newLocator(opts Options, derived namespace.Derived) (*clientv3.Client, *etcdlocator.Locator, error) {
 	ec, err := etcd.NewClient(etcd.Options{Endpoints: opts.EtcdEndpoints})
 	if err != nil {
 		return nil, nil, err
 	}
-	loc, err := etcdlocator.NewLocator(ec, etcdlocator.WithPrefix("/atlas/actors/"+ns))
+	loc, err := etcdlocator.NewLocator(ec, etcdlocator.WithPrefix(derived.EtcdDirectory))
 	if err != nil {
 		_ = ec.Close()
 		return nil, nil, fmt.Errorf("actor: 创建 locator 失败: %w", err)
@@ -139,7 +128,12 @@ func newLocator(opts Options, ns string) (*clientv3.Client, *etcdlocator.Locator
 // newClusterRuntime 组装集群运行时（目录 + NATS 传输 + 可选发现/追踪/指标）。
 // 日志不显式注入：cluster 默认取 atlas 全局 Logger（bootstrap 已把本服务配置好的 Logger
 // 装进全局），再捕获一次只会在将来二次 SetLogger 时固化为旧实例。
-func newClusterRuntime(opts Options, ns string, nc *nats.Conn, loc *etcdlocator.Locator) (*cluster.Runtime, error) {
+func newClusterRuntime(opts Options, derived namespace.Derived, nc *nats.Conn, loc *etcdlocator.Locator) (*cluster.Runtime, error) {
+	transport, err := cluster.NewNATSTransport(nc,
+		cluster.WithLocalNodeID(opts.NodeID), cluster.WithNamespace(derived.Namespace.String()))
+	if err != nil {
+		return nil, fmt.Errorf("actor: 创建 NATS 传输失败: %w", err)
+	}
 	cfg := cluster.Config{
 		NodeID: opts.NodeID,
 		Mode:   cluster.ModeCluster,
@@ -147,8 +141,7 @@ func newClusterRuntime(opts Options, ns string, nc *nats.Conn, loc *etcdlocator.
 	}
 	rtOpts := []cluster.Option{
 		cluster.WithDirectory(cluster.NewDirectory(loc, opts.NodeID, 10*time.Second)),
-		cluster.WithTransport(cluster.NewNATSTransport(nc,
-			cluster.WithLocalNodeID(opts.NodeID), cluster.WithNamespace(ns))),
+		cluster.WithTransport(transport),
 	}
 	if opts.Discovery != nil && opts.ServiceName != "" {
 		rtOpts = append(rtOpts, cluster.WithDiscovery(opts.Discovery, opts.ServiceName))

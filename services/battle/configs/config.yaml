@@ -1,20 +1,35 @@
 runtime:
   name: battle
   # id 缺省取 <服务名>-<主机名>：注册实例 ID、actor NodeID 与指标 service_instance_id 三处同源，
-  # 且必须每进程唯一（actor NodeID 决定 NATS 节点 subject atlas_actor.<env>.node.<id>.*，
+  # 且必须每进程唯一（actor NodeID 决定 NATS 节点 subject atlas_actor.<ns>.node.<id>.*，
   # 同主机的多个服务不得共用）；同主机同服务的双进程需在此显式配唯一 id。
   # version 缺省取构建注入版本（lib/version，Makefile/CI 经 -ldflags 写入）；需要时在此覆盖
-  env: test        # 命名空间来源：链路资源 deployment.environment.name、注册中心键前缀 /atlas/services/<env>、
-                   # actor 平面 NATS subject（atlas_actor.<env>.*）与业务 topic 前缀（atlas.<env>.push|event|gw.*）
+  env: test        # **仅标签**：链路资源 deployment.environment.name 与指标 env 标签；
+                   # 命名空间由 runtime.namespace 派生，env 不参与任何前缀派生。
+  # namespace 是**唯一命名空间字段**：注册中心键前缀 /atlas/services/<ns>、actor subject 前缀
+  # atlas_actor.<ns>、业务 topic 前缀 atlas.<ns>、redis 键前缀 atlas:<ns>:、etcd 目录 /atlas/actors/<ns>
+  # 五面全由它派生（框架 namespace.Derive）。**必须显式配置，缺失即启动失败**（严格模式 R9）；
+  # 取值限 [A-Za-z0-9_-]，非法字符同样启动失败。缺省约定与五面派生表见 docs/config.md。
+  namespace: test
+  # 客户端版本门槛（M1 协议演进）字段位：校验逻辑在**网关登录入口**（见 p3 的版本门槛实现），
+  # 本服务声明仅为「每服务一份自包含 YAML」的样例；OFF=不校验；NEGOTIATE=只协商；ENFORCE=拒绝低版本。
+  min_client_version: 0.1.0
+  min_client_version_mode: MIN_CLIENT_VERSION_MODE_NEGOTIATE
 registry:
   etcd:
     endpoints:
       - 127.0.0.1:12379
 server:
+  # gRPC 是**两个互相独立的面**（缺省约定见 docs/config.md：地址为空 = 该面不启用）：
+  #   edge_addr（不可信区）：客户端 op 经网关转发到域 rpc/ 平面的 Edge 接口（access=CLIENT）；
+  #   internal_addr（可信区）：服务间 gRPC 调用 + P7 管理面 AdminService。
+  # 两面各自独立监听、独立生命周期，地址不得相同（相同即装配期报错）；
+  # 两面都挂 opgrpc 一元拦截器（入站 metadata→ctx 身份、出站错误→gRPC status）。
   grpc:
-    addr: 0.0.0.0:9300
+    edge_addr: 0.0.0.0:9300
+    internal_addr: 0.0.0.0:9301
     timeout: 30s                  # 单次 RPC 超时；Atlas 默认 1s，本模板显式放宽到 30s
-    reflection: true              # 调试/测试开启；生产应关闭（会暴露服务清单）
+    reflection: true              # 调试/测试开启；生产应关闭（会暴露服务清单，两面同享该开关）
     # stream_timeout: 30s         # 流式 RPC 超时（不配 = 不限）
     # max_recv_msg_size: 4194304  # 单条消息接收上限（字节，不配 = 4MB）
     # metadata: true              # 注册 gRPC metadata 服务

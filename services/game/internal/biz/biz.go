@@ -4,10 +4,13 @@ package biz
 
 import (
 	"context"
+	"time"
 
+	admingamev1 "github.com/huangyuCN/atlas-game-layout/api/admin/game/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
+	"github.com/huangyuCN/atlas/metrics"
 )
 
 // PlayerService 是玩家注册/登录业务接口（PlayerActor 经此接入业务逻辑）。
@@ -17,13 +20,6 @@ type PlayerService interface {
 	Register(ctx context.Context, req *gamev1.RegisterReq) (*gamev1.RegisterReply, error)
 	// Login 登录：校验玩家数据与口令并回执摘要；会话建立与令牌裁决在 Gateway。
 	Login(ctx context.Context, req *gamev1.LoginReq) (*gamev1.LoginReply, error)
-}
-
-// GameService 是玩家查询与背包业务接口（grpc/http 服务实现）。
-type GameService interface {
-	GetPlayer(ctx context.Context, req *gamev1.GetPlayerRequest) (*gamev1.GetPlayerReply, error)
-	GetBackpack(ctx context.Context, req *gamev1.GetBackpackRequest) (*gamev1.GetBackpackReply, error)
-	GrantItem(ctx context.Context, req *gamev1.GrantItemRequest) (*gamev1.GrantItemReply, error)
 }
 
 // PlayerStateAccess 是玩家状态访问接口：
@@ -41,6 +37,39 @@ type PlayerStateAccess interface {
 type PlayerServiceOptions struct {
 	// NewPlayerID 是玩家 ID 生成器（nil 用 idgen 默认实现）。
 	NewPlayerID func() string
+}
+
+// DefaultMaxGrantCount 是管理面单次发放上限的默认值（R12）：
+// 配置（game.conf.Admin.max_grant_count）缺省或 0 时回退本值；
+// **不提供「关闭上限」**——只能调高，不能取消。
+const DefaultMaxGrantCount uint32 = 100
+
+// NormalizeMaxGrantCount 归一单次发放上限：0（未配置）回退 DefaultMaxGrantCount，其余原样返回。
+func NormalizeMaxGrantCount(n uint32) uint32 {
+	if n == 0 {
+		return DefaultMaxGrantCount
+	}
+	return n
+}
+
+// AdminOptions 是管理面业务服务的装配参数（handler 构造用）。
+type AdminOptions struct {
+	// MaxGrantCount 是单次发放上限（0 = 未配置，回退 DefaultMaxGrantCount）。
+	MaxGrantCount uint32
+	// NewAuditID 是审计号生成器（nil 用 idgen 默认实现）。
+	NewAuditID func() string
+	// Now 返回当前时间（nil 用 time.Now；测试注入固定时钟）。
+	Now func() time.Time
+	// Meter 是指标采集器（nil/noop = 不打点）；用于审计收尾失败计数
+	// handler.MetricAdminAuditFinalizeFailed（记录保持 PENDING，需人工核查）。
+	Meter metrics.Collector
+}
+
+// AdminService 是 game 管理面业务接口（仅内网 GM/运维工具可达）：
+// 实现只做「校验 + 幂等 + 审计 + 转发」，业务写经 PlayerStateAccess 收敛到 PlayerActor 聚合根，
+// 本层不直连 mongo/redis 改业务数据。方法签名即管理面 gRPC 契约（api/admin/game/v1）。
+type AdminService interface {
+	admingamev1.AdminServiceServer
 }
 
 // MatchmakerClient 是撮合域客户端接口（PlayerActor 的匹配/组队域用，

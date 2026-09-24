@@ -5,13 +5,16 @@ package main
 import (
 	"context"
 	"fmt"
+	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
+	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 	"sync/atomic"
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	"github.com/huangyuCN/atlas-game-layout/scripts/sdksession"
 	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -19,12 +22,12 @@ import (
 
 // pushOps 是客户端订阅的服务端推送 op 集（op 为消息完整名）。
 var pushOps = []string{
-	consts.PushOpMatchStarted,
-	consts.PushOpMatchFailed,
-	consts.PushOpPartyRoster,
-	consts.PushOpFrameBroadcast,
-	consts.PushOpBattleEnd,
-	consts.PushOpKickedOffline,
+	gamev1opclient.PlayerServicePushOps.MatchStartedNotify,
+	gamev1opclient.PlayerServicePushOps.MatchFailedNotify,
+	gamev1opclient.PlayerServicePushOps.PartyRosterNotify,
+	battlev1opclient.BattleServicePushOps.FrameBroadcast,
+	battlev1opclient.BattleServicePushOps.BattleEndNotify,
+	gatewayv1opclient.SessionPushOps.KickedNotify,
 }
 
 // player 是一端客户端：SDK 会话 + 通道 + 域强类型 stub + 推送收集。
@@ -33,8 +36,8 @@ type player struct {
 	id      string // 玩家 ID（登录回执）
 	sess    *sdkclient.Session
 	cli     *sdkclient.Client
-	players *gamev1.PlayerServiceOpClient   // 玩家域 op（业务通道，会话承载身份）
-	battle  *battlev1.BattleServiceOpClient // 战斗域 op（dual 战斗通道视图 / 单通道复用业务通道）
+	players *gamev1opclient.PlayerService   // 玩家域 op（业务通道，会话承载身份）
+	battle  *battlev1opclient.BattleService // 战斗域 op（dual 战斗通道视图 / 单通道复用业务通道）
 
 	started chan *gamev1.MatchStartedNotify
 	end     chan *battlev1.BattleEndNotify
@@ -43,10 +46,13 @@ type player struct {
 	frames  atomic.Int64 // 收到的帧广播数
 }
 
-// newSession 构造 SDK 会话管理器：内置会话心跳（10s，无载荷——服务端按
-// 连接/帧槽定位会话续租，空载荷已由框架按零值消息解码）。
-func newSession() *sdkclient.Session {
-	return sdkclient.NewSession(sdkclient.WithSessionHeartbeatInterval(10 * time.Second))
+// newSession 构造 SDK 会话管理器：会话协议接缝取自模板生成描述符（scripts/sdksession），
+// 内置会话心跳（10s，无载荷——服务端按连接/帧槽定位会话续租，空载荷已由框架按零值消息解码）。
+// opts 是会话级选项（如 WithOnKicked：被挤下线原因经接缝按帧头版本解码，见 S0.5 修订 1）。
+func newSession(opts ...sdkclient.SessionOption) *sdkclient.Session {
+	return sdksession.NewSession(append([]sdkclient.SessionOption{
+		sdkclient.WithSessionHeartbeatInterval(10 * time.Second),
+	}, opts...)...)
 }
 
 // commonDialOpts 客户端公共拨号参数：传输保活心跳（会话心跳由 Session 内置承担）。
@@ -75,11 +81,11 @@ func newPlayer(tag string, sess *sdkclient.Session, cli *sdkclient.Client) *play
 		ros:     make(chan *gamev1.PartyRosterNotify, 4),
 		failed:  make(chan *gamev1.MatchFailedNotify, 4),
 	}
-	p.players = gamev1.NewPlayerServiceOpClient(sess)
+	p.players = gamev1opclient.NewPlayerService(sess)
 	if bv := cli.Channel(sdkclient.KindBattle); bv != nil {
-		p.battle = battlev1.NewBattleServiceOpClient(bv)
+		p.battle = battlev1opclient.NewBattleService(bv)
 	} else {
-		p.battle = battlev1.NewBattleServiceOpClient(cli)
+		p.battle = battlev1opclient.NewBattleService(cli)
 	}
 	p.watchNotifies()
 	return p
@@ -101,7 +107,10 @@ func newDualPlayer(tcpAddr, kcpAddr string, extra ...sdkclient.Option) (*player,
 	if err != nil {
 		return nil, fmt.Errorf("dual 连接失败: %w", err)
 	}
-	sess.Bind(cli)
+	if err := sess.Bind(cli); err != nil {
+		_ = cli.Close()
+		return nil, fmt.Errorf("会话绑定失败: %w", err)
+	}
 	return newPlayer(fmt.Sprintf("dual-%d", time.Now().UnixNano()%1000), sess, cli), nil
 }
 
@@ -113,19 +122,31 @@ func newSinglePlayer(wsURL string, extra ...sdkclient.Option) (*player, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ws 连接失败: %w", err)
 	}
-	sess.Bind(cli)
+	if err := sess.Bind(cli); err != nil {
+		_ = cli.Close()
+		return nil, fmt.Errorf("会话绑定失败: %w", err)
+	}
 	return newPlayer(fmt.Sprintf("single-%d", time.Now().UnixNano()%1000), sess, cli), nil
 }
 
 // newBizPlayer 建立仅业务通道客户端（容错/顶号场景的轻量形态）。
 func newBizPlayer(tcpAddr string, extra ...sdkclient.Option) (*player, error) {
-	sess := newSession()
+	return newBizPlayerWith(tcpAddr, nil, extra...)
+}
+
+// newBizPlayerWith 在 newBizPlayer 基础上追加**会话级**选项（如 WithOnKicked：被挤下线
+// 原因经 SessionProtocol 接缝按帧头版本解码，见 SDK 接缝 S0.5 修订 1）。
+func newBizPlayerWith(tcpAddr string, sessOpts []sdkclient.SessionOption, extra ...sdkclient.Option) (*player, error) {
+	sess := newSession(sessOpts...)
 	opts := append(append(commonDialOpts(sess), sess.ChannelOptions()...), extra...)
 	cli, err := sdkclient.Dial(tcpAddr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tcp 连接失败: %w", err)
 	}
-	sess.Bind(cli)
+	if err := sess.Bind(cli); err != nil {
+		_ = cli.Close()
+		return nil, fmt.Errorf("会话绑定失败: %w", err)
+	}
 	return newPlayer(fmt.Sprintf("biz-%d", time.Now().UnixNano()%1000), sess, cli), nil
 }
 
@@ -145,24 +166,24 @@ func (p *player) watchNotifies() {
 // watch 分发服务端推送：成局/失败/名册/结束 → 信号通道，帧广播 → 计数。
 func (p *player) watch(operation string, payload []byte) {
 	switch operation {
-	case consts.PushOpMatchStarted:
+	case gamev1opclient.PlayerServicePushOps.MatchStartedNotify:
 		var n gamev1.MatchStartedNotify
 		if protojson.Unmarshal(payload, &n) == nil {
 			push(p.started, &n)
 		}
-	case consts.PushOpMatchFailed:
+	case gamev1opclient.PlayerServicePushOps.MatchFailedNotify:
 		var n gamev1.MatchFailedNotify
 		if protojson.Unmarshal(payload, &n) == nil {
 			push(p.failed, &n)
 		}
-	case consts.PushOpPartyRoster:
+	case gamev1opclient.PlayerServicePushOps.PartyRosterNotify:
 		var n gamev1.PartyRosterNotify
 		if protojson.Unmarshal(payload, &n) == nil {
 			push(p.ros, &n)
 		}
-	case consts.PushOpFrameBroadcast:
+	case battlev1opclient.BattleServicePushOps.FrameBroadcast:
 		p.frames.Add(1)
-	case consts.PushOpBattleEnd:
+	case battlev1opclient.BattleServicePushOps.BattleEndNotify:
 		var n battlev1.BattleEndNotify
 		if protojson.Unmarshal(payload, &n) == nil {
 			push(p.end, &n)
@@ -187,11 +208,15 @@ func (p *player) disconnect() error {
 // （GetPlayerData：摘要 + 背包，登录轻回执的按需补充）。
 func (p *player) registerLogin(ctx context.Context, step byte) error {
 	account := fmt.Sprintf("e2e-%s-%d", p.tag, time.Now().UnixNano())
-	reg, err := p.sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: account})
+	rawReg, err := p.sess.Register(ctx, &gatewayv1.RegisterRequest{Account: account, Password: "pw", Nickname: account})
 	if err != nil {
 		return fmt.Errorf("注册失败: %w", err)
 	}
-	if _, err := p.sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.PlayerID, Password: "pw"}); err != nil {
+	reg, err := sdksession.ReplyAs[*gatewayv1.RegisterReply](rawReg)
+	if err != nil {
+		return fmt.Errorf("注册回执: %w", err)
+	}
+	if _, err := p.sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"}); err != nil {
 		return fmt.Errorf("登录失败: %w", err)
 	}
 	p.id = p.sess.PlayerID()

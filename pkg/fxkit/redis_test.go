@@ -17,7 +17,7 @@ type fakeRedisConf struct {
 // GetData 返回测试用数据中间件配置段。
 func (f *fakeRedisConf) GetData() *configspb.Data { return f.data }
 
-// GetRuntime 返回测试用服务身份（redis 键命名空间取自它，见 pkg/actor.NamespaceOf）。
+// GetRuntime 返回测试用服务身份（redis 键命名空间取自 runtime.namespace）。
 func (f *fakeRedisConf) GetRuntime() *configspb.Runtime { return f.rt }
 
 // TestRedisOptions 验证 proto 配置 → redis.Options 的映射（缺省/三形态/全字段）。
@@ -101,15 +101,16 @@ func TestRedisOptionsUnknownMode(t *testing.T) {
 
 // TestNewRedisClient 验证按配置构造客户端（惰性连接）；缺 addrs 快速失败。
 func TestNewRedisClient(t *testing.T) {
-	cli, err := NewRedisClient(&fakeRedisConf{data: &configspb.Data{Redis: &configspb.Data_Redis{
-		Addrs: []string{"127.0.0.1:1"},
-	}}})
+	cli, err := NewRedisClient(&fakeRedisConf{
+		data: &configspb.Data{Redis: &configspb.Data_Redis{Addrs: []string{"127.0.0.1:1"}}},
+		rt:   testRuntime(),
+	})
 	if err != nil {
 		t.Fatalf("NewRedisClient() 错误 = %v", err)
 	}
 	t.Cleanup(func() { _ = cli.Close() })
 
-	if _, err := NewRedisClient(&fakeRedisConf{}); err == nil {
+	if _, err := NewRedisClient(&fakeRedisConf{rt: testRuntime()}); err == nil {
 		t.Fatal("缺 redis.addrs 期望报错，实际为 nil")
 	}
 }

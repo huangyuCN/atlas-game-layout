@@ -1,7 +1,7 @@
 // Package actor 提供 battle 服务的 actor 装配：BattleActor（集群懒激活）承载
 // 一局战斗：内嵌 lockstep 会话（帧引擎）+ 帧广播下发 + 结算落库与事件。
 //
-// 分发由 protoc-gen-atlas-actor 生成的桩接管（battlev1.NewBattleServiceActorServer），
+// 分发由 protoc-gen-atlas-actor 生成的桩接管（battlev1actor.NewBattleService），
 // 客户端 op 与集群内部调用共用同一份 service 契约。发起者玩家身份不来自消息体，
 // 统一经投递 sender 注入（ActorContext.Sender，Gateway 侧组装）。
 //
@@ -14,11 +14,10 @@ package actor
 import (
 	"context"
 	"fmt"
+	battlev1actor "github.com/huangyuCN/atlas-game-layout/api/battle/v1/actor"
 	"hash/fnv"
 	"time"
 
-	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
-	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz/simulator"
@@ -103,7 +102,7 @@ func NewRuntimeProps(d DefaultDeps, cfg Config) core.Props {
 // NewProps 构造 BattleActor 注册规格。
 func NewProps(p Props) core.Props {
 	return core.Props{
-		Type: consts.ActorTypeBattle,
+		Type: battlev1actor.BattleServiceActorType,
 		NewHandler: func(pid types.PID) core.Handler {
 			b := &BattleActor{
 				pid:        pid,
@@ -116,12 +115,12 @@ func NewProps(p Props) core.Props {
 				cfg:        p.Cfg,
 				players:    make(map[string]struct{}),
 			}
-			return battlev1.NewBattleServiceActorServer(b, core.WithLocalTell(b.onFrameResult))
+			return battlev1actor.NewBattleService(b, core.WithLocalTell(b.onFrameResult))
 		},
 		SpawnMode:     core.SpawnAuto,
 		Tell:          pkgactor.DefaultTellChain(),
 		Ask:           pkgactor.DefaultAskChain(),
-		DecodeInbound: battlev1.NewBattleServiceDecodeInbound(),
+		DecodeInbound: battlev1actor.NewBattleServiceDecodeInbound(),
 	}
 }
 
