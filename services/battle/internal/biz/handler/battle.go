@@ -39,7 +39,13 @@ func (h *BattleHandler) CreateBattle(ctx context.Context, req *battlev1.CreateBa
 	ctx, span := observability.StartSpan(ctx, "battle.Battle.CreateBattle",
 		attribute.String("match.id", req.GetMatchId()))
 	defer func() { observability.EndSpan(span, err) }()
-	pid, err := battlePID(req.GetMatchId())
+	// 目标身份优先取请求携带的 battle_id（与 matcher 的调用约定一致）；
+	// 未携带时回落 match_id（既有管理面行为）。
+	battleID := req.GetBattleId()
+	if battleID == "" {
+		battleID = req.GetMatchId()
+	}
+	pid, err := battlePID(battleID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +65,7 @@ func (h *BattleHandler) GetBattle(ctx context.Context, req *battlev1.GetBattleRe
 	if err != nil {
 		return nil, err
 	}
-	st, err := h.cli.GetState(ctx, pid, &battlev1.GetStateReq{})
+	st, err := h.cli.GetState(ctx, pid, &battlev1.GetStateReq{BattleId: req.GetBattleId()})
 	if err != nil {
 		return nil, fmt.Errorf("handler: 战斗请求失败: %w", err)
 	}

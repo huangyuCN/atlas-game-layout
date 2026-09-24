@@ -7,6 +7,7 @@
 export interface CreateBattleRequest {
   matchId?: string; // battle.v1.CreateBattleRequest.match_id
   playerIds?: string[]; // battle.v1.CreateBattleRequest.player_ids
+  battleId?: string; // battle.v1.CreateBattleRequest.battle_id
 }
 
 export interface CreateBattleReply {
@@ -34,6 +35,7 @@ export interface BattleSettledEvent {
 }
 
 export interface GetStateReq {
+  battleId?: string; // battle.v1.GetStateReq.battle_id
 }
 
 export interface GetStateReply {

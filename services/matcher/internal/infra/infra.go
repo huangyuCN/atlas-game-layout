@@ -196,6 +196,7 @@ func (s *BattleActorStarter) Start(ctx context.Context, battleID, matchID string
 	if _, err := cli.Create(ctx, pid, &battlev1.CreateBattleRequest{
 		MatchId:   matchID,
 		PlayerIds: playerIDs,
+		BattleId:  battleID, // 目标身份随请求携带：RPC 面（gRPC）按此字段寻址
 	}); err != nil {
 		return fmt.Errorf("infra: 开局调用失败: %w", err)
 	}

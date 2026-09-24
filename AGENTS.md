@@ -54,6 +54,9 @@ Atlas 类型仅在 `pkg/` 装配层使用。`go.mod` 以本地 `replace` 指向 
 - **规模与复用（新增/修改代码时遵守）**：
   - **单文件**：同一源文件行数**不超过 500 行**（含空行与注释）；若逼近上限，应拆分为多个文件或子包，并保证职责清晰。
   - **单函数**：同一函数**不超过 50 行**（含空行与注释）；超出则拆分为多个函数或提取步骤，避免单块过长。
+  - **工具生成代码不受上述行数限制**：`*.pb.go`（含 `_actor` / `_route` / `_rpc_adapter` / `_grpc` 等 protoc 插件产物）、`*.g.cs`、`*_pb.ts` 等由代码生成器产出的文件，行数与函数长度以生成器输出为准；禁止手工编辑（改生成器后重新生成），也不要求为"逼近 500 行"而拆分。
+  - **生成器本身受限制**：`cmd/protoc-gen-*` 下的插件源码是手写代码，同样遵守单文件 ≤500 行、单函数 ≤50 行——生成逻辑膨胀时按职责拆文件（如 `actor.go` / `route.go` / `rpcadapter.go` 分列）。
+  - **生成物仍按职责分文件**：同一 proto 的 actor 分发桩、路由表、RPC 接入层各自独立成文件（便于 review 与减少合并冲突），不因为"不受行数限制"就堆进同一个文件。
   - **枚举优先（杜绝魔法值）**：协议与代码中语义有限的值（状态/原因/类型/级别等）**必须**定义为 proto enum 或 Go 常量集合，杜绝散落的魔法字符串/数字——客户端拿到的是自解释的枚举名（protojson 默认下发枚举名）。协议新增 reason/状态/类型字段一律用 enum 类型；发现存量魔法值，在改造到该处时一并枚举化。自由文本（如操作备注、错误描述）不在此列；纯路由键（如推送 operation 的消息完整名）是协议寻址键，不属魔法值。
 - **调用链追踪自检（跨模块/跨服务变更必须执行）**：修改跨模块、跨进程（如集群路由、消息投递、RPC 调用）的逻辑后，**必须**从入口点出发，跟踪完整的调用链并验证每一跳的关键假设（PID 格式、地址映射、消息编解码、端口/主题命名等）是否匹配。仅 `go build` 通过不足以证明链路正确。
   - **公共抽象**：多处重复或可被清晰命名的逻辑，**必须**提取为包内/跨包的**公共函数**（或小型类型与方法），避免复制粘贴；提取时保持命名与现有代码风格一致。
@@ -133,7 +136,11 @@ game/battle 的业务 actor（`services/*/internal/actor/`）采用**按域分�
 | `player_bag.go` / `battle_frame.go` | 背包/帧同步域方法（GrantItem/GetBackpack/GetPlayer / FrameInput/onFrameResult/checkSettle） |
 
 **铁律**：
-- 业务 actor **实现生成的 `<Service>Server` 接口**（方法签名 `(ctx core.ActorContext, req *X) (*Y, error)`）；分发由生成桩接管——**不手写 OnTell/OnAsk/switch 分发/decodeEnvelope**；
+- 业务 actor **实现生成的 `<Service>ActorServer` 接口**（方法签名 `(ctx core.ActorContext, req *X) (*Y, error)`）；分发由生成桩（`New<Service>ActorServer`）接管——**不手写 OnTell/OnAsk/switch 分发/decodeEnvelope**；
+- 每个域 proto 会生成**两面**，用途不同不要混用：
+  - **actor 面**：`<Service>ActorServer`（业务实现）+ `New<Service>ActorServer`（本地分发桩）+ `<Service>ClusterClient`（**仅集群内互调**，跨服务请走 RPC 面）；
+  - **RPC 面**：`<Service>Server`（gRPC 接口，`--go-grpc_out` 生成）+ `<Service>RPCAdapter`（接入层，`New<Service>RPCAdapter(rt, opts)`：解析 metadata → 组装 PID → Ask/Tell，可直接注册到 `grpc.Server`）+ `<Service>OpClient`（客户端 SDK stub，经会话通道发起 op）。
+  - **部署前提**：接入层同时暴露 CLIENT 与 INTERNAL op，`server.grpc` 必须限内网——客户端越权面靠网络边界，不靠 access 过滤。
 - 错误**上抛**（`return nil, err`，结构化 error 经集群 error 通道往返），**不包 `Ok:false` 回执**；
 - 本地消息（如定时快照 `tickSnapshot`）经 `core.WithLocalTell[T]` 类型路由注册；
 - 生命周期（OnStart/OnStop）经生成桩 `DispatchBase` 断言转发；
@@ -210,6 +217,16 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 - 注册端与发现端**共用同一条构造路径**（`pkg/fxkit.RegistryOptions` → `pkg/registry.NewEtcd`，返回对象同时实现 Registrar 与 Discovery）；前缀不一致会表现为「注册成功却发现不到」。
 - 嵌入式/测试形态用 `assemble.Options.Namespace` 指定**本次运行独占的前缀**（如 `/atlas/services/it-<纳秒>`）：既与常驻进程隔离，也避免上一次运行残留的实例键（租约未过期）触发注册冲突。
 - 实例键冲突（`registry.ErrInstanceConflict`）会让进程**启动失败退出**：同一实例 ID 的旧进程仍在运行、或异常退出后租约尚未过期（TTL 15s）都会命中，等租约过期后重启即可。**不要**改 ID 绕过——那正是要防的静默顶替。
+
+### 域 op 的目标身份（battle 域为例，两面规则不同）
+
+| 面 | 寻址来源 | 空值行为 |
+|----|----------|----------|
+| 帧协议/网关透传（CLIENT op） | 请求字段（`battle_id`）或会话身份，按注解 `uid`/`uid_field` | 一律拒绝（不回落） |
+| 服务 gRPC 管理面（`BattleHandler.CreateBattle`） | 请求 `battle_id`，未携带时**回落 `match_id`**（既有管理面行为，`battle:<match_id>` 是历史约定） | 回落 |
+| RPC 接入层（INTERNAL op） | 请求 `battle_id`（由调用方分配并携带，如 matcher 的 `idgen.Battle()`） | 拒绝 |
+
+> `Create` 之前目标 battle actor 尚不存在，因此**调用方必须把目标身份写进请求**（`CreateBattleRequest.battle_id`）——RPC 面没有 PID 概念，接入层只能按字段寻址。
 
 ### actor 平面身份与命名空间（改 actor 装配时必须遵守）
 

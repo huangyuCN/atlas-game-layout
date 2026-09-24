@@ -22,6 +22,9 @@ public sealed class CreateBattleRequest
     [JsonPropertyName("playerIds")]
     public List<string>? PlayerIds { get; set; }
 
+    [JsonPropertyName("battleId")]
+    public string? BattleId { get; set; }
+
 }
 
 /// <summary>CreateBattleReply DTO（protojson JSON 语义）。</summary>
@@ -79,6 +82,9 @@ public sealed class BattleSettledEvent
 /// <summary>GetStateReq DTO（protojson JSON 语义）。</summary>
 public sealed class GetStateReq
 {
+    [JsonPropertyName("battleId")]
+    public string? BattleId { get; set; }
+
 }
 
 /// <summary>GetStateReply DTO（protojson JSON 语义）。</summary>

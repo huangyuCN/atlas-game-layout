@@ -13,6 +13,10 @@ import "google/api/annotations.proto";
 message CreateBattleRequest {
   string match_id = 1;
   repeated string player_ids = 2;
+  // battle_id 是**调用方分配**的目标战斗标识（actor key），必须随请求携带：
+  // RPC 面（gRPC）没有 PID 概念，接入层正是按这个字段寻址 battle:<battle_id>；
+  // matcher 生成 id 后填入，管理面未填时回落 match_id（保持既有行为）。
+  string battle_id = 3;
 }
 
 message CreateBattleReply {
@@ -43,7 +47,10 @@ message BattleSettledEvent {
 }
 
 // GetStateReq/Reply 战斗状态查询（grpc 管理接口转发）。
-message GetStateReq {}
+message GetStateReq {
+  // battle_id 是目标战斗标识（actor key）：RPC 面按它寻址 battle:<battle_id>。
+  string battle_id = 1;
+}
 
 message GetStateReply {
   string state = 1;

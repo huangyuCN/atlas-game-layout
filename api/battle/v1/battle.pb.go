@@ -28,9 +28,13 @@ const (
 
 // CreateBattleRequest 开局：matcher 成局后调用。
 type CreateBattleRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MatchId       string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
-	PlayerIds     []string               `protobuf:"bytes,2,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MatchId   string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	PlayerIds []string               `protobuf:"bytes,2,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
+	// battle_id 是**调用方分配**的目标战斗标识（actor key），必须随请求携带：
+	// RPC 面（gRPC）没有 PID 概念，接入层正是按这个字段寻址 battle:<battle_id>；
+	// matcher 生成 id 后填入，管理面未填时回落 match_id（保持既有行为）。
+	BattleId      string `protobuf:"bytes,3,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -77,6 +81,13 @@ func (x *CreateBattleRequest) GetPlayerIds() []string {
 		return x.PlayerIds
 	}
 	return nil
+}
+
+func (x *CreateBattleRequest) GetBattleId() string {
+	if x != nil {
+		return x.BattleId
+	}
+	return ""
 }
 
 type CreateBattleReply struct {
@@ -336,7 +347,9 @@ func (x *BattleSettledEvent) GetPlayers() []*PlayerResult {
 
 // GetStateReq/Reply 战斗状态查询（grpc 管理接口转发）。
 type GetStateReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// battle_id 是目标战斗标识（actor key）：RPC 面按它寻址 battle:<battle_id>。
+	BattleId      string `protobuf:"bytes,1,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -369,6 +382,13 @@ func (x *GetStateReq) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetStateReq.ProtoReflect.Descriptor instead.
 func (*GetStateReq) Descriptor() ([]byte, []int) {
 	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetStateReq) GetBattleId() string {
+	if x != nil {
+		return x.BattleId
+	}
+	return ""
 }
 
 type GetStateReply struct {
@@ -435,11 +455,12 @@ var File_api_battle_v1_battle_proto protoreflect.FileDescriptor
 
 const file_api_battle_v1_battle_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/battle/v1/battle.proto\x12\tbattle.v1\x1a\x1cgoogle/api/annotations.proto\"O\n" +
+	"\x1aapi/battle/v1/battle.proto\x12\tbattle.v1\x1a\x1cgoogle/api/annotations.proto\"l\n" +
 	"\x13CreateBattleRequest\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1d\n" +
 	"\n" +
-	"player_ids\x18\x02 \x03(\tR\tplayerIds\"0\n" +
+	"player_ids\x18\x02 \x03(\tR\tplayerIds\x12\x1b\n" +
+	"\tbattle_id\x18\x03 \x01(\tR\bbattleId\"0\n" +
 	"\x11CreateBattleReply\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"/\n" +
 	"\x10GetBattleRequest\x12\x1b\n" +
@@ -453,8 +474,9 @@ const file_api_battle_v1_battle_proto_rawDesc = "" +
 	"\x12BattleSettledEvent\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x12\x19\n" +
 	"\bmatch_id\x18\x02 \x01(\tR\amatchId\x121\n" +
-	"\aplayers\x18\x03 \x03(\v2\x17.battle.v1.PlayerResultR\aplayers\"\r\n" +
-	"\vGetStateReq\"m\n" +
+	"\aplayers\x18\x03 \x03(\v2\x17.battle.v1.PlayerResultR\aplayers\"*\n" +
+	"\vGetStateReq\x12\x1b\n" +
+	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"m\n" +
 	"\rGetStateReply\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12#\n" +
 	"\rcurrent_frame\x18\x02 \x01(\x04R\fcurrentFrame\x12!\n" +

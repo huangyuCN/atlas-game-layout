@@ -226,7 +226,8 @@ func NewPlayerServiceActorServer(impl PlayerServiceActorServer, opts ...core.Dis
 	}
 }
 
-// PlayerServiceClusterClient 是集群内部互调的 client stub：强类型返回，跨节点 []byte 解码在内部完成。
+// PlayerServiceClusterClient 是**集群内部互调专用**的 client stub：强类型返回，
+// 跨节点 []byte 解码在内部完成。跨服务/跨集群调用请走 RPC 面（本 proto 生成的 PlayerServiceServer 接入层），也不要与客户端 SDK 的 PlayerServiceOpClient 混用。
 type PlayerServiceClusterClient struct {
 	inv core.ActorInvoker
 }

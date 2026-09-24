@@ -73,8 +73,9 @@ ATLAS_BIN ?= ../atlas/bin
 ATLAS_DIR ?= $(dir $(ATLAS_BIN))
 PROTO_INC := -I. -Ithird_party -I$(abspath $(ATLAS_DIR))
 # 信任边界三层：管理面（google.api.http REST，atlas-http/go-grpc 生成）、
-# 域统一契约（客户端 op + actor 分发共用一份 service：atlas-actor 生成桩 +
-# atlas-client 生成 SDK stub；透传引擎按注解路由表运行时注册，不再生成传输桩）、
+# 域统一契约（客户端 op + actor 分发共用一份 service：atlas-actor 生成分发桩 +
+# 路由表 + RPC 接入层、atlas-client 生成 SDK stub；透传引擎按注解路由表运行时注册）、
+# 注意：域 proto 必须与 --go-grpc_out 同批生成——接入层产物实现 gRPC 接口，漏生成编译不过。
 # 会话生命周期（gateway.v1.Session，Gateway 自留，四传输生成桩）。
 API_SERVICE_PROTOS := api/game/v1/player.proto api/matcher/v1/matcher.proto api/battle/v1/battle.proto
 API_DOMAIN_PROTOS := api/game/v1/player_service.proto api/battle/v1/battle_service.proto

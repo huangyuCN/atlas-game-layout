@@ -81,6 +81,13 @@ var BattleServiceRouteTable = relay.Table{
 		Idempotency: relay.IdempotencyNone,
 		NewRequest:  func() proto.Message { return new(CreateBattleRequest) },
 		NewReply:    func() proto.Message { return new(CreateBattleReply) },
+		UidOf: func(req any) (string, bool) {
+			r, ok := req.(*CreateBattleRequest)
+			if !ok {
+				return "", false
+			}
+			return r.BattleId, r.BattleId != ""
+		},
 	},
 	"/battle.v1.BattleService/GetState": {
 		Operation:   "/battle.v1.BattleService/GetState",
@@ -93,5 +100,12 @@ var BattleServiceRouteTable = relay.Table{
 		Idempotency: relay.IdempotencyNone,
 		NewRequest:  func() proto.Message { return new(GetStateReq) },
 		NewReply:    func() proto.Message { return new(GetStateReply) },
+		UidOf: func(req any) (string, bool) {
+			r, ok := req.(*GetStateReq)
+			if !ok {
+				return "", false
+			}
+			return r.BattleId, r.BattleId != ""
+		},
 	},
 }
