@@ -22,7 +22,7 @@ func faceOf(t *testing.T, srv transport.Server) *serverutil.FaceServer {
 
 // TestNewGRPCServersRegistersMatcherOnInternal 验证 Matcher 服务只注册在 internal 面：
 // 它属**服务间**调用（game 的 PlayerActor → matcher），必须落在可信面；
-// edge 面不得出现 Matcher 方法（客户端 op 走 gateway 的 actor 平面转发，不经 matcher 的 Edge 接口）。
+// edge 面不得出现 Matcher 方法（matcher 无客户端 op；服务间调用一律走可信的 internal 面）。
 func TestNewGRPCServersRegistersMatcherOnInternal(t *testing.T) {
 	cfg := &conf.Bootstrap{Server: &configspb.Server{Grpc: &configspb.Server_GRPC{
 		EdgeAddr: "127.0.0.1:0", InternalAddr: "127.0.0.1:0",

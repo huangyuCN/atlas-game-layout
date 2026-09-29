@@ -1526,9 +1526,8 @@ const file_api_game_v1_player_service_proto_rawDesc = "" +
 	"\x19LOGOUT_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14LOGOUT_REASON_LOGOUT\x10\x01\x12%\n" +
 	"!LOGOUT_REASON_LOGGED_IN_ELSEWHERE\x10\x02\x12!\n" +
-	"\x1dLOGOUT_REASON_SESSION_EXPIRED\x10\x032\xfa\a\n" +
-	"\rPlayerService\x128\n" +
-	"\bRegister\x12\x14.game.v1.RegisterReq\x1a\x16.game.v1.RegisterReply\x12D\n" +
+	"\x1dLOGOUT_REASON_SESSION_EXPIRED\x10\x032\x82\b\n" +
+	"\rPlayerService\x12D\n" +
 	"\rGetPlayerData\x12\x19.game.v1.GetPlayerDataReq\x1a\x18.game.v1.PlayerDataReply\x12>\n" +
 	"\vGetBackpack\x12\x17.game.v1.GetBackpackReq\x1a\x16.game.v1.BackpackReply\x12U\n" +
 	"\x0fEnterMatchQueue\x12\x1b.game.v1.EnterMatchQueueReq\x1a\x1d.game.v1.EnterMatchQueueReply\"\x06\xd2\xd5\"\x02 \x01\x12A\n" +
@@ -1540,7 +1539,8 @@ const file_api_game_v1_player_service_proto_rawDesc = "" +
 	"LeaveParty\x12\x16.game.v1.LeavePartyReq\x1a\x13.game.v1.PartyReply\x125\n" +
 	"\bGetParty\x12\x14.game.v1.GetPartyReq\x1a\x13.game.v1.PartyReply\x12F\n" +
 	"\n" +
-	"QueueParty\x12\x16.game.v1.QueuePartyReq\x1a\x18.game.v1.PartyQueueReply\"\x06\xd2\xd5\"\x02 \x01\x127\n" +
+	"QueueParty\x12\x16.game.v1.QueuePartyReq\x1a\x18.game.v1.PartyQueueReply\"\x06\xd2\xd5\"\x02 \x01\x12@\n" +
+	"\bRegister\x12\x14.game.v1.RegisterReq\x1a\x16.game.v1.RegisterReply\"\x06\xd2\xd5\"\x02\b\x02\x127\n" +
 	"\x05Login\x12\x11.game.v1.LoginReq\x1a\x13.game.v1.LoginReply\"\x06\xd2\xd5\"\x02\b\x02\x12<\n" +
 	"\x06Logout\x12\x12.game.v1.LogoutMsg\x1a\x16.google.protobuf.Empty\"\x06\xd2\xd5\"\x02\b\x02\x12C\n" +
 	"\tGrantItem\x12\x15.game.v1.GrantItemReq\x1a\x17.game.v1.GrantItemReply\"\x06\xd2\xd5\"\x02\b\x02\x12@\n" +
@@ -1611,32 +1611,32 @@ var file_api_game_v1_player_service_proto_depIdxs = []int32{
 	29, // 8: game.v1.PartyReply.members:type_name -> common.v1.PlayerSummary
 	32, // 9: game.v1.MatchFailedNotify.reason:type_name -> matcher.v1.MatchFailReason
 	33, // 10: game.v1.PartyRosterNotify.reason:type_name -> matcher.v1.PartyRosterReason
-	1,  // 11: game.v1.PlayerService.Register:input_type -> game.v1.RegisterReq
-	6,  // 12: game.v1.PlayerService.GetPlayerData:input_type -> game.v1.GetPlayerDataReq
-	7,  // 13: game.v1.PlayerService.GetBackpack:input_type -> game.v1.GetBackpackReq
-	13, // 14: game.v1.PlayerService.EnterMatchQueue:input_type -> game.v1.EnterMatchQueueReq
-	15, // 15: game.v1.PlayerService.CancelMatch:input_type -> game.v1.CancelMatchReq
-	17, // 16: game.v1.PlayerService.GetMatchStatus:input_type -> game.v1.GetMatchStatusReq
-	19, // 17: game.v1.PlayerService.CreateParty:input_type -> game.v1.CreatePartyReq
-	20, // 18: game.v1.PlayerService.JoinParty:input_type -> game.v1.JoinPartyReq
-	21, // 19: game.v1.PlayerService.LeaveParty:input_type -> game.v1.LeavePartyReq
-	22, // 20: game.v1.PlayerService.GetParty:input_type -> game.v1.GetPartyReq
-	24, // 21: game.v1.PlayerService.QueueParty:input_type -> game.v1.QueuePartyReq
+	6,  // 11: game.v1.PlayerService.GetPlayerData:input_type -> game.v1.GetPlayerDataReq
+	7,  // 12: game.v1.PlayerService.GetBackpack:input_type -> game.v1.GetBackpackReq
+	13, // 13: game.v1.PlayerService.EnterMatchQueue:input_type -> game.v1.EnterMatchQueueReq
+	15, // 14: game.v1.PlayerService.CancelMatch:input_type -> game.v1.CancelMatchReq
+	17, // 15: game.v1.PlayerService.GetMatchStatus:input_type -> game.v1.GetMatchStatusReq
+	19, // 16: game.v1.PlayerService.CreateParty:input_type -> game.v1.CreatePartyReq
+	20, // 17: game.v1.PlayerService.JoinParty:input_type -> game.v1.JoinPartyReq
+	21, // 18: game.v1.PlayerService.LeaveParty:input_type -> game.v1.LeavePartyReq
+	22, // 19: game.v1.PlayerService.GetParty:input_type -> game.v1.GetPartyReq
+	24, // 20: game.v1.PlayerService.QueueParty:input_type -> game.v1.QueuePartyReq
+	1,  // 21: game.v1.PlayerService.Register:input_type -> game.v1.RegisterReq
 	3,  // 22: game.v1.PlayerService.Login:input_type -> game.v1.LoginReq
 	5,  // 23: game.v1.PlayerService.Logout:input_type -> game.v1.LogoutMsg
 	10, // 24: game.v1.PlayerService.GrantItem:input_type -> game.v1.GrantItemReq
 	11, // 25: game.v1.PlayerService.GetPlayer:input_type -> game.v1.GetPlayerReq
-	2,  // 26: game.v1.PlayerService.Register:output_type -> game.v1.RegisterReply
-	8,  // 27: game.v1.PlayerService.GetPlayerData:output_type -> game.v1.PlayerDataReply
-	9,  // 28: game.v1.PlayerService.GetBackpack:output_type -> game.v1.BackpackReply
-	14, // 29: game.v1.PlayerService.EnterMatchQueue:output_type -> game.v1.EnterMatchQueueReply
-	16, // 30: game.v1.PlayerService.CancelMatch:output_type -> game.v1.CancelMatchReply
-	18, // 31: game.v1.PlayerService.GetMatchStatus:output_type -> game.v1.MatchStatusReply
-	23, // 32: game.v1.PlayerService.CreateParty:output_type -> game.v1.PartyReply
-	23, // 33: game.v1.PlayerService.JoinParty:output_type -> game.v1.PartyReply
-	23, // 34: game.v1.PlayerService.LeaveParty:output_type -> game.v1.PartyReply
-	23, // 35: game.v1.PlayerService.GetParty:output_type -> game.v1.PartyReply
-	25, // 36: game.v1.PlayerService.QueueParty:output_type -> game.v1.PartyQueueReply
+	8,  // 26: game.v1.PlayerService.GetPlayerData:output_type -> game.v1.PlayerDataReply
+	9,  // 27: game.v1.PlayerService.GetBackpack:output_type -> game.v1.BackpackReply
+	14, // 28: game.v1.PlayerService.EnterMatchQueue:output_type -> game.v1.EnterMatchQueueReply
+	16, // 29: game.v1.PlayerService.CancelMatch:output_type -> game.v1.CancelMatchReply
+	18, // 30: game.v1.PlayerService.GetMatchStatus:output_type -> game.v1.MatchStatusReply
+	23, // 31: game.v1.PlayerService.CreateParty:output_type -> game.v1.PartyReply
+	23, // 32: game.v1.PlayerService.JoinParty:output_type -> game.v1.PartyReply
+	23, // 33: game.v1.PlayerService.LeaveParty:output_type -> game.v1.PartyReply
+	23, // 34: game.v1.PlayerService.GetParty:output_type -> game.v1.PartyReply
+	25, // 35: game.v1.PlayerService.QueueParty:output_type -> game.v1.PartyQueueReply
+	2,  // 36: game.v1.PlayerService.Register:output_type -> game.v1.RegisterReply
 	4,  // 37: game.v1.PlayerService.Login:output_type -> game.v1.LoginReply
 	34, // 38: game.v1.PlayerService.Logout:output_type -> google.protobuf.Empty
 	35, // 39: game.v1.PlayerService.GrantItem:output_type -> game.v1.GrantItemReply

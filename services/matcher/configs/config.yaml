@@ -26,7 +26,14 @@ server:
   # 两面各自独立监听、独立生命周期，地址不得相同（相同即装配期报错）；
   # 两面都挂 opgrpc 一元拦截器（入站 metadata→ctx 身份、出站错误→gRPC status）。
   grpc:
-    edge_addr: 0.0.0.0:9200
+    # edge_addr（不可信区）本轮**不启用**：matcher 没有任何带 atlas.route.v1 注解的 service
+    # （无客户端 op、无 rpc/ 平面），该面零注册——开着等于对外暴露一个空 gRPC 面，
+    # 且 reflection 会把服务清单一起暴露。matcher 只被服务间以 internal 面调用
+    # （game 的 PlayerActor → matcher；battle 直连），故只启用 internal 面。
+    # 注意：这里只管「进程形态的配置是否启用该面」；装配层 ServerSet 仍保留两个面字段，
+    # 嵌入式/测试形态显式给随机 loopback 端口（见 services/matcher/assemble、internal/server 测试），
+    # 「地址非空 = 该面启用，空 = 不启用」的机制不变（docs/config.md §6）。
+    # edge_addr: 0.0.0.0:9200
     internal_addr: 0.0.0.0:9201
     timeout: 30s                  # 单次 RPC 超时；Atlas 默认 1s，本模板显式放宽到 30s
     reflection: true              # 调试/测试开启；生产应关闭（会暴露服务清单，两面同享该开关）

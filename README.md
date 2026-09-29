@@ -47,31 +47,40 @@ test/e2e        # 进程内端到端测试（真中间件，不可达自动跳�
 
 新增一个业务接口**不需要**碰装配/路由/gateway：改 proto → `make proto` → 填生成桩。
 
+### 域协议的四平面布局（v2）
+
+一份域 proto（`api/game/v1/player_service.proto`、`api/battle/v1/battle_service.proto`）经 Atlas 插件
+一次生成四类产物，按平面分子包隔离——**根包只留消息与路由表**：
+
+| 平面 | 产物位置 | 内容 |
+|------|----------|------|
+| 根包（消息 + 路由表） | `api/<域>/v1/*.pb.go`（`*_route.pb.go` 是路由表） | `--go_out` 消息；`<Service>RouteTable`（网关透传引擎查表用） |
+| `actor/` | `api/<域>/v1/actor/*.pb.go` | 业务接口 `<Service>` + `Unimplemented<Service>` 兜底 + 分发桩 + 解码表 + `<Service>ClusterClient`（集群互调） |
+| `rpc/` | `api/<域>/v1/rpc/*.pb.go` | Edge（`access=CLIENT`）/ Internal（`access=INTERNAL`）双接口 + 自带 `ServiceDesc`/`Register` + 类型化客户端 |
+| `opclient/` | `api/<域>/v1/opclient/*.pb.go`（另有 `_pb.ts` / `_client.g.cs`） | 会话通道 CLIENT op 的强类型 SDK stub（三语言） |
+
+- 生成物**零词缀**：类型名即 service 名（`PlayerService` / `NewPlayerService` / `PlayerServiceClusterClient`）；
+- 域 proto **不进** `--go-grpc_out`（`rpc/` 平面自持 gRPC 管线）；无 route 注解的 proto（会话等）仍走标准产物；
+- Edge / Internal 各自 `Register…` 到两个独立 listener（端口隔离即信任边界），注册错面**编译期**即失败；
+- **每个 rpc 必须使用独立请求消息**：actor 分发按消息类型路由，生成期校验重复输入。
+
+### 新增一个 op 三步流程
+
 以给 game 增加「背包查询」为例（已有 `GetBackpack` 可参考）：
 
-1. **定义协议**：在 `api/game/v1/player.proto` 的 `Player` service 增加 rpc；
-2. **生成代码**：`make proto`（Atlas 全家桶插件：go/grpc/http/tcp/udp/kcp/ws/errors/openapi）；
-3. **填生成桩**：在 `services/game/internal/biz/handler/` 实现生成的服务接口，业务写完后
-   在 `services/game/assemble` 挂载即可（grpc/http 服务端由生成代码自动注册）。
-
-> proto 工具链：`make proto-tools` 优先收集 `ATLAS_BIN` 现成插件（`atlas upgrade` 安装目录），
-> 缺插件且存在 Atlas 源码时回退源码构建；均不可用时按报错指引执行 `atlas upgrade`。
-
-### 新增 actor 接口三步流程
-
-业务 actor（game 的 `PlayerActor`、battle 的 `BattleActor`）的接口同样三步：
-
-1. **定义协议**：在 `api/game/v1/player_actor.proto`（或 `api/battle/v1/battle_actor.proto`）的
-   `service PlayerActor`/`BattleActor` 增加 rpc——**returns 具体消息即 Ask（有回执），
-   returns `google.protobuf.Empty` 即 Tell（单向）**；
-2. **生成代码**：`make proto`（`--atlas-actor_out` 插件生成 `<Service>Server` 接口 +
-   `Unimplemented` 兜底 + client stub）；
-3. **填生成桩**：在 `services/game/internal/actor/player_auth.go`/`player_bag.go`
-   （battle 为 `battle_session.go`/`battle_frame.go`）实现方法，错误直接 `return nil, err` 上抛。
+1. **定义协议**：在 `api/game/v1/player_service.proto` 的 `PlayerService` 增加 rpc，并按需标注
+   `atlas.route.v1`（`access=CLIENT` 是客户端 op、`INTERNAL` 是服务间调用；uid 来源决定 actor 目标 PID）；
+2. **生成代码**：`make proto`（Atlas 全家桶插件：go / actor / client / http / tcp / udp / kcp / ws / errors / openapi）；
+3. **填生成桩**：业务逻辑实现生成的 `actor/` 平面接口（`services/game/internal/actor/`，battle 为
+   `services/battle/internal/actor/`），错误直接 `return nil, err` 上抛；接入层在 `services/<域>/assemble`
+   挂载两个 gRPC 面即可（Edge/Internal 的 `Register`/`ServiceDesc` 由生成产物自带）。
 
 > **注意（wire 不兼容）**：actor 消息已**去信封化**——不再有 `PlayerActorMsg`/`BattleActorMsg`
 > oneof 包装，请求/回执直接是业务消息，业务错误经集群 error 通道往返。**服务端与客户端需整仓同步升级**，
 > 旧信封二进制不兼容，不能混布。
+>
+> proto 工具链：`make proto-tools` 优先收集 `ATLAS_BIN` 现成插件（`atlas upgrade` 安装目录），
+> 缺插件且存在 Atlas 源码时回退源码构建；均不可用时按报错指引执行 `atlas upgrade`。
 
 ## 帧通道压测
 

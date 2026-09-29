@@ -15,6 +15,7 @@ import (
 
 // PlayerServiceClient 是 PlayerService 服务面的类型化 gRPC 客户端（跨服务调用）。
 type PlayerServiceClient interface {
+	Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterReply, error)
 	Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginReply, error)
 	Logout(ctx context.Context, req *v1.LogoutMsg) (*emptypb.Empty, error)
 	GrantItem(ctx context.Context, req *v1.GrantItemReq) (*v1.GrantItemReply, error)
@@ -29,6 +30,15 @@ type playerServiceClient struct {
 // NewPlayerServiceClient 基于连接创建类型化客户端。
 func NewPlayerServiceClient(cc grpc.ClientConnInterface) PlayerServiceClient {
 	return &playerServiceClient{cc: cc}
+}
+
+// Register 发起一次一元调用。
+func (c *playerServiceClient) Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterReply, error) {
+	out := new(v1.RegisterReply)
+	if err := c.cc.Invoke(ctx, "/game.v1.PlayerService/Register", req, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Login 发起一次一元调用。

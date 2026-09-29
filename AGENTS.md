@@ -4,7 +4,7 @@
 
 本仓库是面向**游戏单仓**的参考实现与脚手架模板（基于 [Atlas](https://github.com/huangyuCN/atlas)），
 以 **gateway / game / matcher / battle** 四服务覆盖 注册 → 登录 → 匹配 → 战斗 → 结算 的完整游戏闭环，
-内置五协议接入、actor 集群、lockstep 帧同步、分布式会话与可编程装配（fx）。
+内置五协议接入、actor 集群（仅托管方 game/battle 持有运行时；gateway/matcher 是调用方）、lockstep 帧同步、分布式会话与可编程装配（fx）。
 
 **模板使用方式**：
 - 用 `atlas new my-game -r https://github.com/huangyuCN/atlas-game-layout` 以本模板生成自己的项目；
@@ -59,6 +59,7 @@ Atlas 类型仅在 `pkg/` 装配层使用。`go.mod` 以本地 `replace` 指向 
   - **生成物仍按职责分文件**：同一 proto 的 actor 分发桩、路由表、RPC 接入层各自独立成文件（便于 review 与减少合并冲突），不因为"不受行数限制"就堆进同一个文件。
   - **枚举优先（杜绝魔法值）**：协议与代码中语义有限的值（状态/原因/类型/级别等）**必须**定义为 proto enum 或 Go 常量集合，杜绝散落的魔法字符串/数字——客户端拿到的是自解释的枚举名（protojson 默认下发枚举名）。协议新增 reason/状态/类型字段一律用 enum 类型；发现存量魔法值，在改造到该处时一并枚举化。自由文本（如操作备注、错误描述）不在此列；纯路由键（如推送 operation 的消息完整名）是协议寻址键，不属魔法值。
 - **调用链追踪自检（跨模块/跨服务变更必须执行）**：修改跨模块、跨进程（如集群路由、消息投递、RPC 调用）的逻辑后，**必须**从入口点出发，跟踪完整的调用链并验证每一跳的关键假设（PID 格式、地址映射、消息编解码、端口/主题命名等）是否匹配。仅 `go build` 通过不足以证明链路正确。
+  - **业务 op 的入口边界（2026-09-25 起）**：客户端 op 经**网关按注解路由表经 gRPC 调域 `rpc/` 平面的 Edge 面**（`grpc-edge` 端点）——**网关与 matcher 不持有 actor 集群运行时**，它们只是 actor 平面的调用方（`make check-deps` 机器化这条边界）；actor 平面（NATS 节点消息、跨节点投递）只服务**托管方 game/battle** 的节点内与跨节点投递。改客户端 op 链路时要跟踪的是「网关查路由表 → `opcall.DeliverRemote` → `opgrpc.NewInvoker` 按方法寻址 → 域 Edge 面接入层 → `opcall.PIDFrom` 还原 PID → actor 投递」；改集群互调才走 `actor/` 子包的 `ClusterClient`（按 PID 寻址）。两条路径的寻址方式（按方法 vs 按 PID）不可混用。
   - **公共抽象**：多处重复或可被清晰命名的逻辑，**必须**提取为包内/跨包的**公共函数**（或小型类型与方法），避免复制粘贴；提取时保持命名与现有代码风格一致。
   - **命名不得以包名开头**：包内导出的函数名、类型名、变量名杜绝以包名作为前缀。调用侧在使用时本身带有包名限定（如 `session.NewManager`），若函数名再以包名开头将形成冗余（`session.SessionNewManager`），且会触发 IDE 警告 "Name starts with the package name"。正确做法：`session.NewManager`（而非 `session.SessionNewManager`）。提交前可用 `make lint`（scripts/check-pkgname）自动检查全部导出标识符（函数/类型/变量/方法）是否以包名开头。
 - **代码注释语言**：所有手写代码注释必须使用中文，包括 Go doc 注释、行内注释、复杂逻辑说明和测试意图说明。允许保留英文的情况仅限专有协议字段、外部标准名、错误码、指标名、trace attribute 名、第三方 API 原文，以及 protobuf/OpenAPI/工具生成文件中的生成注释。
@@ -128,8 +129,8 @@ services/<svc>/
   - **rpc 面**（`api/<域>/v1/rpc/`）：`<Service>Edge`（access=CLIENT，**客户端面**）与 `<Service>Internal`（access=INTERNAL，**服务面**）双接口 + 各自 `Register…`/`New…`（自带 `grpc.ServiceDesc`，**域 proto 不再需要 `--go-grpc_out`**）+ `<Service>Client`（服务面的类型化 gRPC 客户端，仅供跨服务调用）；
   - **opclient 面**（`api/<域>/v1/opclient/`）：会话通道 CLIENT op stub（Go/TS/C#，仅导出 access=CLIENT 方法；TS/C# 零 protobuf 运行时依赖）+ 推送 op 常量（消息级 `push` 注解生成，值 = 消息完整名）。
   - **信任边界**：Edge 与 Internal 注册到**两个独立 listener**（端口隔离即信任边界）；"把 Internal 实现注册到 Edge"在编译期即不成立（形参类型不同）。
-- 客户端 op 的投递统一走框架 `opcall`：`opcall.CallFromContext(ctx, rt, entry, req)`（生成的 `rpc/` 方法体即此一行组合），网关侧为 `relay.Table` 查表 + `opcall.PlanFor`（发起者/观测头/去重键）+ `opcall.Deliver`（Ask/Tell 唯一入口）+ `opcall.ReplyOf`（回执归一）；
-- **注册 `rpc/` 平面到 listener 时必须挂 `opgrpc` 拦截器**（服务端 `opgrpc.UnaryServerInterceptor()`：metadata→ctx + 错误投影；客户端 `opgrpc.UnaryClientInterceptor()`：ctx→metadata），否则跨进程身份与 reason 判定不成立（域 `rpc/` 面的 listener 注册随 P7 管理面窗口落地）；
+- 客户端 op 的投递统一走框架 `opcall`：生成的 `rpc/` 方法体为 `opcall.CallFromContext(ctx, rt, entry, req)` 一行组合（域内落地）；**网关侧为 `relay.Table` 查表 + `opcall.PlanFor`（发起者/观测头/去重键）+ `opcall.DeliverRemote`（跨服务调用的唯一投递入口，按路由条目的方法寻址）**，后端是 `opgrpc.NewInvoker(domainclient.Resolver)`（按 `grpc-edge` 端点拨域 Edge 面）；`opcall.Deliver`（按 PID 寻址）只用于**集群内已解析出 PID** 的投递。回执归一为 `opcall.ReplyOf`；
+- **注册 `rpc/` 平面到 listener 时必须挂 `opgrpc` 拦截器**（服务端 `opgrpc.UnaryServerInterceptor()`：metadata→ctx + 错误投影；客户端 `opgrpc.UnaryClientInterceptor()`：ctx→metadata），否则跨进程身份与 reason 判定不成立。域 `rpc/` 面的 listener 注册**已落地**：`services/{game,battle}/internal/server/server.go` 各把 `New<S>Edge`/`New<S>Internal` 注册到 `server.grpc` 的 edge/internal 两个 listener（端口隔离即信任边界）；
 - 每个 rpc 必须使用**独立请求消息**（actor 分发按消息类型路由，生成期即校验）；
 - 错误**上抛**（`return nil, err`，结构化 error 经集群 error 通道往返），**不包 `Ok:false` 回执**；
 - 本地消息（如定时快照 `tickSnapshot`）经 `core.WithLocalTell[T]` 类型路由注册；
@@ -146,14 +147,14 @@ services/<svc>/
 
 | 协议面 | 位置 | 特征 |
 |---|---|---|
-| 客户端 op（SDK 消费） | 域 proto 的 `service`，rpc 标 `access: ACCESS_CLIENT`（service 级默认 + rpc 级覆盖） | 身份来自会话/字段（`uid`/`uid_field`），**业务消息不含身份字段**；SDK 导出、网关透传 |
+| 客户端 op（SDK 消费） | 域 proto 的 `service`，rpc 标 `access: ACCESS_CLIENT`（service 级默认 + rpc 级覆盖） | 身份来自会话/字段（`uid`/`uid_field`），**业务消息不含身份字段**；SDK 导出；**网关按注解路由表经 gRPC 调域 `rpc/` 平面的 Edge 面**（`grpc-edge` 端点），网关不持有 actor 集群运行时 |
 | 服务端内部方法 | 同一 service 的 rpc 标 `access: ACCESS_INTERNAL` | 服务间 gRPC（如 game 的 Login/Logout），客户端 stub 不导出 |
 | 推送（服务端 → 客户端） | 消息级注解 `option (atlas.route.v1.push) = true;` | 推送 op = 消息完整名；生成三语言常量；不进路由表 |
 | 会话生命周期 | `api/gateway/v1/session.proto`（**留在模板原地**，R13） | Gateway 自留：四传输生成桩 + `opclient` 会话 stub + 协议描述符（`SessionProtocolOps`/`Token`/`PlayerID`/`ExpiresAt`）；三 SDK 经 `SessionProtocol` 接缝接入（**P4 落地**）|
 | 管理面（P7） | `api/admin/**`（P7 新增） | 普通 gRPC 面（`--go-grpc_out`），只注册到 **internal listener** |
 
 - 改协议 → `make proto` → 产物落四类平面（根包消息 + 路由表 / `actor/` / `rpc/` / `opclient/`）；
-- 新增业务 op 流程：改 proto（补注解与限流/生命周期字段）→ `make proto` → 在 `services/<svc>/internal/actor/` 实现 actor 面方法 → 网关零代码（路由表驱动透传）；
+- 新增业务 op 流程：改 proto（补注解与限流/生命周期字段）→ `make proto` → 在 `services/<svc>/internal/actor/` 实现 actor 面方法 → 网关零代码（路由表驱动，客户端 op 由网关经 gRPC 转到该域 Edge 面）；
 - 客户端 op 与 actor 分发**共用同一份 service/消息**（不再有 gateway ↔ 域 的镜像投影服务）；`gateway.v1` 只留会话协议与推送；
 - **手写代码与生成代码同目录**：生成文件有明确生成头（Code generated），不得手改；手写文件注释用中文。
 
@@ -214,7 +215,7 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 
 | 面 | 寻址来源 | 空值行为 |
 |----|----------|----------|
-| 网关透传（CLIENT op：`relay.Table` + `opcall.Deliver`） | 请求字段（`battle_id`）或会话身份，按注解 `uid`/`uid_field` | 一律拒绝（不回落） |
+| 网关转域 Edge 面（CLIENT op：`relay.Table` + `opcall.DeliverRemote`，按方法寻址） | 请求字段（`battle_id`）或会话身份，按注解 `uid`/`uid_field` | 一律拒绝（不回落） |
 | `rpc/` 平面的 Edge/Internal 面（gRPC 接入） | 同上（`opcall.PIDFrom` 从 metadata/请求解析） | 拒绝 |
 | `actor/` 平面的 `<Service>ClusterClient`（集群内互调） | 调用方显式给 PID（`battle:<battleID>`，由 `idgen.Battle()` 分配） | 拒绝 |
 
@@ -259,7 +260,7 @@ actor 平面（NATS 节点消息、广播主题、etcd 归属目录）**与注�
 | `serverutil.Filters` | `pkg/middleware.Filters()` 默认空 | HTTP 全局 stdlib 包装（CORS/gzip/pprof），**裸处理器也生效** |
 
 - **不要挂 `recovery`**：HTTP/gRPC 服务端已内置 panic 恢复与超时，重复挂载会双重恢复、双重打点。
-- 裸 `HandleFunc` 处理器（如 `/health`）**不经过中间件链**：探针不记日志、不打点是有意为之；手写管理接口要可观测就照生成代码的写法用 `Route(...)` + `ctx.Middleware(...)`（见 `services/matcher/internal/server` 的规则查询）。
+- 裸 `HandleFunc` 处理器（如 `/health`）**不经过中间件链**：探针不记日志、不打点是有意为之；手写接口要可观测就照生成代码的写法，走 `Route(...)` 注册并用 `ctx.Middleware(...)` 包住业务调用（模板现有手写 HTTP 路由只剩两个 `/health`；matcher 的 `/v1/matcher/rules` REST 面已按统一设计删除，管理能力归 P7 的 `api/admin`）。
 - 业务追加中间件不改各服务构造代码：`fx.Decorate(func(m serverutil.Middlewares) serverutil.Middlewares { return append(m, myMw) })`；过滤器同理装饰 `serverutil.Filters`。
 - 跨服务链路需要两端都挂：服务端 `tracing.Server`（extract）+ 客户端 `tracing.Client`（inject）；只挂一端会得到「每个服务各自一个 root span」。
 

@@ -93,6 +93,34 @@ jobs:
           rmdir "$GITHUB_WORKSPACE/.ci-deps" 2>/dev/null || true
           ls -l "$parent/atlas/go.mod" "$parent/cow/go.mod" "$parent/atlas-sdk-go/go.mod"
 
+      # protoc 不在 runner 预置环境里；版本钉 26.1 与开发环境（Homebrew libprotoc 26.1）一致，
+      # 避免版本漂移让「重生成无 diff」门禁产生假红（与 Atlas 仓 ci.yml 同一姿态）。
+      - name: Install protoc
+        env:
+          PROTOC_VERSION: "26.1"
+        run: |
+          curl -fsSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          sudo unzip -o /tmp/protoc.zip -d /usr/local
+          sudo chmod +x /usr/local/bin/protoc
+          protoc --version
+
+      # 路线图 §7.1#3「重生成无 diff」：协议改了但生成物没跟着提交（或插件版本漂移）即红。
+      - name: proto 产物重生成无 diff
+        env:
+          # atlas 源码检出在 replace 路径 ../atlas：proto-tools 由它构建 Atlas 插件；
+          # PROTO_INC 的 -I$(ATLAS_DIR) 也由此指向框架权威 proto（third_party 不再放框架 proto 副本）。
+          ATLAS_DIR: ../atlas
+        run: |
+          make proto
+          out="$(git status --porcelain)"
+          if [ -n "$out" ]; then
+            echo "::error::make proto 产物与仓库内容不一致：请在本地跑 make proto 并提交生成物"
+            echo "$out"
+            git --no-pager diff --stat
+            exit 1
+          fi
+
       - name: gofmt 检查
         run: |
           out="$(gofmt -l . | grep -v '^third_party/' || true)"
@@ -100,6 +128,8 @@ jobs:
 
       - name: go vet
         run: go vet ./...
+      - name: 依赖边界门禁（网关/matcher 不得依赖 actor 集群运行时）
+        run: go run ./scripts/check-deps .
 
       - name: 单元测试
         run: go test -count=1 ./...

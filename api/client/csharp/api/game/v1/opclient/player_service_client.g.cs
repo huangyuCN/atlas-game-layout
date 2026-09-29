@@ -297,13 +297,6 @@ public sealed class PlayerService
 
     public PlayerService(IAtlasInvoker inv, ISerializer ser) { _inv = inv; _ser = ser; }
 
-    /// <summary>/game.v1.PlayerService/Register：请求-响应；业务拒绝返回业务错误（Reason 为主键）。</summary>
-    public async Task<RegisterReply?> RegisterAsync(RegisterReq? req, InvokeOptions? options = null, CancellationToken cancellationToken = default)
-    {
-        var payload = _ser.Serialize(req ?? new RegisterReq());
-        var data = await _inv.InvokeRawAsync("/game.v1.PlayerService/Register", payload, options, cancellationToken);
-        return data.Length == 0 ? null : (RegisterReply)_ser.Deserialize(data, typeof(RegisterReply));
-    }
     /// <summary>/game.v1.PlayerService/GetPlayerData：请求-响应；业务拒绝返回业务错误（Reason 为主键）。</summary>
     public async Task<PlayerDataReply?> GetPlayerDataAsync(GetPlayerDataReq? req, InvokeOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -379,7 +372,6 @@ public sealed class PlayerService
 /// <summary>PlayerServiceProtocolOps 是 PlayerService 的会话 op 名（按 rpc 名索引）。</summary>
 public static class PlayerServiceProtocolOps
 {
-    public const string Register = "/game.v1.PlayerService/Register";
     public const string GetPlayerData = "/game.v1.PlayerService/GetPlayerData";
     public const string GetBackpack = "/game.v1.PlayerService/GetBackpack";
     public const string EnterMatchQueue = "/game.v1.PlayerService/EnterMatchQueue";
@@ -404,7 +396,6 @@ public static class PlayerServiceProtocolDescriptor
     /// <summary>PlayerServicePlayerID 从会话消息里取 PlayerID（无该字段返回零值）。</summary>
     public static string PlayerServicePlayerID(object? msg) => msg switch
     {
-        RegisterReply m => m.PlayerId ?? "",
         _ => "",
     };
 

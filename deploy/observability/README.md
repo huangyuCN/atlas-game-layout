@@ -14,6 +14,7 @@
 | `actor_mailbox_depth` | Gauge | `actor_type` | actor 运行时 | 邮箱积压（配合 M4 背压观察） |
 | `actor_remote_delivery_total` | Counter | `result`（ok/404/error） | actor 集群（框架 `contrib/actor/cluster`） | 跨节点投递与 404 重路由 |
 | `battle_frames_total` | Counter | 聚合（不按 battle_id，避免高基数） | `services/battle` | 帧推进速率 |
+| `admin_audit_finalize_failed_total` | Counter | 无标签（聚合） | `services/game` 管理面（`internal/biz/handler/admin_audit.go`） | 审计收尾（写终态）失败次数：记录停在 PENDING，同键重试报「操作在途」，需人工按 `created_at` 核查补单；恒为 0 才是健康 |
 
 约定：
 

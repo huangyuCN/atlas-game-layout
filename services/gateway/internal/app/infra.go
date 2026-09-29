@@ -1,20 +1,24 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
+	gamev1rpc "github.com/huangyuCN/atlas-game-layout/api/game/v1/rpc"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
-	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
+	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/domainclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
+	"github.com/huangyuCN/atlas/contrib/actor/opcall"
+	"github.com/huangyuCN/atlas/contrib/actor/opgrpc"
 	"github.com/huangyuCN/atlas/metrics"
-	"github.com/huangyuCN/atlas/namespace"
 	"github.com/huangyuCN/atlas/registry"
 	natsgo "github.com/nats-io/nats.go"
+	"google.golang.org/grpc"
 )
 
 // NewNatsConn 装配 NATS 连接（推送订阅 + gateway 控制通道）。
@@ -63,46 +67,33 @@ func newSessionManager(cfg *conf.Bootstrap, cli *pkredis.Client, meter metrics.C
 	return m, nil
 }
 
-// NewActorClient 装配远程 actor 客户端背后的集群运行时
-// （Locator=etcd、NATS 传输；PlayerActor 懒激活在 game 节点执行，
-// 本节点注册「只发不接」副本以支持发送侧判定）。
-func NewActorClient(cfg *conf.Bootstrap, discovery registry.Discovery, meter metrics.Collector) (*actorclient.Client, error) {
-	var endpoints []string
-	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
-		endpoints = r.GetEtcd().GetEndpoints()
-	}
-	nodeID := ""
-	var derived namespace.Derived
-	if r := cfg.GetRuntime(); r != nil {
-		d, derr := namespace.Derive(r.GetNamespace())
-		if derr != nil {
-			return nil, fmt.Errorf("app: %w", derr)
-		}
-		nodeID, derived = r.GetId(), d
-	}
-	rt, err := pkgactor.NewRuntime(pkgactor.Options{
-		NodeID:        nodeID,
-		Namespace:     derived.Namespace,
-		ServiceName:   consts.ServiceGame, // 懒激活在 game 节点执行（PlayerActor 宿主）
-		EtcdEndpoints: endpoints,
-		NatsURL:       natsURLOf(cfg),
-		Tracer:        pkgactor.DefaultTracer(),
-		Meter:         meter,
-		Discovery:     discovery,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("app: 构造 actor 集群运行时失败: %w", err)
-	}
-	if err := pkgactor.RegisterPlayerReplica(rt); err != nil {
-		return nil, fmt.Errorf("app: 注册 PlayerActor 懒激活副本失败: %w", err)
-	}
-	return actorclient.NewClient(rt), nil
+// NewDomainResolver 装配域服务连接解析器：业务 op 透传按路由条目寻址，
+// 拨到该域 rpc/ 平面的 **Edge 面**（`grpc-edge` 端点；连接惰性建立、按服务复用）。
+func NewDomainResolver(discovery registry.Discovery, mws serverutil.ClientMiddlewares) *domainclient.Resolver {
+	return domainclient.NewResolver(discovery, mws)
 }
 
-// natsURLOf 提取 data.nats.url。
-func natsURLOf(cfg *conf.Bootstrap) string {
-	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
-		return d.GetNats().GetUrl()
-	}
-	return ""
+// NewDomainInvoker 把连接解析器包成「按方法寻址」的投递端口
+// （opcall.DeliverRemote 的唯一后端：网关不持有任何 actor 集群运行时）。
+func NewDomainInvoker(r *domainclient.Resolver) opcall.MethodInvoker {
+	return opgrpc.NewInvoker(r)
+}
+
+// NewPlayerConn 装配 game **internal 面**（可信区）的惰性连接：网关的会话联动
+// （Register/Login/Logout）经类型化客户端调用——这些方法只注册在 internal listener，
+// 与客户端 op 走的 edge 面端口隔离。惰性拨号使网关启动不依赖 game 已在线
+// （四个服务可任意顺序启动/重启，见 serverutil.LazyConn）。
+func NewPlayerConn(discovery registry.Discovery, mws serverutil.ClientMiddlewares) *serverutil.LazyConn {
+	return serverutil.NewLazyConn(func(ctx context.Context) (grpc.ClientConnInterface, error) {
+		conn, err := serverutil.DialDomain(ctx, discovery, consts.ServiceGame, serverutil.SchemeGRPC, mws)
+		if err != nil {
+			return nil, err
+		}
+		return conn, nil
+	})
+}
+
+// NewPlayerClient 基于 internal 面连接构造 PlayerService 类型化客户端。
+func NewPlayerClient(conn *serverutil.LazyConn) gamev1rpc.PlayerServiceClient {
+	return gamev1rpc.NewPlayerServiceClient(conn)
 }

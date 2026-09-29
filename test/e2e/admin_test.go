@@ -1,7 +1,8 @@
 package e2e
 
 // admin_test.go 是 game 管理面（admin.game.v1.AdminService）的端到端用例：
-// 发放闭环与审计可查、同键幂等重放、单次上限（R12），以及「管理面只在 internal 面可达」的安全边界。
+// 发放闭环与审计可查、同键幂等重放、失败也审计、单次上限（R12），
+// 以及「管理面只在 internal 面可达」的安全边界。
 // 说明：进程内装配不初始化链路导出（noop provider），用例装内存导出器让 span 有效，
 // 从而验证审计 trace_id 确实来自链路上下文（而不是恒为空）。
 
@@ -23,6 +24,12 @@ import (
 
 // adminItemID 是用例发放的道具 ID。
 const adminItemID uint32 = 1001
+
+// adminAuditFailedStored 是审计「失败」在 mongo（集合 admin_audits 的 result 字段）里的落库字面量：
+// 与 services/game/internal/data/models.AuditFailed 同值——该模型是内部包，test/e2e 不可引用
+// （Go internal 规则），故这里按**落库编码**断言；管理面协议侧对应
+// admingamev1.AuditResult_AUDIT_RESULT_FAILED（投影下发的是枚举名，与落库字面量不同）。
+const adminAuditFailedStored = "FAILED"
 
 // adminEnv 是管理面 e2e 夹具：管理面客户端 + 已登录玩家 + 请求上下文。
 // 发放与查询都经域面收敛到 PlayerActor，要求聚合根在线，故先经网关注册登录。
@@ -273,5 +280,43 @@ func TestE2EAdminEdgeFaceRejectsAdminService(t *testing.T) {
 	}
 	if rep == nil {
 		t.Fatal("internal 面管理面回执为空")
+	}
+}
+
+// TestE2EAdminGrantFailureAudited 验证「失败也审计」（p7 验收表 + 管理面规范 §5.7）：
+// 对不存在的玩家发放 → 业务错误原样上抛，且审计**仍留痕**（管理面投影 + mongo 直查双重断言）。
+// reason 取实现真实值：玩家 ID 无档时懒激活的 PlayerActor 未持聚合根即拒单，域面报
+// PLAYER_NOT_ONLINE（services/game/internal/actor/player_bag.go）——「不存在」与「从未登录」
+// 在域面不可区分（GrantItem 不读库），故这里不假设 PLAYER_NOT_FOUND。
+func TestE2EAdminGrantFailureAudited(t *testing.T) {
+	env := newAdminEnv(t)
+	const operator = "e2e-admin-fail"
+	ghost := "p-ghost-" + uuid.NewString()
+	_, err := env.admin.GrantItem(env.ctx, &admingamev1.GrantItemRequest{
+		Context: adminCtx(operator, "fail-"+uuid.NewString(), false), PlayerId: ghost, ItemId: adminItemID, Count: 1,
+	})
+	if !errorv1.IsPlayerNotOnline(err) {
+		t.Fatalf("对不存在玩家发放的错误 = %v, 期望 reason %s", err, errorv1.ReasonPlayerNotOnline())
+	}
+
+	// 失败必须留痕：管理面投影里恰有一条 FAILED，reason 非空，operator 为自报值。
+	entries := auditEntries(t, env, ghost)
+	if len(entries) != 1 {
+		t.Fatalf("失败发放的审计条数 = %d, 期望 1（失败也审计）", len(entries))
+	}
+	entry := entries[0]
+	if entry.GetResult() != admingamev1.AuditResult_AUDIT_RESULT_FAILED || entry.GetTargetId() != ghost ||
+		entry.GetOperator() != operator || entry.GetReason() != errorv1.ReasonPlayerNotOnline() {
+		t.Fatalf("失败审计投影不符（期望 FAILED + reason 非空 + operator 自报）: %+v", entry)
+	}
+
+	// 直连 mongo 复核落库字段：不只信管理面投影。
+	doc := mongoAudit(t, entry.GetAuditId())
+	if doc["result"] != adminAuditFailedStored || doc["reason"] != entry.GetReason() ||
+		doc["operator"] != operator || doc["finished_at"] == int64(0) {
+		t.Fatalf("失败审计落库字段不符: %+v", doc)
+	}
+	if message, _ := doc["message"].(string); message == "" {
+		t.Fatalf("失败审计应落 message（失败描述）: %+v", doc)
 	}
 }

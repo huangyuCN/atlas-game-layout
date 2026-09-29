@@ -18,7 +18,7 @@ LDFLAGS := -X $(MODULE)/lib/version.Version=$(VERSION) \
            -X $(MODULE)/lib/version.Commit=$(COMMIT) \
            -X $(MODULE)/lib/version.BuildTime=$(BUILD_TIME)
 
-.PHONY: help build build-gmctl lint comment-lint check-dup run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
+.PHONY: help build build-gmctl lint comment-lint check-dup check-deps run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
 
 help: ## 列出所有目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -37,13 +37,17 @@ build-gmctl: ## 构建 GM 命令行到 ./bin/gmctl（管理面 internal listener
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -o $(BIN_DIR)/gmctl ./cmd/gmctl
 
-lint: ## 代码规范检查：包名前缀 + Go doc 注释 + 重复代码
+lint: ## 代码规范检查：包名前缀 + Go doc 注释 + 重复代码 + 依赖边界
 	$(GO) run ./scripts/check-pkgname . scripts/check-pkgname/allowlist.txt
 	$(GO) run ./scripts/go-comment-lint .
 	$(GO) run ./scripts/check-dup . scripts/check-dup/allowlist.txt
+	$(GO) run ./scripts/check-deps .
 
 check-dup: ## 重复代码检查（结构指纹归一，详见 scripts/check-dup/allowlist.txt；违规退出码 1）
 	$(GO) run ./scripts/check-dup . scripts/check-dup/allowlist.txt
+
+check-deps: ## 依赖边界检查：网关/matcher 不得依赖 actor 集群运行时（阶段 2「退出 actor 面」的落地判据）
+	$(GO) run ./scripts/check-deps .
 
 comment-lint: ## Go doc 注释规范检查（首词=声明名等，详见 docs/go-comments.md；违规退出码 1）
 	$(GO) run ./scripts/go-comment-lint .
@@ -112,9 +116,11 @@ proto-tools: ## 收集/构建 protoc 插件到 ./bin（Atlas 全家桶 + go/go-g
 		echo "错误：ATLAS_BIN 缺插件且无 Atlas 源码；请先执行 atlas upgrade 并以 ATLAS_BIN=$$(go env GOPATH)/bin 重试" >&2; \
 		exit 1; \
 	fi
-	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install github.com/google/gnostic/cmd/protoc-gen-openapi@latest
+	@# 外部插件版本钉死：生成物头部记录插件版本（protoc-gen-go v1.36.12 /
+	@# protoc-gen-go-grpc v1.6.2），@latest 漂移会让 CI 的「重生成无 diff」门禁假红。
+	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+	@GOBIN="$(PWD)/$(BIN_DIR)" $(GO) install github.com/google/gnostic/cmd/protoc-gen-openapi@v0.7.1
 
 proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/openapi/配置）
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \

@@ -39,8 +39,8 @@ type GRPCServerSet struct {
 
 // NewGRPCServers 构造 matcher 的两个 gRPC 面并注册 Matcher 服务：
 // Matcher 是**服务间**调用（game 的 PlayerActor → matcher，battle 直连测试），故注册到
-// internal listener；edge 面本轮不注册域服务（客户端 op 走 gateway 的 actor 平面转发，
-// 不经 matcher 的 Edge 接口），面本身按配置启用/留空。
+// internal listener；matcher 没有带 route 注解的 service（不存在客户端 op），edge 面按配置
+// 留空（不启用）——启用也只会得到一个空面，还会因 reflection 暴露服务清单。
 // 两面各自独立地址与生命周期（server.grpc.edge_addr / internal_addr，空 = 不启用该面），
 // 都挂 opgrpc 一元拦截器（入站 metadata→ctx、错误→status，挂载点见 serverutil.GRPCServers）。
 func NewGRPCServers(cfg *conf.Bootstrap, svc *handler.MatcherHandler,

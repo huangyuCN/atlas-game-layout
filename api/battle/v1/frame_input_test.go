@@ -1,9 +1,12 @@
-package gatewayv1
+package battlev1
+
+// frame_input_test.go 是战斗帧通道（客户端 op：帧输入上行 / 加入回执 / 补帧）的协议编解码用例。
+// 这三条消息都是本包（battle.v1）契约，故用例随协议留在本包——原先放在 api/gateway/v1
+// 只是因为会话通道复用它们，读起来像网关的消息，实际与网关协议无关。
 
 import (
 	"testing"
 
-	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -12,7 +15,7 @@ import (
 // TestSendFrameInputRoundtrip 校验帧输入上行消息（battle.v1.FrameInputReq，
 // 与 lockstep 帧数据复用）的编解码往返。
 func TestSendFrameInputRoundtrip(t *testing.T) {
-	in := &battlev1.FrameInputReq{
+	in := &FrameInputReq{
 		BattleId: "b-0001",
 		Input: &locksteppb.LockstepInput{
 			FrameId:   7,
@@ -25,7 +28,7 @@ func TestSendFrameInputRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("protojson.Marshal 失败: %v", err)
 	}
-	var out battlev1.FrameInputReq
+	var out FrameInputReq
 	if err := protojson.Unmarshal(b, &out); err != nil {
 		t.Fatalf("protojson.Unmarshal 失败: %v", err)
 	}
@@ -34,9 +37,9 @@ func TestSendFrameInputRoundtrip(t *testing.T) {
 	}
 }
 
-// TestJoinBattleReplyCarriesSnapshot 校验加入战斗回执（复用 battle.v1 actor 回执）携带断线重连所需字段。
+// TestJoinBattleReplyCarriesSnapshot 校验加入战斗回执（FrameInputReq 的同伴消息）携带断线重连所需字段。
 func TestJoinBattleReplyCarriesSnapshot(t *testing.T) {
-	in := &battlev1.JoinBattleReply{
+	in := &JoinBattleReply{
 		Meta:         &locksteppb.SessionMeta{SessionId: "b-0001", MaxPlayers: 2},
 		CurrentFrame: 42,
 		Snapshot:     &locksteppb.SnapshotMeta{FrameId: 40, StorageKey: "snap/b-0001/40"},
@@ -45,7 +48,7 @@ func TestJoinBattleReplyCarriesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("protojson.Marshal 失败: %v", err)
 	}
-	var out battlev1.JoinBattleReply
+	var out JoinBattleReply
 	if err := protojson.Unmarshal(b, &out); err != nil {
 		t.Fatalf("protojson.Unmarshal 失败: %v", err)
 	}
@@ -56,7 +59,7 @@ func TestJoinBattleReplyCarriesSnapshot(t *testing.T) {
 
 // TestSyncFramesReusesLockstep 校验补帧请求（battle.v1.SyncFramesReq）携带客体字段与断点帧号。
 func TestSyncFramesReusesLockstep(t *testing.T) {
-	req := &battlev1.SyncFramesReq{
+	req := &SyncFramesReq{
 		BattleId:      "b-0001",
 		LastSeenFrame: 5,
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/middleware/logging"
 	mwmetrics "github.com/huangyuCN/atlas/middleware/metrics"
@@ -22,6 +23,15 @@ import (
 // （Prometheus 侧导出为 <name>_bucket；atlas 的建议名自带 _bucket，会重复后缀，故不用）。
 const serverSecondsHistogramName = "server_requests_seconds"
 
+// businessErrOnly 是请求日志的错误过滤口径示范：**业务类拒绝不入 ERROR 噪音**。
+// 玩家可理解的业务拒绝（道具不足、不在队伍中等，生成物一律 WithClass(ClassBusiness)）
+// 命中即降为 Debug 且不展开 error_id/error_operations/error_stack——否则正常业务分支
+// 会把 ERROR 级日志淹掉；未标注分类的错误（运行时/取消）保持原级别，故障仍可见。
+// 业务若想改口径（如同时降级取消类），用 fx.Decorate 覆盖 Server 即可。
+func businessErrOnly(err error) bool {
+	return atlaserrors.ClassOf(err) == atlaserrors.ClassBusiness
+}
+
 // Module 提供服务端/客户端中间件链与 HTTP 过滤器链的默认值：
 // 业务侧用 fx.Decorate 追加（如 fx.Decorate(func(f serverutil.Filters) serverutil.Filters {...})）。
 var Module = fx.Module("middleware",
@@ -30,6 +40,7 @@ var Module = fx.Module("middleware",
 
 // Server 返回服务端默认中间件链：追踪 → 日志 → 指标。
 // 追踪排在最前，使 server span 覆盖后续全部处理（日志与指标在内层各自观测）。
+// 日志挂 WithErrorFilter(businessErrOnly)：业务类拒绝降 Debug（示范口径，见该函数注释）。
 // 不含 recovery：HTTP/gRPC 服务端已内置 panic 恢复，重复挂载会双重恢复与双重打点。
 func Server() (serverutil.Middlewares, error) {
 	meter := otel.Meter(consts.MeterNameTransport)
@@ -43,7 +54,7 @@ func Server() (serverutil.Middlewares, error) {
 	}
 	return serverutil.Middlewares{
 		tracing.Server(tracing.WithTracerName(consts.TracerNameTransport)),
-		logging.Server(atlaslog.GetLogger()),
+		logging.Server(atlaslog.GetLogger(), logging.WithErrorFilter(businessErrOnly)),
 		mwmetrics.Server(mwmetrics.WithRequests(requests), mwmetrics.WithSeconds(seconds)),
 	}, nil
 }

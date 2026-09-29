@@ -17,6 +17,7 @@ import (
 
 // PlayerServiceInternal 是 PlayerService 的服务面（access=INTERNAL，服务间经 gRPC 调用）。
 type PlayerServiceInternal interface {
+	Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterReply, error)
 	Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginReply, error)
 	Logout(ctx context.Context, req *v1.LogoutMsg) (*emptypb.Empty, error)
 	GrantItem(ctx context.Context, req *v1.GrantItemReq) (*v1.GrantItemReply, error)
@@ -34,12 +35,28 @@ var playerServiceInternalDesc = grpc.ServiceDesc{
 	ServiceName: "game.v1.PlayerService",
 	HandlerType: (*PlayerServiceInternal)(nil),
 	Methods: []grpc.MethodDesc{
+		{MethodName: "Register", Handler: handlePlayerServiceInternalRegister},
 		{MethodName: "Login", Handler: handlePlayerServiceInternalLogin},
 		{MethodName: "Logout", Handler: handlePlayerServiceInternalLogout},
 		{MethodName: "GrantItem", Handler: handlePlayerServiceInternalGrantItem},
 		{MethodName: "GetPlayer", Handler: handlePlayerServiceInternalGetPlayer},
 	},
 	Metadata: "api/game/v1/player_service.proto",
+}
+
+// handlePlayerServiceInternalRegister 解包请求并经拦截器调用本面实现。
+func handlePlayerServiceInternalRegister(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(v1.RegisterReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlayerServiceInternal).Register(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/game.v1.PlayerService/Register"}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(PlayerServiceInternal).Register(ctx, req.(*v1.RegisterReq))
+	})
 }
 
 // handlePlayerServiceInternalLogin 解包请求并经拦截器调用本面实现。
@@ -115,6 +132,16 @@ type playerServiceInternal struct {
 	opts opcall.AdapterOptions
 }
 
+// Register 投递到目标 actor 并归一化回执。
+func (a *playerServiceInternal) Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterReply, error) {
+	entry := v1.PlayerServiceRouteTable["/game.v1.PlayerService/Register"]
+	rep, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...)
+	if err != nil {
+		return nil, err
+	}
+	return opcall.Reply[*v1.RegisterReply](entry, rep)
+}
+
 // Login 投递到目标 actor 并归一化回执。
 func (a *playerServiceInternal) Login(ctx context.Context, req *v1.LoginReq) (*v1.LoginReply, error) {
 	entry := v1.PlayerServiceRouteTable["/game.v1.PlayerService/Login"]
@@ -125,14 +152,13 @@ func (a *playerServiceInternal) Login(ctx context.Context, req *v1.LoginReq) (*v
 	return opcall.Reply[*v1.LoginReply](entry, rep)
 }
 
-// Logout 投递到目标 actor 并归一化回执。
+// Logout 单向投递 Tell 消息到目标 actor（无回执，跳过回执归一）。
 func (a *playerServiceInternal) Logout(ctx context.Context, req *v1.LogoutMsg) (*emptypb.Empty, error) {
 	entry := v1.PlayerServiceRouteTable["/game.v1.PlayerService/Logout"]
-	rep, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...)
-	if err != nil {
+	if _, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...); err != nil {
 		return nil, err
 	}
-	return opcall.Reply[*emptypb.Empty](entry, rep)
+	return &emptypb.Empty{}, nil
 }
 
 // GrantItem 投递到目标 actor 并归一化回执。

@@ -22,7 +22,6 @@ const PlayerServiceActorType = "player"
 // PlayerService 是业务 actor 实现的接口；签名由 service 块决定，
 // returns 具体消息即 Ask，returns google.protobuf.Empty 即 Tell（单向）。
 type PlayerService interface {
-	Register(ctx core.ActorContext, req *v1.RegisterReq) (*v1.RegisterReply, error)
 	GetPlayerData(ctx core.ActorContext, req *v1.GetPlayerDataReq) (*v1.PlayerDataReply, error)
 	GetBackpack(ctx core.ActorContext, req *v1.GetBackpackReq) (*v1.BackpackReply, error)
 	EnterMatchQueue(ctx core.ActorContext, req *v1.EnterMatchQueueReq) (*v1.EnterMatchQueueReply, error)
@@ -33,6 +32,7 @@ type PlayerService interface {
 	LeaveParty(ctx core.ActorContext, req *v1.LeavePartyReq) (*v1.PartyReply, error)
 	GetParty(ctx core.ActorContext, req *v1.GetPartyReq) (*v1.PartyReply, error)
 	QueueParty(ctx core.ActorContext, req *v1.QueuePartyReq) (*v1.PartyQueueReply, error)
+	Register(ctx core.ActorContext, req *v1.RegisterReq) (*v1.RegisterReply, error)
 	Login(ctx core.ActorContext, req *v1.LoginReq) (*v1.LoginReply, error)
 	Logout(ctx core.ActorContext, msg *v1.LogoutMsg) error
 	GrantItem(ctx core.ActorContext, req *v1.GrantItemReq) (*v1.GrantItemReply, error)
@@ -42,9 +42,6 @@ type PlayerService interface {
 // UnimplementedPlayerService 是兜底基类；业务 actor embed 它获得接口演进安全。
 type UnimplementedPlayerService struct{}
 
-func (UnimplementedPlayerService) Register(core.ActorContext, *v1.RegisterReq) (*v1.RegisterReply, error) {
-	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.Register")
-}
 func (UnimplementedPlayerService) GetPlayerData(core.ActorContext, *v1.GetPlayerDataReq) (*v1.PlayerDataReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.GetPlayerData")
 }
@@ -75,6 +72,9 @@ func (UnimplementedPlayerService) GetParty(core.ActorContext, *v1.GetPartyReq) (
 func (UnimplementedPlayerService) QueueParty(core.ActorContext, *v1.QueuePartyReq) (*v1.PartyQueueReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.QueueParty")
 }
+func (UnimplementedPlayerService) Register(core.ActorContext, *v1.RegisterReq) (*v1.RegisterReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.Register")
+}
 func (UnimplementedPlayerService) Login(core.ActorContext, *v1.LoginReq) (*v1.LoginReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: PlayerService.Login")
 }
@@ -90,10 +90,6 @@ func (UnimplementedPlayerService) GetPlayer(core.ActorContext, *v1.GetPlayerReq)
 
 // playerServiceDecodeTable 是消息全名 → 类型化 Unmarshal 闭包的解码表（生成期静态绑定）。
 var playerServiceDecodeTable = map[string]func([]byte) (proto.Message, error){
-	"game.v1.RegisterReq": func(b []byte) (proto.Message, error) {
-		m := new(v1.RegisterReq)
-		return m, proto.Unmarshal(b, m)
-	},
 	"game.v1.GetPlayerDataReq": func(b []byte) (proto.Message, error) {
 		m := new(v1.GetPlayerDataReq)
 		return m, proto.Unmarshal(b, m)
@@ -132,6 +128,10 @@ var playerServiceDecodeTable = map[string]func([]byte) (proto.Message, error){
 	},
 	"game.v1.QueuePartyReq": func(b []byte) (proto.Message, error) {
 		m := new(v1.QueuePartyReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"game.v1.RegisterReq": func(b []byte) (proto.Message, error) {
+		m := new(v1.RegisterReq)
 		return m, proto.Unmarshal(b, m)
 	},
 	"game.v1.LoginReq": func(b []byte) (proto.Message, error) {
@@ -177,8 +177,6 @@ func (d *playerServiceDispatch) OnAsk(ctx core.ActorContext, req any) (any, erro
 		return nil, err
 	}
 	switch r := req.(type) {
-	case *v1.RegisterReq:
-		return d.impl.Register(ctx, r)
 	case *v1.GetPlayerDataReq:
 		return d.impl.GetPlayerData(ctx, r)
 	case *v1.GetBackpackReq:
@@ -199,6 +197,8 @@ func (d *playerServiceDispatch) OnAsk(ctx core.ActorContext, req any) (any, erro
 		return d.impl.GetParty(ctx, r)
 	case *v1.QueuePartyReq:
 		return d.impl.QueueParty(ctx, r)
+	case *v1.RegisterReq:
+		return d.impl.Register(ctx, r)
 	case *v1.LoginReq:
 		return d.impl.Login(ctx, r)
 	case *v1.GrantItemReq:
@@ -240,27 +240,6 @@ type PlayerServiceClusterClient struct {
 // NewPlayerServiceClusterClient 以发送端运行时构造集群互调 client stub。
 func NewPlayerServiceClusterClient(inv core.ActorInvoker) *PlayerServiceClusterClient {
 	return &PlayerServiceClusterClient{inv: inv}
-}
-
-// Register 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
-// 变参透传投递选项——sender/观测头等由调用方按需注入）。
-func (c *PlayerServiceClusterClient) Register(ctx context.Context, pid types.PID, req *v1.RegisterReq, opts ...core.SendOption) (*v1.RegisterReply, error) {
-	rep, err := c.inv.Ask(ctx, pid, req, opts...)
-	if err != nil {
-		return nil, err
-	}
-	switch v := rep.(type) {
-	case *v1.RegisterReply:
-		return v, nil
-	case []byte:
-		out := new(v1.RegisterReply)
-		if err := proto.Unmarshal(v, out); err != nil {
-			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
-	}
 }
 
 // GetPlayerData 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
@@ -464,6 +443,27 @@ func (c *PlayerServiceClusterClient) QueueParty(ctx context.Context, pid types.P
 		return v, nil
 	case []byte:
 		out := new(v1.PartyQueueReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// Register 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *PlayerServiceClusterClient) Register(ctx context.Context, pid types.PID, req *v1.RegisterReq, opts ...core.SendOption) (*v1.RegisterReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *v1.RegisterReply:
+		return v, nil
+	case []byte:
+		out := new(v1.RegisterReply)
 		if err := proto.Unmarshal(v, out); err != nil {
 			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
 		}

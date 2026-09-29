@@ -12,7 +12,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
-	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	gwapp "github.com/huangyuCN/atlas-game-layout/services/gateway/internal/app"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"go.uber.org/fx"
@@ -37,12 +36,11 @@ type Options struct {
 
 // Gateway 是装配完成的 gateway 实例句柄。
 type Gateway struct {
-	TCPURL  string              // 业务通道（tcp，host:port）
-	WSURL   string              // 单通道形态（ws://host:port，业务+战斗共用）
-	KCPURL  string              // 战斗通道（kcp，host:port）
-	UDPURL  string              // 战斗通道（udp，host:port）
-	HTTPURL string              // 健康检查（http，host:port）
-	Actors  *actorclient.Client // 远程 actor 客户端（测试/观测用）
+	TCPURL  string // 业务通道（tcp，host:port）
+	WSURL   string // 单通道形态（ws://host:port，业务+战斗共用）
+	KCPURL  string // 战斗通道（kcp，host:port）
+	UDPURL  string // 战斗通道（udp，host:port）
+	HTTPURL string // 健康检查（http，host:port）
 	stop    func(ctx context.Context) error
 }
 
@@ -51,11 +49,10 @@ type graphHandles struct {
 	fx.In
 
 	bootstrap.Servers
-	Actors *actorclient.Client
 }
 
 // New 装配并启动一个 gateway 实例：映射配置 → bootstrap.Boot 启动依赖图
-// （含推送订阅、会话清扫与 actor 客户端），由 atlas.App 统一启动五协议服务端并注册实例。
+// （含推送订阅、会话清扫与域服务客户端），由 atlas.App 统一启动五协议服务端并注册实例。
 func New(ctx context.Context, o Options) (*Gateway, error) {
 	var h graphHandles
 	cfg, err := newBootstrap(o)
@@ -74,7 +71,6 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 		KCPURL:  urls[serverutil.SchemeKCP].Host,
 		UDPURL:  urls[serverutil.SchemeUDP].Host,
 		HTTPURL: urls[serverutil.SchemeHTTP].Host,
-		Actors:  h.Actors,
 		stop:    inst.Stop,
 	}, nil
 }

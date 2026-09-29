@@ -44,7 +44,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | 平面 | 形态（`ns=test`） | 取值字段 | 消费方 |
 |------|-------------------|----------|--------|
 | ① 注册中心键前缀 | `/atlas/services/test` | `Derived.RegistryPrefix` | `pkg/registry`（实例键 `<前缀>/<服务名>/<实例 ID>`） |
-| ② actor NATS subject 前缀 | `atlas_actor.test` | `Derived.ActorSubjectPrefix` | `pkg/actor` → 框架 subject 单包（只拼后缀） |
+| ② actor 集群 NATS subject 前缀 | `atlas_actor.test` | `Derived.ClusterSubjectPrefix` | `pkg/actor` → 框架 subject 单包（只拼后缀） |
 | ③ 业务 topic 前缀 | `atlas.test` | `Derived.TopicPrefix` | `lib/consts.NewTopics`（`atlas.<ns>.push/event/gw.*`） |
 | ④ redis 键前缀 | `atlas:test:` | `Derived.RedisKeyPrefix` | `pkg/redis.NewKeys` |
 | ⑤ etcd 目录前缀 | `/atlas/actors/test` | `Derived.EtcdDirectory` | `pkg/actor`（节点归属键 + locator 前缀） |
@@ -111,6 +111,10 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 |------|----|------|
 | `edge_addr` | 2（由 `addr` 改名，号保留） | **edge 面**：不可信区。客户端 op 经网关转发到域 `rpc/` 平面的 **Edge 接口**（`ACCESS_CLIENT`） |
 | `internal_addr` | 11（新增） | **internal 面**：可信区。服务间 gRPC 调用 + P7 管理面 `AdminService` |
+
+> **客户端侧（拨号方）同一条边界**：服务发现解析默认只取 `grpc`（internal 面）端点；
+> 要拨 domain 的 edge 面必须显式 `atlasgrpc.WithEndpointScheme("grpc-edge")`——
+> 不配就拨不到 Edge 面（网关的客户端 op 透传正是靠它落到不可信面）。
 
 - **空 = 不启用该面**（符合 §1 唯一规则）；进程内/测试形态显式写 `127.0.0.1:0`（随机端口），不靠留空。
 - 两面地址不得相同（装配期报错）；端口写 `0` 时内核分配必然不同，故不算冲突。

@@ -7,10 +7,10 @@ package app
 import (
 	"context"
 
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
 	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
@@ -35,11 +35,12 @@ var Module = fx.Module("matcher",
 		fxkit.NewPublisher,            // 业务事件发布入口（连接 + 命名空间收口）
 		fxkit.NewEtcdClient[*conf.Bootstrap],
 		fxkit.NewRegistrar[*conf.Bootstrap], // → registry.Registrar，供 atlas.App 服务注册
-		// → registry.Discovery：actor 集群选节点与 gRPC 客户端寻址共用（键前缀与注册端同源）
+		// → registry.Discovery：battle 的 gRPC 寻址（键前缀与注册端同源）
 		fxkit.NewEtcdDiscovery[*conf.Bootstrap],
 		fxkit.NewRedisClient[*conf.Bootstrap],
 		NewNatsConn,
-		NewActorRuntime,
+		NewBattleConn,
+		NewBattleClient,
 		NewMatchmakerRuntime,
 		NewMatchmakerParty,
 		infra.NewNatsEventPublisher,
@@ -65,7 +66,7 @@ var Module = fx.Module("matcher",
 	fx.Invoke(
 		registerResources,
 		registerRuntime,
-		registerActorLifecycle,
+		registerBattleConn,
 	),
 )
 
@@ -88,11 +89,10 @@ func registerRuntime(lc fx.Lifecycle, rt *matchredis.Runtime) {
 	})
 }
 
-// registerActorLifecycle 把 actor 集群客户端接入生命周期。
-func registerActorLifecycle(lc fx.Lifecycle, rt *pkgactor.Runtime) {
+// registerBattleConn 把 battle internal 面连接接入生命周期（OnStop 关闭）。
+func registerBattleConn(lc fx.Lifecycle, conn *serverutil.LazyConn) {
 	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error { return rt.Start(ctx) },
-		OnStop:  func(ctx context.Context) error { return rt.Shutdown(ctx) },
+		OnStop: func(context.Context) error { return conn.Close() },
 	})
 }
 

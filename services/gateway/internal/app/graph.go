@@ -1,5 +1,5 @@
 // Package app 是 gateway 服务的唯一装配之家：
-// Module 列出全部组件清单（infra → 会话 → actor 客户端 → server 分层），
+// Module 列出全部组件清单（infra → 会话 → 域服务客户端 → server 分层），
 // 进程形态（cmd/main + atlas App 驱动启停）与进程内形态
 // （assemble 经 bootstrap.Boot 驱动启停）共用同一张依赖图。
 package app
@@ -10,14 +10,17 @@ import (
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	gamev1rpc "github.com/huangyuCN/atlas-game-layout/api/game/v1/rpc"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
 	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
-	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
+	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/domainclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/server"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
+	"github.com/huangyuCN/atlas/contrib/actor/opcall"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
@@ -43,7 +46,7 @@ var Module = fx.Module("gateway",
 		// ── infra：注册中心 + 外部客户端 ──
 		fxkit.NewEtcdClient[*conf.Bootstrap],
 		fxkit.NewRegistrar[*conf.Bootstrap], // → registry.Registrar，供 atlas.App 服务注册
-		// → registry.Discovery：actor 集群选节点与 gRPC 客户端寻址共用（键前缀与注册端同源）
+		// → registry.Discovery：域服务 gRPC 寻址（Edge 面 / Internal 面同源）
 		fxkit.NewEtcdDiscovery[*conf.Bootstrap],
 		fxkit.NewRedisClient[*conf.Bootstrap],
 		fxkit.Topics[*conf.Bootstrap], // 业务 topic 命名空间（与 actor 平面同源）
@@ -59,15 +62,18 @@ var Module = fx.Module("gateway",
 		// fx.Out 自带 servers 组标签，未启用的面为 nil。
 		server.NewGRPCServers,
 		newServerSet,
-		// ── 会话 + actor 集群客户端 ──
+		// ── 会话 + 域服务客户端（Edge 面：业务 op 透传；Internal 面：会话联动）──
 		newSessionManager,
-		NewActorClient,
+		NewDomainResolver,
+		NewDomainInvoker,
+		NewPlayerConn,
+		NewPlayerClient,
 		newGateway,
 	),
 	fx.Invoke(
 		registerResources,
 		registerRelay,
-		registerActorLifecycle,
+		registerDomainConns,
 	),
 )
 
@@ -115,7 +121,8 @@ func newServerSet(
 func newGateway(
 	cfg *conf.Bootstrap,
 	sess *session.Manager,
-	actors *actorclient.Client,
+	inv opcall.MethodInvoker,
+	players gamev1rpc.PlayerServiceClient,
 	meter metrics.Collector,
 	nc *natsgo.Conn,
 	pub *pkgnats.Publisher,
@@ -126,12 +133,13 @@ func newGateway(
 		instanceID = r.GetId()
 	}
 	// 透传引擎：合并各域生成的注解路由表（operation → actor 寻址规则），
-	// 新增域 op 时 gateway 无需改代码（表由 protoc 生成，access=CLIENT 注册）。
+	// 业务 op 按条目寻址经 Edge 面（gRPC）投递到域服务；新增域 op 时 gateway 无需改代码
+	// （表由 protoc 生成，access=CLIENT 的方法注册传输路由）。
 	table, err := relay.Merge(gamev1.PlayerServiceRouteTable, battlev1.BattleServiceRouteTable)
 	if err != nil {
 		return nil, fmt.Errorf("gateway: 透传路由表合并失败: %w", err)
 	}
-	g := server.NewGateway(instanceID, table, sess, actors, meter, nc, pub, tcpSrv, wsSrv, kcpSrv, udpSrv,
+	g := server.NewGateway(instanceID, table, sess, inv, players, meter, nc, pub, tcpSrv, wsSrv, kcpSrv, udpSrv,
 		server.NewVersionGate(cfg.GetRuntime()))
 	// 通道绑定副作用（Gateway 会话模型的领域知识，装配声明——不进注解协议）：
 	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道（battle 帧推送寻址）。
@@ -164,11 +172,17 @@ func registerRelay(lc fx.Lifecycle, g *server.Gateway, sess *session.Manager) {
 	})
 }
 
-// registerActorLifecycle 把 actor 集群运行时接入生命周期。
-func registerActorLifecycle(lc fx.Lifecycle, actors *actorclient.Client) {
+// registerDomainConns 把域服务连接接入生命周期：OnStop 关闭解析器缓存的 Edge 面连接
+// 与会话联动用的 Internal 面连接（连接随进程结束一并释放）。
+func registerDomainConns(lc fx.Lifecycle, resolver *domainclient.Resolver, playerConn *serverutil.LazyConn) {
 	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error { return actors.Start(ctx) },
-		OnStop:  func(ctx context.Context) error { return actors.Shutdown(ctx) },
+		OnStop: func(context.Context) error {
+			firstErr := resolver.Close()
+			if err := playerConn.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+			return firstErr
+		},
 	})
 }
 

@@ -14,7 +14,6 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
-	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
@@ -70,9 +69,9 @@ type gwEnv struct {
 	id     string
 	sess   *session.Manager
 	g      *Gateway
-	mock   *mockActorRuntime // game/battle actor 桩（断言投递用）
-	push   *fakePusher       // TCP 业务通道推送记录（会话回写断言用）
-	kcp    *fakePusher       // KCP 战斗通道推送记录（通道绑定优先级断言用）
+	mock   *mockDomain // 域服务桩（断言投递与调用身份用）
+	push   *fakePusher // TCP 业务通道推送记录（会话回写断言用）
+	kcp    *fakePusher // KCP 战斗通道推送记录（通道绑定优先级断言用）
 	tcpSrv *tcpt.Server
 	tcpURL string
 }
@@ -107,8 +106,8 @@ func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Co
 	push, kcpPush := new(fakePusher), new(fakePusher)
 
 	sess := session.NewManager(session.NewRedisStore(cli), id, session.Options{TTL: 30 * time.Second})
-	mock := newMockActorRuntime()
-	g := NewGateway(id, newRouteTable(t), sess, actorclient.NewClient(mock), meter, nc, testPublisher(nc),
+	mock := newMockDomain()
+	g := NewGateway(id, newRouteTable(t), sess, mock, mock, meter, nc, testPublisher(nc),
 		push, new(fakePusher), kcpPush, udpSrv, VersionGate{})
 	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
 	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))

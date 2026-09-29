@@ -197,7 +197,6 @@ service PlayerService {
   // 客户端可达（SESSION 寻址）。幂等示范：EnterMatchQueue/QueueParty 是有副作用的
   // 写操作（重复入队/重复排队不应重复计费或叠加），声明 idempotency: IDEMPOTENT——
   // 客户端重试/重发在去重窗口内不重复执行；查询类与天然幂等类不声明（零开销）。
-  rpc Register (RegisterReq) returns (RegisterReply);
   rpc GetPlayerData (GetPlayerDataReq) returns (PlayerDataReply);
   rpc GetBackpack (GetBackpackReq) returns (BackpackReply);
   rpc EnterMatchQueue (EnterMatchQueueReq) returns (EnterMatchQueueReply) {
@@ -215,6 +214,13 @@ service PlayerService {
     option (atlas.route.v1.rpc_route) = { idempotency: IDEMPOTENT };
   }
   // 服务端内部（Gateway 登录链路与管理面 grpc 转发；客户端 op 不存在）。
+  //
+  // Register 也属内部方法：账号注册的唯一客户端入口是网关会话协议
+  // `/gateway.v1.Session/Register`（网关按账号组装会话身份后经 internal 面转发到本方法）；
+  // 域面不再向客户端开放注册——同一能力两套客户端 API 是 v2 要消灭的冗余面。
+  rpc Register (RegisterReq) returns (RegisterReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
   rpc Login (LoginReq) returns (LoginReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
   }

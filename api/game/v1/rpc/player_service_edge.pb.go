@@ -16,7 +16,6 @@ import (
 
 // PlayerServiceEdge 是 PlayerService 的客户端面（access=CLIENT，经网关/帧通道调用）。
 type PlayerServiceEdge interface {
-	Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterReply, error)
 	GetPlayerData(ctx context.Context, req *v1.GetPlayerDataReq) (*v1.PlayerDataReply, error)
 	GetBackpack(ctx context.Context, req *v1.GetBackpackReq) (*v1.BackpackReply, error)
 	EnterMatchQueue(ctx context.Context, req *v1.EnterMatchQueueReq) (*v1.EnterMatchQueueReply, error)
@@ -40,7 +39,6 @@ var playerServiceEdgeDesc = grpc.ServiceDesc{
 	ServiceName: "game.v1.PlayerService",
 	HandlerType: (*PlayerServiceEdge)(nil),
 	Methods: []grpc.MethodDesc{
-		{MethodName: "Register", Handler: handlePlayerServiceEdgeRegister},
 		{MethodName: "GetPlayerData", Handler: handlePlayerServiceEdgeGetPlayerData},
 		{MethodName: "GetBackpack", Handler: handlePlayerServiceEdgeGetBackpack},
 		{MethodName: "EnterMatchQueue", Handler: handlePlayerServiceEdgeEnterMatchQueue},
@@ -53,21 +51,6 @@ var playerServiceEdgeDesc = grpc.ServiceDesc{
 		{MethodName: "QueueParty", Handler: handlePlayerServiceEdgeQueueParty},
 	},
 	Metadata: "api/game/v1/player_service.proto",
-}
-
-// handlePlayerServiceEdgeRegister 解包请求并经拦截器调用本面实现。
-func handlePlayerServiceEdgeRegister(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	in := new(v1.RegisterReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PlayerServiceEdge).Register(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/game.v1.PlayerService/Register"}
-	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
-		return srv.(PlayerServiceEdge).Register(ctx, req.(*v1.RegisterReq))
-	})
 }
 
 // handlePlayerServiceEdgeGetPlayerData 解包请求并经拦截器调用本面实现。
@@ -231,16 +214,6 @@ func NewPlayerServiceEdge(rt core.ActorInvoker, opts opcall.AdapterOptions) Play
 type playerServiceEdge struct {
 	rt   core.ActorInvoker
 	opts opcall.AdapterOptions
-}
-
-// Register 投递到目标 actor 并归一化回执。
-func (a *playerServiceEdge) Register(ctx context.Context, req *v1.RegisterReq) (*v1.RegisterReply, error) {
-	entry := v1.PlayerServiceRouteTable["/game.v1.PlayerService/Register"]
-	rep, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...)
-	if err != nil {
-		return nil, err
-	}
-	return opcall.Reply[*v1.RegisterReply](entry, rep)
 }
 
 // GetPlayerData 投递到目标 actor 并归一化回执。

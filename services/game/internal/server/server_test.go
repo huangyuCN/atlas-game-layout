@@ -63,10 +63,11 @@ func TestNewGRPCServersSplitsFaces(t *testing.T) {
 		t.Fatalf("两面都应启用，实际 edge=%v internal=%v", set.Edge, set.Internal)
 	}
 	const service = "game.v1.PlayerService"
+	// Register 属 INTERNAL（账号注册的唯一客户端入口是网关会话协议，域面不开放注册）。
 	assertFaceMethods(t, faceOf(t, set.Edge), service,
-		[]string{"Register", "GetPlayerData", "QueueParty"}, []string{"Login", "Logout", "GrantItem", "GetPlayer"})
+		[]string{"GetPlayerData", "QueueParty"}, []string{"Register", "Login", "Logout", "GrantItem", "GetPlayer"})
 	assertFaceMethods(t, faceOf(t, set.Internal), service,
-		[]string{"Login", "Logout", "GrantItem", "GetPlayer"}, []string{"Register", "GetPlayerData", "QueueParty"})
+		[]string{"Register", "Login", "Logout", "GrantItem", "GetPlayer"}, []string{"GetPlayerData", "QueueParty"})
 }
 
 // TestAdminServiceRegisteredOnInternalFaceOnly 验证管理面只注册在 internal 面（安全边界钉死）：

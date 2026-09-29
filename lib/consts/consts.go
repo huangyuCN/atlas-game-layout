@@ -22,12 +22,6 @@ const (
 	EnvDefault = "default"
 )
 
-// Actor 类型名（集群懒激活的 group 名，PID 形如 <Type>:<Key>）。
-const (
-	ActorTypePlayer = "player"
-	ActorTypeBattle = "battle"
-)
-
 // Topics 按命名空间构造业务 topic：前缀取 namespace.Derived.TopicPrefix（atlas.<ns>）。
 // 两套共用同一 NATS 的部署若不隔离会串台——玩家推送互相下发、业务事件互相收到、
 // 网关控制通道串号，且都是静默的（不报错，只是消息走错环境）。命名空间与注册中心
@@ -86,17 +80,6 @@ const (
 	CtxKeyPlayerID  = "player_id"
 	CtxKeySessionID = "session_id"
 	CtxKeyBattleID  = "battle_id"
-)
-
-// 服务端推送 operation（消息 protobuf 完整名，客户端 OnNotify 按此分发；
-// gateway 下发与 battle 上行通知共用同一套约定，ADR-0002）。
-const (
-	PushOpKickedOffline  = "/gateway.v1.KickedNotify"
-	PushOpMatchStarted   = "/game.v1.MatchStartedNotify"
-	PushOpMatchFailed    = "/game.v1.MatchFailedNotify"
-	PushOpPartyRoster    = "/game.v1.PartyRosterNotify"
-	PushOpFrameBroadcast = "/battle.v1.FrameBroadcast"
-	PushOpBattleEnd      = "/battle.v1.BattleEndNotify"
 )
 
 // 链路追踪 instrumentation scope 名（span 归属的库标识，集中管理便于统一改名）。

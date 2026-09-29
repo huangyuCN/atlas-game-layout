@@ -1,23 +1,24 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
+	battlev1rpc "github.com/huangyuCN/atlas-game-layout/api/battle/v1/rpc"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
+	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
 	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
 	"github.com/huangyuCN/atlas/matchmaker"
-	"github.com/huangyuCN/atlas/metrics"
-	"github.com/huangyuCN/atlas/namespace"
 	"github.com/huangyuCN/atlas/registry"
 	natsgo "github.com/nats-io/nats.go"
+	"google.golang.org/grpc"
 )
 
 // NewNatsConn 装配 NATS 连接（成局事件总线）。
@@ -37,48 +38,22 @@ func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 	return conn, nil
 }
 
-// NewActorRuntime 装配 actor 集群客户端（成局后开局调用 + 战斗 actor 懒激活副本）：
-// ServiceName 指向 battle——副本注册使本节点的懒激活判定成立，实际拉起在 battle 节点（M7）。
-// 服务发现由装配层提供（fxkit.NewEtcdDiscovery），保证与注册端同一键前缀。
-func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter metrics.Collector) (*pkgactor.Runtime, error) {
-	var endpoints []string
-	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
-		endpoints = r.GetEtcd().GetEndpoints()
-	}
-	nodeID := ""
-	var derived namespace.Derived
-	if r := cfg.GetRuntime(); r != nil {
-		d, derr := namespace.Derive(r.GetNamespace())
-		if derr != nil {
-			return nil, fmt.Errorf("app: %w", derr)
+// NewBattleConn 拨号 battle 的 **internal 面**（可信区）：成局后的开局调用走
+// 类型化客户端（BattleService/Create），matcher 不再自建 actor 集群运行时，
+// 也不需要「只发不接」的懒激活副本——目标 PID 的解析与懒激活在 battle 侧完成。
+func NewBattleConn(discovery registry.Discovery, mws serverutil.ClientMiddlewares) *serverutil.LazyConn {
+	return serverutil.NewLazyConn(func(ctx context.Context) (grpc.ClientConnInterface, error) {
+		conn, err := serverutil.DialDomain(ctx, discovery, consts.ServiceBattle, serverutil.SchemeGRPC, mws)
+		if err != nil {
+			return nil, err
 		}
-		nodeID, derived = r.GetId(), d
-	}
-	rt, err := pkgactor.NewRuntime(pkgactor.Options{
-		NodeID:        nodeID,
-		Namespace:     derived.Namespace,
-		ServiceName:   consts.ServiceBattle,
-		EtcdEndpoints: endpoints,
-		NatsURL:       natsURLOf(cfg),
-		Tracer:        pkgactor.DefaultTracer(),
-		Meter:         meter,
-		Discovery:     discovery,
+		return conn, nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("app: 构造 actor 运行时失败: %w", err)
-	}
-	if err := pkgactor.RegisterBattleReplica(rt); err != nil {
-		return nil, fmt.Errorf("app: 注册战斗 actor 懒激活副本失败: %w", err)
-	}
-	return rt, nil
 }
 
-// natsURLOf 提取 data.nats.url。
-func natsURLOf(cfg *conf.Bootstrap) string {
-	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
-		return d.GetNats().GetUrl()
-	}
-	return ""
+// NewBattleClient 基于 internal 面连接构造 BattleService 类型化客户端。
+func NewBattleClient(conn *serverutil.LazyConn) battlev1rpc.BattleServiceClient {
+	return battlev1rpc.NewBattleServiceClient(conn)
 }
 
 // NewMatchmakerRuntime 装配撮合运行时（redis 后端 + 等级相近规则）。
@@ -95,8 +70,8 @@ func serviceOf(rt *matchredis.Runtime) matchmaker.Service { return rt.Service }
 
 // newSink 装配成局观察方默认组合（nats 发布 + 开局调用）；
 // 测试注入经 fx.Decorate 覆盖本提供器输出（见 assemble）。
-func newSink(pub *pkgnats.Publisher, rt *pkgactor.Runtime) biz.MatchEventSink {
-	return infra.NewSink(pub, rt)
+func newSink(pub *pkgnats.Publisher, cli battlev1rpc.BattleServiceClient) biz.MatchEventSink {
+	return infra.NewSink(pub, cli)
 }
 
 // rosterOf 把 nats 事件发布器绑定为名册变更发布接口（供 fx 按接口注入）。

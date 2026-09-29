@@ -24,15 +24,6 @@ func NewPlayerService(cli client.Invoker) *PlayerService {
 	return &PlayerService{cli: cli}
 }
 
-// Register 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
-func (c *PlayerService) Register(ctx context.Context, req *v1.RegisterReq, opts ...client.InvokeOption) (*v1.RegisterReply, error) {
-	var out v1.RegisterReply
-	if err := c.cli.Invoke(ctx, `/game.v1.PlayerService/Register`, req, &out, opts...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // GetPlayerData 请求-响应调用；业务拒绝返回错误（Reason 为主键）。
 func (c *PlayerService) GetPlayerData(ctx context.Context, req *v1.GetPlayerDataReq, opts ...client.InvokeOption) (*v1.PlayerDataReply, error) {
 	var out v1.PlayerDataReply
@@ -125,7 +116,6 @@ func (c *PlayerService) QueueParty(ctx context.Context, req *v1.QueuePartyReq, o
 
 // PlayerServiceProtocolOps 是 PlayerService 的会话 op 名（按 rpc 名索引）。
 var PlayerServiceProtocolOps = struct {
-	Register        string
 	GetPlayerData   string
 	GetBackpack     string
 	EnterMatchQueue string
@@ -137,7 +127,6 @@ var PlayerServiceProtocolOps = struct {
 	GetParty        string
 	QueueParty      string
 }{
-	Register:        "/game.v1.PlayerService/Register",
 	GetPlayerData:   "/game.v1.PlayerService/GetPlayerData",
 	GetBackpack:     "/game.v1.PlayerService/GetBackpack",
 	EnterMatchQueue: "/game.v1.PlayerService/EnterMatchQueue",
@@ -157,10 +146,6 @@ func PlayerServiceToken(msg any) string {
 
 // PlayerServicePlayerID 从会话消息里取 PlayerID（无该字段的消息返回零值）。
 func PlayerServicePlayerID(msg any) string {
-	switch m := msg.(type) {
-	case *v1.RegisterReply:
-		return m.PlayerId
-	}
 	return ""
 }
 

@@ -1,0 +1,1 @@
+第三方 proto 依赖目录：只放外部依赖（如 googleapis 的 `google/api/*.proto`）；**框架权威 proto（如 `errors/errors.proto`）由 `-I$(ATLAS_DIR)` 提供，不要在这里放同名副本**——`PROTO_INC` 里 `-Ithird_party` 排在 `-I$(ATLAS_DIR)` 之前，同名副本会静默遮蔽权威定义（曾发生：`third_party/errors/errors.proto` 缺 `ErrorClass`/`Status.class`）。

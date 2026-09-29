@@ -36,7 +36,8 @@ type GRPCServerSet struct {
 }
 
 // NewGRPCServers 构造 gateway 的 gRPC 双面：本轮**只启用 edge 面**且暂不注册域服务
-// （客户端 op 走 tcp/ws/kcp/udp 四协议通道与 actor 平面转发），internal 面留空（不启用）——
+// （客户端 op 走 tcp/ws/kcp/udp 四协议通道，再由网关按路由表经 gRPC 转发到域的 Edge 面；
+// 网关自身不对外提供域服务），internal 面留空（不启用）——
 // 按 server.grpc.edge_addr / internal_addr 的配置判定，空 = 不启用该面（缺省约定见 docs/config.md）。
 // 两面都挂 opgrpc 一元拦截器（挂载点见 serverutil.GRPCServers），P7 管理面再往 internal 面注册。
 func NewGRPCServers(cfg *conf.Bootstrap, mws serverutil.Middlewares) (GRPCServerSet, error) {

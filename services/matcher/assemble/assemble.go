@@ -37,7 +37,7 @@ type Options struct {
 // Matcher 是装配完成的 matcher 服务句柄。
 type Matcher struct {
 	// GRPCURL 是 internal 面（可信区：Matcher 服务注册在此，服务间调用与测试直连用）的 host:port；
-	// edge 面本轮不注册域服务（客户端 op 经 gateway 的 actor 平面转发）。
+	// edge 面不启用：matcher 没有带 route 注解的 service（不存在客户端 op），面空着无意义。
 	GRPCURL string
 	Service matchmaker.Service // 撮合运行时 API（测试/观测用）
 	stop    func(ctx context.Context) error

@@ -19,28 +19,32 @@ import (
 )
 
 // edgeMethodNames 是 game.v1.PlayerService 的 Edge 面方法名（access=CLIENT）。
+// 注意 Register 不在此列：账号注册的唯一客户端入口是网关会话协议
+// （/gateway.v1.Session/Register），域侧 Register 是 access=INTERNAL 的内部方法。
 var edgeMethodNames = []string{
-	"Register", "GetPlayerData", "GetBackpack", "EnterMatchQueue", "CancelMatch", "GetMatchStatus",
+	"GetPlayerData", "GetBackpack", "EnterMatchQueue", "CancelMatch", "GetMatchStatus",
 	"CreateParty", "JoinParty", "LeaveParty", "GetParty", "QueueParty",
 }
 
 // internalMethodNames 是 game.v1.PlayerService 的 Internal 面方法名（access=INTERNAL）。
-var internalMethodNames = []string{"Login", "Logout", "GrantItem", "GetPlayer"}
+var internalMethodNames = []string{"Register", "Login", "Logout", "GrantItem", "GetPlayer"}
 
 // faceStub 同时实现 PlayerServiceEdge 与 PlayerServiceInternal：
-// 两个方法面各自回显 ctx 上的调用身份（Register/GetPlayer 读 opcall.CallInfoFrom），
-// 用于证明 opgrpc 已挂载（入站 metadata → ctx 身份，生成的 rpc 方法体同此契约）；其余方法只返回空回执。
+// 两个方法面各有一个方法回显 ctx 上的调用身份（Register=Internal、GetPlayerData=Edge，
+// 读 opcall.CallInfoFrom），用于证明两个面都挂了 opgrpc（入站 metadata → ctx 身份，
+// 生成的 rpc 方法体同此契约）；其余方法只返回空回执。
 type faceStub struct{}
 
-// Register 实现 Edge 面：回显 ctx 调用身份（经 opgrpc 从入站 metadata 搬运而来）。
+// Register 实现 Internal 面：回显 ctx 调用身份（经 opgrpc 从入站 metadata 搬运而来）。
 func (faceStub) Register(ctx context.Context, _ *gamev1.RegisterReq) (*gamev1.RegisterReply, error) {
 	info, _ := opcall.CallInfoFrom(ctx)
 	return &gamev1.RegisterReply{PlayerId: info.PlayerID}, nil
 }
 
-// GetPlayerData 实现 Edge 面（回执内容不参与断言）。
-func (faceStub) GetPlayerData(context.Context, *gamev1.GetPlayerDataReq) (*gamev1.PlayerDataReply, error) {
-	return &gamev1.PlayerDataReply{}, nil
+// GetPlayerData 实现 Edge 面：回显 ctx 调用身份（与 Register 同理，用于 Edge 面断言）。
+func (faceStub) GetPlayerData(ctx context.Context, _ *gamev1.GetPlayerDataReq) (*gamev1.PlayerDataReply, error) {
+	info, _ := opcall.CallInfoFrom(ctx)
+	return &gamev1.PlayerDataReply{Player: &commonv1.PlayerSummary{PlayerId: info.PlayerID}}, nil
 }
 
 // GetBackpack 实现 Edge 面（回执内容不参与断言）。
@@ -178,7 +182,8 @@ func TestGRPCServersFacesRejectCrossCalls(t *testing.T) {
 		req    any
 	}{
 		{"edge 面调 INTERNAL 方法 Login", edgeConn, "/game.v1.PlayerService/Login", &gamev1.LoginReq{}},
-		{"internal 面调 Edge 方法 Register", internalConn, "/game.v1.PlayerService/Register", &gamev1.RegisterReq{}},
+		{"edge 面调 INTERNAL 方法 Register", edgeConn, "/game.v1.PlayerService/Register", &gamev1.RegisterReq{}},
+		{"internal 面调 Edge 方法 GetPlayerData", internalConn, "/game.v1.PlayerService/GetPlayerData", &gamev1.GetPlayerDataReq{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -207,12 +212,12 @@ func TestGRPCServersFacesMountOpgrpc(t *testing.T) {
 	defer cancel()
 	ctx = metadata.AppendToOutgoingContext(ctx, opcall.MetadataPlayerID, playerID)
 
-	edgeReply := &gamev1.RegisterReply{}
-	if err := dialFace(t, faces.Edge).Invoke(ctx, "/game.v1.PlayerService/Register", &gamev1.RegisterReq{}, edgeReply); err != nil {
+	edgeReply := &gamev1.PlayerDataReply{}
+	if err := dialFace(t, faces.Edge).Invoke(ctx, "/game.v1.PlayerService/GetPlayerData", &gamev1.GetPlayerDataReq{}, edgeReply); err != nil {
 		t.Fatalf("edge 面调用失败: %v", err)
 	}
-	if edgeReply.GetPlayerId() != playerID {
-		t.Errorf("edge 面 ctx 玩家身份 = %q，期望 %q（opgrpc 未挂载？）", edgeReply.GetPlayerId(), playerID)
+	if got := edgeReply.GetPlayer().GetPlayerId(); got != playerID {
+		t.Errorf("edge 面 ctx 玩家身份 = %q，期望 %q（opgrpc 未挂载？）", got, playerID)
 	}
 
 	internalReply := &gamev1.PlayerReply{}

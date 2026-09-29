@@ -8,7 +8,7 @@
 | 词 | 是什么 | 在代码里 |
 |---|---|---|
 | **会话** | 登录后「连接 ↔ 玩家 ↔ 凭据」的绑定关系 | gateway 的 `session.Manager`（redis 路由表 + 本地连接表） |
-| **透传引擎** | 把客户端业务 op 原样转发到 actor 的执行器 | gateway 的 `server/relay.go`（`Relay.Forward`） |
+| **透传引擎** | 把客户端业务 op 原样转发到域 `rpc/` 平面 Edge 接口（gRPC）的执行器 | gateway 的 `server/relay.go`（`Relay.Forward`） |
 | **路由表** | 「op → 目标 actor 规则」的清单，由 proto 注解自动生成 | `api/*/v1/*_service_route.pb.go` 里的 `XxxServiceRouteTable` |
 
 身份去哪了：**客户端消息里没有 token、没有 player_id**。客户端发什么，服务器就照原样转发——服务器只负责「证明你是谁」和「找谁」。
@@ -23,9 +23,9 @@
 │ Invoke(     │              │  ①登录态识别      │              │                      │
 │  "/game.v1  │   帧(TCP)    │    (查会话)       │              │   ④分发桩 type switch│
 │  .PlayerService                     │    │        │   ⑤调用业务方法        │
-│  /EnterMatch│─────────────▶│  ②查透传路由表    │─────────────▶│  (消息里没有身份字段) │
-│  Queue",    │              │  ③组装 target PID │  集群投递    │                      │
-│  req)       │              │  ④注入 sender     │  (Ask)       │  ⑥回执原样返回        │
+│  /EnterMatch│─────────────▶│  ②查透传路由表    │─ gRPC ──────▶│  (消息里没有身份字段) │
+│  Queue",    │              │  ③组装 metadata身份│ 域 Edge 面   │                      │
+│  req)       │              │  ④按方法寻址投递  │  (Ask)       │  ⑥回执原样返回        │
 │             │◀─────────────│  (凭据不可见)     │◀─────────────│                      │
 └─────────────┘   响应帧      └──────────────────┘   回执帧      └──────────────────────┘
 ```
@@ -87,16 +87,18 @@
  │      → {actor: "player", uid来源: 会话, 可达性: CLIENT}                  │
  │    （这个条目是 protoc-gen-atlas-actor 从注解生成的，不是手写的）          │
  │                                                                        │
- │ ③ 组装 target PID                                                      │
- │    actor="player" + uid=会话玩家 → PID{player, "42"}                    │
- │    → 决定消息发给谁：**玩家 42 自己的 actor**                             │
- │                                                                        │
- │ ④ 注入 sender（发起者身份）                                             │
- │    sender = PID{player, "42"}（同款玩家身份）                            │
- │    放进投递信封的 headers（x-atlas-sender-pid），不进业务消息              │
- │                                                                        │
- │ ⑤ 集群投递 Ask/Tell                                                    │
- │    returns 是 Empty → Tell（单向）；是具体消息 → Ask（等回执）             │
+ │ ③ 组装调用身份（metadata 三键，进请求头不进载荷）                       │
+ │    x-atlas-player-id  = 会话玩家（"42"）                                │
+ │    x-atlas-sender-pid = player:42（发起者；客户端不可影响）             │
+ │    x-atlas-request-id = 帧头请求 ID（观测头；幂等 op 接收侧作去重键）   │
+ │                                                                         │
+ │ ④ 按方法寻址投递（gRPC 一元调用）                                       │
+ │    opcall.DeliverRemote → opgrpc.NewInvoker → 域 rpc/ 平面的 Edge 接口  │
+ │    （按面的 scheme 选端点：客户端 op 走 grpc-edge，服务间调用走 grpc）  │
+ │                                                                         │
+ │ ⑤ 域侧解析 PID 并投递到 actor（解析与懒激活都在托管方）                 │
+ │    Edge 方法体 opcall.PIDFrom：会话身份或 uid_field → PID{player, 42}   │
+ │    returns 是 Empty → Tell（单向）；是具体消息 → Ask（等回执）          │
  │                                                                        │
  │ ⑥ 原样回执                                                             │
  │    actor 的回执对象直接编码回客户端，不映射不投影                          │
@@ -112,7 +114,7 @@
 上面 ⑤ 投出的消息到了 game 服务，落地路径：
 
 ```
- 集群（NATS AskRequest）                        game 进程
+ 域 Edge 接口（gRPC 入站）                       game 进程
  ───────────────────────                       ─────────────────────────────────────────
  │                             │ PID{player,42} 的 cell 收到信封                         │
  │                             │                                                        │
@@ -273,7 +275,7 @@
 
 ## 10. 一句话备忘
 
-- **请求路径**：SDK Invoke → 透传引擎（认身份、找目标、带上 sender）→ 集群 → actor 分发桩 → 业务方法。
+- **请求路径**：SDK Invoke → 透传引擎（认身份、查路由表、组装 metadata 身份）→ gRPC 调域 Edge 面 → 域侧解析 PID（懒激活）→ actor 分发桩 → 业务方法。
 - **推送路径**：业务侧 `PublishEnvelope` → NATS → 持连接的 Gateway → 会话路由选通道 → Notify 帧。
 - **channel 绑定** = 「这条连接从此归玩家会话的战斗槽管」，JoinBattle 成功后由网关绑定（装配声明一行）。
 - **身份只有两个来源**：连接绑定（TCP/WS）与帧会话槽（UDP/KCP）——都出自 Gateway 的会话管理器，客户端 payload 从头到尾没有参与。

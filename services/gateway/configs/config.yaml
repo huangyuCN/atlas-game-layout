@@ -20,10 +20,13 @@ registry:
     endpoints:
       - 127.0.0.1:12379
 server:
-  # gRPC 是**两个互相独立的面**（缺省约定见 docs/config.md：地址为空 = 该面不启用）：
-  #   edge_addr（不可信区）：gateway 的 edge 面本轮**暂不注册域服务**（客户端 op 走下面四协议
-  #     通道与 actor 平面转发），只保留面本身与 opgrpc 拦截器，供后续网关侧接入使用；
-  #   internal_addr（可信区）：服务间 gRPC + P7 管理面 AdminService——本轮**留空 = 不启用**。
+  # gRPC 是**两个互相独立的面**（缺省约定见 docs/config.md：地址为空 = 该面不启用）。
+  # 注意区分方向：网关**自身**的两个面只服务"别人调网关"，而业务 op 是网关**作为客户端**
+  # 拨号域服务的面——客户端 op 走域的 edge 面（grpc-edge 端点），会话联动走域的 internal 面。
+  #   edge_addr（不可信区）：网关自身暂不注册域服务（客户端 op 走下面四协议通道，再由网关
+  #     按路由表经 gRPC 转发到域 rpc/ 平面的 Edge 接口），只保留面本身与 opgrpc 拦截器，
+  #     供后续网关侧 gRPC 接入使用；
+  #   internal_addr（可信区）：服务间 gRPC + 管理面 AdminService——本轮**留空 = 不启用**。
   # 端口取 10081：10080 已被上面的 http 健康面占用（两面地址相同会被装配期拒绝）。
   grpc:
     edge_addr: 0.0.0.0:10081

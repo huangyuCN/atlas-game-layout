@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/pkg/spanstest"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
 	atlashttp "github.com/huangyuCN/atlas/transport/http"
@@ -31,7 +33,18 @@ const (
 )
 
 // startHTTP 起一个挂指定中间件链的 HTTP 服务端，返回就绪端点（测试结束自动停止）。
+// 业务调用恒成功（/ping 返回 {"ok":"1"}）；需要断言链上错误处理时用 startHTTPCall。
 func startHTTP(t *testing.T, mws serverutil.Middlewares) *url.URL {
+	t.Helper()
+	return startHTTPCall(t, mws, func(context.Context, interface{}) (interface{}, error) {
+		return map[string]string{"ok": "1"}, nil
+	})
+}
+
+// startHTTPCall 起一个挂指定中间件链的 HTTP 服务端，业务调用的返回（含错误）由 call 决定，
+// 用于断言链上的错误处理（如日志定级与诊断字段）。
+func startHTTPCall(t *testing.T, mws serverutil.Middlewares,
+	call func(context.Context, interface{}) (interface{}, error)) *url.URL {
 	t.Helper()
 	srv, err := serverutil.HTTPServer(&configspb.Server_HTTP{Addr: "127.0.0.1:0"}, mws, nil)
 	if err != nil {
@@ -40,9 +53,7 @@ func startHTTP(t *testing.T, mws serverutil.Middlewares) *url.URL {
 	// 与生成代码同构：中间件的应用点是「服务调用」——handler 里显式 ctx.Middleware(...)
 	// 包住业务调用；裸 HandleFunc 处理器（如 /health）不经过中间件链，正是有意为之。
 	srv.Route("/").GET("/ping", func(ctx atlashttp.Context) error {
-		h := ctx.Middleware(func(context.Context, interface{}) (interface{}, error) {
-			return map[string]string{"ok": "1"}, nil
-		})
+		h := ctx.Middleware(call)
 		out, err := h(ctx, nil)
 		if err != nil {
 			return err
@@ -56,6 +67,16 @@ func startHTTP(t *testing.T, mws serverutil.Middlewares) *url.URL {
 	}
 	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
 	return ep
+}
+
+// getQuiet 发一次 GET 并关闭响应体：链上返回业务错误时状态码非 2xx 属预期，故不校验状态。
+func getQuiet(t *testing.T, ep *url.URL, path string) {
+	t.Helper()
+	resp, err := http.Get(ep.String() + path)
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	_ = resp.Body.Close()
 }
 
 // TestServerChainExtractsUpstreamTrace 验证服务端链生成 server span 并延续上游链路
@@ -205,6 +226,40 @@ func TestServerChainLogsRequest(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "/ping") {
 		t.Fatalf("未见请求日志，实际输出: %q", buf.String())
+	}
+}
+
+// TestServerChainDemotesBusinessError 验证默认链的日志口径示范：
+// 业务类拒绝（ClassBusiness）经 logging.WithErrorFilter 降为 Debug 且不展开诊断字段，
+// 运行时类错误不命中过滤、保持 ERROR 并展开 error_id（噪音被静音、故障仍可见）。
+func TestServerChainDemotesBusinessError(t *testing.T) {
+	var buf bytes.Buffer
+	old := atlaslog.GetLogger()
+	// 默认级别 info 看不到 Debug 行：本用例把级别开到 Debug，断言「降级」而不是「消失」。
+	// 注意顺序：中间件在 Server() 里取全局 logger，必须先装 logger 再建链。
+	atlaslog.SetLogger(atlaslog.New(atlaslog.WithWriter(&buf), atlaslog.WithMinLevel(atlaslog.LevelDebug)))
+	defer atlaslog.SetLogger(old)
+
+	mws, err := Server()
+	if err != nil {
+		t.Fatalf("Server() 错误 = %v", err)
+	}
+
+	bizEP := startHTTPCall(t, mws, func(context.Context, interface{}) (interface{}, error) {
+		return nil, errorv1.ErrPlayerNotFound("玩家不存在")
+	})
+	getQuiet(t, bizEP, "/ping")
+	if got := buf.String(); !strings.Contains(got, "level=DEBUG") || strings.Contains(got, "error_id") {
+		t.Fatalf("业务类拒绝应降 DEBUG 且不带诊断字段，实际日志: %q", got)
+	}
+
+	buf.Reset()
+	boomEP := startHTTPCall(t, mws, func(context.Context, interface{}) (interface{}, error) {
+		return nil, atlaserrors.New(500, "DB_DOWN", "db down")
+	})
+	getQuiet(t, boomEP, "/ping")
+	if got := buf.String(); !strings.Contains(got, "level=ERROR") || !strings.Contains(got, "error_id") {
+		t.Fatalf("运行时类错误应保持 ERROR 并展开诊断字段，实际日志: %q", got)
 	}
 }
 

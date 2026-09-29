@@ -1,40 +1,33 @@
 // Package server 负责 gateway 服务的传输层组装与统一 handler：
 // 五协议 Server（tcp/ws/kcp/udp/http）+ 会话绑定 + 挤下线 + 下行推送。
-// 业务 op 经透传引擎（relay.go）原样转发域 actor，本文件只实现 Gateway
-// 自留的会话生命周期接口（gateway.v1.Session）与登录联动逻辑。
+// 业务 op 经透传引擎（relay.go）原样转发到域 rpc/ 平面的 Edge 接口；
+// 本文件只实现 Gateway 自留的会话生命周期接口（gateway.v1.Session）与登录联动逻辑，
+// 其中的域调用经 internal 面的类型化客户端（客户端 op 面不暴露这些方法）。
 package server
 
 import (
 	"context"
 	"encoding/json"
-	gamev1actor "github.com/huangyuCN/atlas-game-layout/api/game/v1/actor"
-	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
-	"github.com/huangyuCN/atlas/contrib/actor/opcall"
 	"strconv"
 	"time"
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
+	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
+	gamev1rpc "github.com/huangyuCN/atlas-game-layout/api/game/v1/rpc"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 	libsession "github.com/huangyuCN/atlas-game-layout/lib/session"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
-	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/actorclient"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/session"
-	"github.com/huangyuCN/atlas/contrib/actor/core"
+	"github.com/huangyuCN/atlas/contrib/actor/opcall"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
-	"github.com/huangyuCN/atlas/contrib/actor/types"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/encoding/protojson"
 )
-
-// playerPID 是 actorclient.PlayerPID 的容错包装（PID 非法返回零值，调用方忽略错误）。
-func playerPID(playerID string) types.PID {
-	pid, _ := actorclient.PlayerPID(playerID)
-	return pid
-}
 
 // connRef 是连接 ID 的身份键（与 session 反向索引约定一致）。
 // 带传输种类前缀：各传输 Server 的 connID 独立计数，裸 ID 会在
@@ -91,8 +84,7 @@ type pushServer interface {
 type Gateway struct {
 	instanceID string
 	sess       *session.Manager
-	actors     *actorclient.Client
-	players    *gamev1actor.PlayerServiceClusterClient // 生成的玩家域集群互调 client
+	players    gamev1rpc.PlayerServiceClient // game internal 面类型化客户端（会话联动：Register/Login/Logout）
 	nc         *nats.Conn
 	pub        *pkgnats.Publisher // 业务事件发布入口（连接 + topic 命名空间收口）
 	pushers    map[transport.Kind]pushServer
@@ -109,7 +101,7 @@ func (g *Gateway) onSessionsExpired(swept []session.SweptSession) {
 	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
 	defer cancel()
 	for _, s := range swept {
-		_ = g.players.Logout(ctx, playerPID(s.PlayerID), &gamev1.LogoutMsg{
+		_, _ = g.players.Logout(g.callCtx(ctx, s.PlayerID), &gamev1.LogoutMsg{
 			Reason: gamev1.LogoutReason_LOGOUT_REASON_SESSION_EXPIRED,
 		})
 	}
@@ -120,7 +112,8 @@ func NewGateway(
 	instanceID string,
 	table relay.Table,
 	sess *session.Manager,
-	actors *actorclient.Client,
+	inv opcall.MethodInvoker,
+	players gamev1rpc.PlayerServiceClient,
 	meter metrics.Collector,
 	nc *nats.Conn,
 	pub *pkgnats.Publisher,
@@ -131,8 +124,7 @@ func NewGateway(
 	g := &Gateway{
 		instanceID: instanceID,
 		sess:       sess,
-		actors:     actors,
-		players:    gamev1actor.NewPlayerServiceClusterClient(actors.PlayerInvoker()),
+		players:    players,
 		nc:         nc,
 		pub:        pub,
 		pushers: map[transport.Kind]pushServer{
@@ -145,7 +137,7 @@ func NewGateway(
 		gate:   gate,
 	}
 	// 透传引擎与 Gateway 共用连接摘取、会话管理器与指标采集器。
-	g.relay = NewRelay(table, sess, actors, meter, func(ctx context.Context) *session.Conn {
+	g.relay = NewRelay(table, sess, inv, meter, func(ctx context.Context) *session.Conn {
 		return connFrom(ctx, g.pushers, g.udpSrv)
 	})
 	// 会话过期联动撮合域（异常下线兜底）。
@@ -156,14 +148,12 @@ func NewGateway(
 // Relay 暴露透传引擎（注册与测试用）。
 func (g *Gateway) Relay() *Relay { return g.relay }
 
-// requestOptions 组装 Gateway 自留会话接口（Register/Login/Resume/Heartbeat）
-// 的投递选项：客户端帧携带的请求幂等键经 WithHeader 注入观测头——与 relay
-// 透传路径同构，全部 op 的 actor 日志都能带 request_id（与客户端 SDK 调试日志对应）。
-func (g *Gateway) requestOptions(ctx context.Context) []core.SendOption {
-	if id := requestIDOf(ctx); id != "" {
-		return []core.SendOption{core.WithHeader(opcall.MetadataRequestID, id)}
-	}
-	return nil
+// callCtx 组装网关自身会话联动的域调用 ctx：身份三键里的 player 身份与请求 ID
+// （与透传路径同构，全部 op 的日志与链路都能对上客户端的 request_id）；
+// **不带发起者**——Register/Login/Logout 是网关代客户端发起的服务端调用，网关不是玩家，
+// 凭空造一个发起者会让接收侧的同源校验失去意义。
+func (g *Gateway) callCtx(ctx context.Context, playerID string) context.Context {
+	return opcall.WithCallInfo(ctx, callInfoOf(ctx, playerID, false))
 }
 
 // connFrom 从请求上下文提取连接寻址信息（connID + 传输种类 + 回写函数）。
@@ -172,23 +162,21 @@ func (g *Gateway) connFrom(ctx context.Context) *session.Conn {
 	return connFrom(ctx, g.pushers, g.udpSrv)
 }
 
-// Register 注册：经 actor 转发 game PlayerService（懒激活），创建玩家数据并回执。
-// 注册不建立会话（客户端仍需 Login）。
+// Register 注册：经 game 的 **internal 面**类型化客户端调用 PlayerService（域侧按账号
+// 懒激活玩家 actor），创建玩家数据并回执。注册不建立会话（客户端仍需 Login）。
 func (g *Gateway) Register(ctx context.Context, req *gatewayv1.RegisterRequest) (*gatewayv1.RegisterReply, error) {
 	if req.GetAccount() == "" || req.GetPassword() == "" {
 		return nil, errorv1.ErrInvalidParams("账号与口令不能为空")
 	}
-	pid, err := actorclient.PlayerPID(req.GetAccount())
-	if err != nil {
-		return nil, err
-	}
-	reply, err := g.players.Register(ctx, pid, &gamev1.RegisterReq{
+	// 域侧注册是 internal 方法（客户端 op 面不暴露注册）：网关按**账号**组装调用身份
+	//（注册时尚无会话，actor 键就是账号），经 internal 面类型化客户端调用。
+	reply, err := g.players.Register(g.callCtx(ctx, req.GetAccount()), &gamev1.RegisterReq{
 		Account:  req.GetAccount(),
 		Password: req.GetPassword(),
 		Nickname: req.GetNickname(),
-	}, g.requestOptions(ctx)...)
+	})
 	if err != nil {
-		return nil, err // 业务错误透传：code/reason 经集群 error 通道往返保留
+		return nil, err // 业务错误原样透传（远端 status 已还原为结构化错误，reason 可判定）
 	}
 	return &gatewayv1.RegisterReply{PlayerId: reply.GetPlayerId()}, nil
 }
@@ -213,16 +201,12 @@ func (g *Gateway) Login(ctx context.Context, req *gatewayv1.LoginRequest) (*gate
 	if err != nil {
 		return nil, errorv1.ErrInternal("签发会话令牌失败")
 	}
-	pid, err := actorclient.PlayerPID(playerID)
-	if err != nil {
-		return nil, err
-	}
-	reply, err := g.players.Login(ctx, pid, &gamev1.LoginReq{
+	reply, err := g.players.Login(g.callCtx(ctx, playerID), &gamev1.LoginReq{
 		PlayerId:        playerID,
 		Password:        req.GetPassword(),
 		Token:           token,
 		GatewayInstance: g.instanceID,
-	}, g.requestOptions(ctx)...)
+	})
 	if err != nil {
 		return nil, err // 业务错误透传（PLAYER_NOT_FOUND / PASSWORD_WRONG 等语义不变）
 	}
@@ -275,10 +259,9 @@ func (g *Gateway) Logout(ctx context.Context, req *gatewayv1.LogoutRequest) (*ga
 	if conn := g.connFrom(ctx); conn != nil {
 		g.sess.Unbind(ctx, playerID, conn.ID)
 	}
-	// 联动 game PlayerActor：保存并停止自身（异步投递）。
-	if pid, perr := actorclient.PlayerPID(playerID); perr == nil {
-		_ = g.players.Logout(ctx, pid, &gamev1.LogoutMsg{Reason: gamev1.LogoutReason_LOGOUT_REASON_LOGOUT})
-	}
+	// 联动 game PlayerActor：保存并停止自身（internal 面类型化调用；失败仅忽略，
+	// 会话已解绑、actor 侧还有会话过期兜底）。
+	_, _ = g.players.Logout(g.callCtx(ctx, playerID), &gamev1.LogoutMsg{Reason: gamev1.LogoutReason_LOGOUT_REASON_LOGOUT})
 	return &gatewayv1.LogoutReply{}, nil
 }
 
@@ -318,11 +301,10 @@ func (g *Gateway) kickOld(ctx context.Context, playerID string, old *session.Rou
 	if old == nil {
 		return
 	}
-	pid, err := actorclient.PlayerPID(playerID)
-	if err == nil {
-		_, _ = g.players.CancelMatch(ctx, pid, &gamev1.CancelMatchReq{})
-		_, _ = g.players.LeaveParty(ctx, pid, &gamev1.LeavePartyReq{})
-	}
+	// 取消匹配与退队都是**客户端 op**：走与透传同一张路由表与同一个 Edge 面投递端口
+	//（身份由本处按被接管玩家给定，不来自载荷）；失败仅忽略——接管本身不能因清理失败而回滚。
+	_ = g.relay.call(ctx, playerID, gamev1opclient.PlayerServiceProtocolOps.CancelMatch, &gamev1.CancelMatchReq{})
+	_ = g.relay.call(ctx, playerID, gamev1opclient.PlayerServiceProtocolOps.LeaveParty, &gamev1.LeavePartyReq{})
 	if old.InstanceID == g.instanceID {
 		if oldSess != nil {
 			g.pushKicked(oldSess)

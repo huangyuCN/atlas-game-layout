@@ -86,6 +86,19 @@ message AdminContext {
 - **边界（必须写进注释）**：dry-run **不做并发竞争预演**（预演不等于预留，TOCTOU 仍存在）——「预演通过」**不等于**「一定成功」，GM 不得据此当作预留或成功凭证。
 - dry-run 不占用幂等键，故不能用来「防重」；同键的 dry-run 可以重复执行。
 
+**存在性口径（apply 与 dry-run 同源，2026-09-25 补记）**：两条路径都**经在线玩家 actor**
+只读查询聚合根内存快照（`biz.PlayerStateAccess.GetPlayer` → `PlayerActor.GetPlayer`），
+**都不读库**，因此：
+
+- 玩家离线或尚未加载 → `PLAYER_NOT_ONLINE`（1007）——它**不区分**「不存在」与「存在但离线」；
+- **dry-run**：把该原因写进回执 `violations`（dry-run **不算失败**，不报错；审计记
+  `SKIPPED_DRY_RUN`，不落 reason/message），GM 据此判断"本次预演是否通过"；
+- **apply**：把该错误直接上抛，审计记 `FAILED`（含 reason/message）。
+
+**离线玩家发放**（给离线玩家补发/邮件补偿）不在本轮范围，归后续邮箱/outbox 能力；在那之前
+GM 工具应把 `PLAYER_NOT_ONLINE` 读作「目标不在线，本次未发放（审计已记失败）」。
+`PLAYER_NOT_FOUND` 仅在"actor 加载成功但档案缺失"这类异常态出现，正常链路不可达。
+
 ### 3.4 分页（所有列表接口统一，游标 token）
 
 | 约定 | 取值 |

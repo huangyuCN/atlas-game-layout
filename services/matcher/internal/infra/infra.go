@@ -1,22 +1,20 @@
 // Package infra 提供 matcher 服务的外部依赖装配：
-// redis（ticket 映射 + matchmaker 后端）、nats（事件总线）、actor 集群客户端（开局调用）。
+// redis（ticket 映射 + matchmaker 后端）、nats（事件总线）、battle internal 面 gRPC 客户端（开局调用）。
 package infra
 
 import (
 	"context"
 	"fmt"
-	battlev1actor "github.com/huangyuCN/atlas-game-layout/api/battle/v1/actor"
 	"strings"
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	battlev1rpc "github.com/huangyuCN/atlas-game-layout/api/battle/v1/rpc"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/matchfunc"
-	"github.com/huangyuCN/atlas/contrib/actor/types"
 	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
 	"github.com/huangyuCN/atlas/matchmaker"
 	goredis "github.com/redis/go-redis/v9"
@@ -174,29 +172,25 @@ func (p *NatsEventPublisher) PublishRoster(ctx context.Context, partyID, leaderI
 	return p.pub.Publish(ctx, p.pub.Topics().PartyRoster(), payload)
 }
 
-// BattleActorStarter 是 biz.BattleStarter 的实现：
-// 经 actor 集群 Ask 懒激活战斗 actor（battle:<battleID>，M7 battle 服务承接）。
-type BattleActorStarter struct {
-	rt *pkgactor.Runtime
+// BattleGRPCStarter 是 biz.BattleStarter 的实现：
+// 经 battle 的 internal 面 gRPC 客户端发起开局调用（目标 battle actor 由 battle 侧
+// 按请求里的 battle_id 解析并懒激活——matcher 不再持有 actor 集群运行时）。
+type BattleGRPCStarter struct {
+	cli battlev1rpc.BattleServiceClient
 }
 
-// NewBattleActorStarter 构造开局调用器。
-func NewBattleActorStarter(rt *pkgactor.Runtime) *BattleActorStarter {
-	return &BattleActorStarter{rt: rt}
+// NewBattleGRPCStarter 构造开局调用器。
+func NewBattleGRPCStarter(cli battlev1rpc.BattleServiceClient) *BattleGRPCStarter {
+	return &BattleGRPCStarter{cli: cli}
 }
 
-// Start 实现 biz.BattleStarter：经生成的 client stub 懒激活战斗 actor（开局）。
-// 业务错误直接透传（code/reason 经集群 error 通道往返保留）。
-func (s *BattleActorStarter) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
-	pid, err := types.NewPID(battlev1actor.BattleServiceActorType, battleID)
-	if err != nil {
-		return fmt.Errorf("infra: 非法战斗 ID %q: %w", battleID, err)
-	}
-	cli := battlev1actor.NewBattleServiceClusterClient(s.rt)
-	if _, err := cli.Create(ctx, pid, &battlev1.CreateBattleRequest{
+// Start 实现 biz.BattleStarter：经类型化 gRPC 客户端开局（CreateBattleRequest.BattleId 即寻址字段）。
+// 业务错误原样透传（远端 status 已在客户端拦截器还原为结构化错误，reason 可判定）。
+func (s *BattleGRPCStarter) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
+	if _, err := s.cli.Create(ctx, &battlev1.CreateBattleRequest{
 		MatchId:   matchID,
 		PlayerIds: playerIDs,
-		BattleId:  battleID, // 目标身份随请求携带：RPC 面（gRPC）按此字段寻址
+		BattleId:  battleID, // 目标身份随请求携带：rpc 面按 uid_field 寻址
 	}); err != nil {
 		return fmt.Errorf("infra: 开局调用失败: %w", err)
 	}
@@ -256,10 +250,10 @@ type Sink struct {
 }
 
 // NewSink 构造默认成局观察方。
-func NewSink(pub *pkgnats.Publisher, rt *pkgactor.Runtime) *Sink {
+func NewSink(pub *pkgnats.Publisher, cli battlev1rpc.BattleServiceClient) *Sink {
 	return &Sink{
 		publisher: NewNatsEventPublisher(pub),
-		starter:   NewBattleActorStarter(rt),
+		starter:   NewBattleGRPCStarter(cli),
 	}
 }
 
@@ -301,7 +295,7 @@ func (d *RedisSettleDeduper) TrySettle(ctx context.Context, matchID string, ttl 
 var (
 	_ biz.PlayerTicketMapper    = (*RedisPlayerTicketMapper)(nil)
 	_ biz.MatchEventPublisher   = (*NatsEventPublisher)(nil)
-	_ biz.BattleStarter         = (*BattleActorStarter)(nil)
+	_ biz.BattleStarter         = (*BattleGRPCStarter)(nil)
 	_ biz.MatchEventSink        = (*Sink)(nil)
 	_ biz.MatchSettleDeduper    = (*RedisSettleDeduper)(nil)
 	_ matchmaker.PlacementQueue = LocalPlacement{}

@@ -138,11 +138,6 @@ export type LogoutReason = "LOGOUT_REASON_UNSPECIFIED" | "LOGOUT_REASON_LOGOUT" 
 export class PlayerService {
   constructor(private readonly inv: Invoker) {}
 
-  /** /game.v1.PlayerService/Register：请求-响应；业务拒绝抛 BusinessError（Reason 为主键）。 */
-  async register(req: RegisterReq | null, ...opts: InvokeOption[]): Promise<RegisterReply> {
-    const out = await this.inv.invoke('/game.v1.PlayerService/Register', req ?? {}, ...opts);
-    return out as RegisterReply;
-  }
   /** /game.v1.PlayerService/GetPlayerData：请求-响应；业务拒绝抛 BusinessError（Reason 为主键）。 */
   async getPlayerData(req: GetPlayerDataReq | null, ...opts: InvokeOption[]): Promise<PlayerDataReply> {
     const out = await this.inv.invoke('/game.v1.PlayerService/GetPlayerData', req ?? {}, ...opts);
@@ -197,7 +192,6 @@ export class PlayerService {
 
 /** PlayerServiceProtocolOps 是 PlayerService 的会话 op 名（按 rpc 名索引）。 */
 export const PlayerServiceProtocolOps = {
-  register: "/game.v1.PlayerService/Register",
   getplayerdata: "/game.v1.PlayerService/GetPlayerData",
   getbackpack: "/game.v1.PlayerService/GetBackpack",
   entermatchqueue: "/game.v1.PlayerService/EnterMatchQueue",

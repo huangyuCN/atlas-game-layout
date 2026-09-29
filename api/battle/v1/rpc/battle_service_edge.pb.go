@@ -108,14 +108,13 @@ func (a *battleServiceEdge) JoinBattle(ctx context.Context, req *v1.JoinBattleRe
 	return opcall.Reply[*v1.JoinBattleReply](entry, rep)
 }
 
-// SendFrameInput 投递到目标 actor 并归一化回执。
+// SendFrameInput 单向投递 Tell 消息到目标 actor（无回执，跳过回执归一）。
 func (a *battleServiceEdge) SendFrameInput(ctx context.Context, req *v1.FrameInputReq) (*emptypb.Empty, error) {
 	entry := v1.BattleServiceRouteTable["/battle.v1.BattleService/SendFrameInput"]
-	rep, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...)
-	if err != nil {
+	if _, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...); err != nil {
 		return nil, err
 	}
-	return opcall.Reply[*emptypb.Empty](entry, rep)
+	return &emptypb.Empty{}, nil
 }
 
 // SyncFrames 投递到目标 actor 并归一化回执。

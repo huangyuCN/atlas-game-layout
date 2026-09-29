@@ -13,21 +13,6 @@ import (
 
 // PlayerServiceRouteTable 是 PlayerService 的透传路由表（atlas.route.v1 注解生成）。
 var PlayerServiceRouteTable = relay.Table{
-	"/game.v1.PlayerService/Register": {
-		Operation:   "/game.v1.PlayerService/Register",
-		Service:     "game.v1.PlayerService",
-		Method:      "Register",
-		Actor:       "player",
-		Access:      relay.AccessClient,
-		UidSource:   relay.UidSession,
-		IsTell:      false,
-		Idempotency: relay.IdempotencyNone,
-		Since:       "",
-		Deprecated:  "",
-		Replacement: "",
-		NewRequest:  func() proto.Message { return new(RegisterReq) },
-		NewReply:    func() proto.Message { return new(RegisterReply) },
-	},
 	"/game.v1.PlayerService/GetPlayerData": {
 		Operation:   "/game.v1.PlayerService/GetPlayerData",
 		Service:     "game.v1.PlayerService",
@@ -178,6 +163,21 @@ var PlayerServiceRouteTable = relay.Table{
 		NewRequest:  func() proto.Message { return new(QueuePartyReq) },
 		NewReply:    func() proto.Message { return new(PartyQueueReply) },
 	},
+	"/game.v1.PlayerService/Register": {
+		Operation:   "/game.v1.PlayerService/Register",
+		Service:     "game.v1.PlayerService",
+		Method:      "Register",
+		Actor:       "player",
+		Access:      relay.AccessInternal,
+		UidSource:   relay.UidSession,
+		IsTell:      false,
+		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+		NewRequest:  func() proto.Message { return new(RegisterReq) },
+		NewReply:    func() proto.Message { return new(RegisterReply) },
+	},
 	"/game.v1.PlayerService/Login": {
 		Operation:   "/game.v1.PlayerService/Login",
 		Service:     "game.v1.PlayerService",
@@ -242,15 +242,6 @@ var PlayerServiceRouteTable = relay.Table{
 
 // PlayerServiceLifecycleTable 是 PlayerService 的 op 生命周期表（含 INTERNAL op；供能力协商与废弃提示）。
 var PlayerServiceLifecycleTable = relay.LifecycleTable{
-	"/game.v1.PlayerService/Register": {
-		Operation:   "/game.v1.PlayerService/Register",
-		Service:     "game.v1.PlayerService",
-		Method:      "Register",
-		Access:      relay.AccessClient,
-		Since:       "",
-		Deprecated:  "",
-		Replacement: "",
-	},
 	"/game.v1.PlayerService/GetPlayerData": {
 		Operation:   "/game.v1.PlayerService/GetPlayerData",
 		Service:     "game.v1.PlayerService",
@@ -337,6 +328,15 @@ var PlayerServiceLifecycleTable = relay.LifecycleTable{
 		Service:     "game.v1.PlayerService",
 		Method:      "QueueParty",
 		Access:      relay.AccessClient,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/game.v1.PlayerService/Register": {
+		Operation:   "/game.v1.PlayerService/Register",
+		Service:     "game.v1.PlayerService",
+		Method:      "Register",
+		Access:      relay.AccessInternal,
 		Since:       "",
 		Deprecated:  "",
 		Replacement: "",

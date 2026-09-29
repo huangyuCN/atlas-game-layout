@@ -12,7 +12,6 @@ import (
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
-	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame"
@@ -269,6 +268,11 @@ func TestRelayTCPWireForward(t *testing.T) {
 	if len(env.mock.matchEnters) != 1 || env.mock.matchEnters[0].GetRuleset() != "casual" {
 		t.Fatalf("入队投递不符: %+v", env.mock.matchEnters)
 	}
+	// 身份随投递下发（metadata 三键）：真实帧链路上玩家身份与发起者都必须是 p-1。
+	info := env.mock.callInfos[opEnterMatch]
+	if info.PlayerID != "p-1" || info.SenderPID != "player:p-1" {
+		t.Fatalf("投递身份不符: %+v", info)
+	}
 
 	// 未登录连接：业务 op 被拒。
 	other := env.newTCPWireClient(t)
@@ -278,39 +282,29 @@ func TestRelayTCPWireForward(t *testing.T) {
 	}
 }
 
-// TestRelayPlan 验证透传投递计划的组装：网关会话身份 → 发起者；
-// 帧头请求 ID → 观测头（所有 op）与去重键（仅注解声明 IDEMPOTENT 的 op）。
-// 去重键的取舍单点收敛在 opcall.PlanFor（core.SendOption 不透明，故在计划层断言）。
-func TestRelayPlan(t *testing.T) {
-	r := &Relay{}
-	idempotent := relay.RouteEntry{Idempotency: relay.Idempotent}
-	none := relay.RouteEntry{Idempotency: relay.IdempotencyNone}
-
-	plan, err := r.planFor(requestIDCtx(transport.KindTCP, opEnterMatch, 1, "", "req-1"), idempotent, "p-1")
-	if err != nil {
-		t.Fatalf("planFor: %v", err)
-	}
-	if !plan.HasSender || plan.Sender.String() != "player:p-1" {
-		t.Fatalf("发起者应为网关会话身份, got %+v", plan)
-	}
-	if plan.RequestID != "req-1" || plan.DedupKey != "req-1" {
-		t.Fatalf("声明幂等且携带请求 ID 应观测 + 去重, got %+v", plan)
+// TestCallInfoOf 验证网关投递身份的组装口径（跨进程链路的关键假设）：
+//   - 客户端 op：player 身份 = 会话身份，发起者 = 该玩家（客户端不可影响），
+//     请求 ID 取帧头（观测头；**去重键的取舍不在这里**——接收侧按路由条目的
+//     Idempotency 声明决定，见 opcall.PlanFromMetadata）；
+//   - 网关自身的会话联动：不下发发起者（网关不是玩家，凭空造一个会让同源校验失效）；
+//   - 未携带请求 ID / 身份非法：不注入（不臆造）。
+func TestCallInfoOf(t *testing.T) {
+	ctx := requestIDCtx(transport.KindTCP, opEnterMatch, 1, "", "req-1")
+	info := callInfoOf(ctx, "p-1", true)
+	if info.PlayerID != "p-1" || info.SenderPID != "player:p-1" || info.RequestID != "req-1" {
+		t.Fatalf("客户端 op 身份不符: %+v", info)
 	}
 
-	plan, err = r.planFor(requestIDCtx(transport.KindTCP, opEnterMatch, 1, "", "req-1"), none, "p-1")
-	if err != nil {
-		t.Fatalf("planFor: %v", err)
-	}
-	if plan.RequestID != "req-1" || plan.DedupKey != "" {
-		t.Fatalf("未声明幂等只注入观测头, got %+v", plan)
+	sess := callInfoOf(ctx, "p-1", false)
+	if sess.PlayerID != "p-1" || sess.RequestID != "req-1" || sess.SenderPID != "" {
+		t.Fatalf("会话联动不应下发发起者: %+v", sess)
 	}
 
-	plan, err = r.planFor(connCtx(transport.KindTCP, opEnterMatch, 1, ""), idempotent, "p-1")
-	if err != nil {
-		t.Fatalf("planFor: %v", err)
+	if got := callInfoOf(connCtx(transport.KindTCP, opEnterMatch, 1, ""), "p-1", true); got.RequestID != "" {
+		t.Fatalf("客户端未携带请求 ID 不应注入: %+v", got)
 	}
-	if plan.RequestID != "" || plan.DedupKey != "" {
-		t.Fatalf("客户端未携带请求 ID 不应注入, got %+v", plan)
+	if got := callInfoOf(context.Background(), "", true); got.SenderPID != "" {
+		t.Fatalf("身份非法不应下发发起者: %+v", got)
 	}
 }
 
