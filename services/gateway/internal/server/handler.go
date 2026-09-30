@@ -1,8 +1,11 @@
 // Package server 负责 gateway 服务的传输层组装与统一 handler：
-// 五协议 Server（tcp/ws/kcp/udp/http）+ 会话绑定 + 挤下线 + 下行推送。
+// 业务协议 Server（tcp/ws/http + gRPC edge）+ 会话绑定 + 挤下线 + 下行推送。
 // 业务 op 经透传引擎（relay.go）原样转发到域 rpc/ 平面的 Edge 接口；
 // 本文件只实现 Gateway 自留的会话生命周期接口（gateway.v1.Session）与登录联动逻辑，
 // 其中的域调用经 internal 面的类型化客户端（客户端 op 面不暴露这些方法）。
+//
+// 战斗帧不经本服务：客户端凭 battle_ticket 直连接入层 → battle 帧面
+// （阶段 3 批次 5 起网关不再承载战斗通道与战斗 op）。
 package server
 
 import (
@@ -24,7 +27,6 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
-	udpt "github.com/huangyuCN/atlas/transport/udp"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -37,24 +39,11 @@ func connRef(kind transport.Kind, connID uint64) string {
 }
 
 // connFrom 从请求上下文提取连接寻址信息（connID + 传输种类 + 回写函数）。
-// UDP 无 connID 语义，按 peer 地址寻址。Ref 为连接身份键（会话反向索引用）。
-func connFrom(ctx context.Context, pushers map[transport.Kind]pushServer, udpSrv *udpt.Server) *session.Conn {
+// Ref 为连接身份键（会话反向索引用）；非业务帧传输上下文返回 nil。
+func connFrom(ctx context.Context, pushers map[transport.Kind]pushServer) *session.Conn {
 	tr, ok := transport.FromServerContext(ctx)
 	if !ok {
 		return nil
-	}
-	if tr.Kind() == transport.KindUDP {
-		peer := transport.PeerFromContext(ctx)
-		if peer == "" || udpSrv == nil {
-			return nil
-		}
-		return &session.Conn{
-			Kind: string(tr.Kind()),
-			Ref:  "udp:" + peer,
-			Send: func(operation string, payload []byte) error {
-				return udpSrv.PushToRaw(peer, operation, payload)
-			},
-		}
 	}
 	connID := transport.ConnIDFromContext(ctx)
 	if connID == 0 {
@@ -74,7 +63,7 @@ func connFrom(ctx context.Context, pushers map[transport.Kind]pushServer, udpSrv
 	}
 }
 
-// pushServer 是传输 Server 的推送能力子集（四协议通用，ADR-0002）。
+// pushServer 是传输 Server 的推送能力子集（业务协议通用，ADR-0002）。
 type pushServer interface {
 	PushRaw(connID uint64, operation string, payload []byte) error
 }
@@ -88,8 +77,7 @@ type Gateway struct {
 	nc         *nats.Conn
 	pub        *pkgnats.Publisher // 业务事件发布入口（连接 + topic 命名空间收口）
 	pushers    map[transport.Kind]pushServer
-	udpSrv     *udpt.Server // UDP 按 peer 寻址（无 connID 语义）
-	relay      *Relay       // 业务 op 透传引擎（表由注解生成，见 relay.go）
+	relay      *Relay // 业务 op 透传引擎（表由注解生成，见 relay.go）
 	meter      metrics.Collector
 	gate       VersionGate // 客户端版本门槛（M1；装配期注入，见 version_gate.go）
 }
@@ -117,8 +105,7 @@ func NewGateway(
 	meter metrics.Collector,
 	nc *nats.Conn,
 	pub *pkgnats.Publisher,
-	tcpSrv, wsSrv, kcpSrv pushServer,
-	udpSrv *udpt.Server,
+	tcpSrv, wsSrv pushServer,
 	gate VersionGate,
 ) *Gateway {
 	g := &Gateway{
@@ -130,16 +117,12 @@ func NewGateway(
 		pushers: map[transport.Kind]pushServer{
 			transport.KindTCP:       tcpSrv,
 			transport.KindWebSocket: wsSrv,
-			transport.KindKCP:       kcpSrv,
 		},
-		udpSrv: udpSrv,
-		meter:  meter,
-		gate:   gate,
+		meter: meter,
+		gate:  gate,
 	}
 	// 透传引擎与 Gateway 共用连接摘取、会话管理器与指标采集器。
-	g.relay = NewRelay(table, sess, inv, meter, func(ctx context.Context) *session.Conn {
-		return connFrom(ctx, g.pushers, g.udpSrv)
-	})
+	g.relay = NewRelay(table, sess, inv, meter, g.connFrom)
 	// 会话过期联动撮合域（异常下线兜底）。
 	g.sess.SetSweptHook(g.onSessionsExpired)
 	return g
@@ -157,9 +140,9 @@ func (g *Gateway) callCtx(ctx context.Context, playerID string) context.Context 
 }
 
 // connFrom 从请求上下文提取连接寻址信息（connID + 传输种类 + 回写函数）。
-// UDP 无 connID 语义，按 peer 地址寻址。Ref 为连接身份键（会话反向索引用）。
+// Ref 为连接身份键（会话反向索引用）。
 func (g *Gateway) connFrom(ctx context.Context) *session.Conn {
-	return connFrom(ctx, g.pushers, g.udpSrv)
+	return connFrom(ctx, g.pushers)
 }
 
 // Register 注册：经 game 的 **internal 面**类型化客户端调用 PlayerService（域侧按账号
@@ -212,7 +195,7 @@ func (g *Gateway) Login(ctx context.Context, req *gatewayv1.LoginRequest) (*gate
 	}
 	// 绑定前快照旧会话（本实例挤下线推送用），随后原子覆盖路由。
 	oldSess, _ := g.sess.LocalSession(playerID)
-	old, err := g.sess.Bind(ctx, playerID, conn, session.ChannelBiz, token)
+	old, err := g.sess.Bind(ctx, playerID, conn, token)
 	if err != nil {
 		return nil, errorv1.ErrInternal("会话绑定失败")
 	}
@@ -244,7 +227,7 @@ func (g *Gateway) Resume(ctx context.Context, req *gatewayv1.ResumeRequest) (*ga
 	if !ok || sess.Token != req.GetToken() {
 		return nil, errorv1.ErrInvalidToken("会话凭据无效或已被接管")
 	}
-	if _, err := g.sess.Bind(ctx, playerID, conn, session.ChannelBiz, req.GetToken()); err != nil {
+	if _, err := g.sess.Bind(ctx, playerID, conn, req.GetToken()); err != nil {
 		return nil, errorv1.ErrInternal("会话恢复绑定失败")
 	}
 	return &gatewayv1.ResumeReply{PlayerId: playerID}, nil
@@ -318,7 +301,7 @@ func (g *Gateway) kickOld(ctx context.Context, playerID string, old *session.Rou
 	_ = publishControl(ctx, g.pub, old.InstanceID, data)
 }
 
-// pushKicked 向会话的全部通道推送「被挤下线」通知。
+// pushKicked 向会话连接推送「被挤下线」通知。
 func (g *Gateway) pushKicked(sess *session.Session) {
 	payload, err := protojson.Marshal(&gatewayv1.KickedNotify{
 		Reason: gatewayv1.KickedReason_KICKED_REASON_LOGGED_IN_ELSEWHERE,
@@ -326,9 +309,7 @@ func (g *Gateway) pushKicked(sess *session.Session) {
 	if err != nil {
 		return
 	}
-	for _, c := range []*session.Conn{sess.Battle, sess.Biz} {
-		if c != nil {
-			_ = c.Send(gatewayv1opclient.SessionPushOps.KickedNotify, payload)
-		}
+	if sess.Conn != nil {
+		_ = sess.Conn.Send(gatewayv1opclient.SessionPushOps.KickedNotify, payload)
 	}
 }

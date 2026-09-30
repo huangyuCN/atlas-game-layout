@@ -111,7 +111,7 @@ func TestPlayerByRef(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
 	c1 := (&fakeConn{id: 1, kind: "ws"}).connWithRef("conn:1")
-	if _, err := m.Bind(ctx, "p-1", c1, ChannelBiz, "t1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", c1, "t1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if pid, ok := m.PlayerByRef("conn:1"); !ok || pid != "p-1" {
@@ -122,7 +122,7 @@ func TestPlayerByRef(t *testing.T) {
 	}
 	// 换绑新连接后旧连接身份注销。
 	c2 := (&fakeConn{id: 2, kind: "ws"}).connWithRef("conn:2")
-	if _, err := m.Bind(ctx, "p-1", c2, ChannelBiz, "t1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", c2, "t1"); err != nil {
 		t.Fatalf("换绑: %v", err)
 	}
 	if _, ok := m.PlayerByRef("conn:1"); ok {
@@ -138,13 +138,13 @@ func TestPlayerByRef(t *testing.T) {
 	}
 }
 
-// TestBindBizWritesRoute 验证登录绑定业务通道后路由表内容完整。
-func TestBindBizWritesRoute(t *testing.T) {
+// TestBindWritesRoute 验证登录绑定后路由表内容完整（单一业务通道）。
+func TestBindWritesRoute(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
 	c := (&fakeConn{id: 1, kind: "tcp"}).conn()
 
-	old, err := m.Bind(ctx, "p-1", c, ChannelBiz, "token-1")
+	old, err := m.Bind(ctx, "p-1", c, "token-1")
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
@@ -158,35 +158,8 @@ func TestBindBizWritesRoute(t *testing.T) {
 	if r == nil {
 		t.Fatal("路由不存在")
 	}
-	if r.InstanceID != "gw-1" || r.Token != "token-1" || r.BizConnID != 1 || r.BizKind != "tcp" {
+	if r.InstanceID != "gw-1" || r.Token != "token-1" || r.ConnID != 1 || r.Kind != "tcp" {
 		t.Fatalf("路由字段不符: %+v", r)
-	}
-	if r.BattleConnID != 0 || r.BattleKind != "" {
-		t.Fatalf("战斗通道应为空: %+v", r)
-	}
-}
-
-// TestBindBattleMergesChannels 验证战斗通道绑定与业务通道合并到同一路由。
-func TestBindBattleMergesChannels(t *testing.T) {
-	ctx := context.Background()
-	m := newTestManager(t, "gw-1")
-	biz := (&fakeConn{id: 1, kind: "ws"}).conn()
-	if _, err := m.Bind(ctx, "p-1", biz, ChannelBiz, "token-1"); err != nil {
-		t.Fatalf("Bind biz: %v", err)
-	}
-	bat := (&fakeConn{id: 2, kind: "kcp"}).conn()
-	if _, err := m.Bind(ctx, "p-1", bat, ChannelBattle, "token-1"); err != nil {
-		t.Fatalf("Bind battle: %v", err)
-	}
-	r, err := m.Route(ctx, "p-1")
-	if err != nil {
-		t.Fatalf("Route: %v", err)
-	}
-	if r.BizConnID != 1 || r.BizKind != "ws" || r.BattleConnID != 2 || r.BattleKind != "kcp" {
-		t.Fatalf("通道合并失败: %+v", r)
-	}
-	if r.Token != "token-1" {
-		t.Fatalf("战斗绑定不应覆盖 token: %+v", r)
 	}
 }
 
@@ -195,15 +168,15 @@ func TestBindReturnsOldRoute(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
 	c1 := (&fakeConn{id: 1, kind: "tcp"}).conn()
-	if _, err := m.Bind(ctx, "p-1", c1, ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", c1, "token-1"); err != nil {
 		t.Fatalf("Bind1: %v", err)
 	}
 	c2 := (&fakeConn{id: 2, kind: "tcp"}).conn()
-	old, err := m.Bind(ctx, "p-1", c2, ChannelBiz, "token-2")
+	old, err := m.Bind(ctx, "p-1", c2, "token-2")
 	if err != nil {
 		t.Fatalf("Bind2: %v", err)
 	}
-	if old == nil || old.Token != "token-1" || old.BizConnID != 1 {
+	if old == nil || old.Token != "token-1" || old.ConnID != 1 {
 		t.Fatalf("旧路由不符: %+v", old)
 	}
 }
@@ -212,7 +185,7 @@ func TestBindReturnsOldRoute(t *testing.T) {
 func TestHeartbeatRefreshesTTL(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if !m.Heartbeat(ctx, "p-1", "token-1") {
@@ -228,7 +201,7 @@ func TestHeartbeatRefreshesTTL(t *testing.T) {
 func TestHeartbeatAppliesConfiguredTTL(t *testing.T) {
 	ctx := context.Background()
 	m, mr := newTestEnv(t, "gw-1", Options{TTL: 90 * time.Second})
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if ttl := mr.TTL(testKeys.GatewayRoute("p-1")); ttl <= 80*time.Second || ttl > 90*time.Second {
@@ -249,7 +222,7 @@ func TestHeartbeatAppliesConfiguredTTL(t *testing.T) {
 func TestValidateToken(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	ok, err := m.Validate(ctx, "p-1", "token-1")
@@ -270,7 +243,7 @@ func TestValidateToken(t *testing.T) {
 func TestUnbind(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	m.Unbind(ctx, "p-1", 1)
@@ -290,11 +263,11 @@ func TestUnbind(t *testing.T) {
 func TestUnbindSkipsStaleConn(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind1: %v", err)
 	}
 	// 新连接挤掉旧连接。
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 2, kind: "tcp"}).conn(), ChannelBiz, "token-2"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 2, kind: "tcp"}).conn(), "token-2"); err != nil {
 		t.Fatalf("Bind2: %v", err)
 	}
 	// 旧连接的解绑不应影响新会话。
@@ -304,33 +277,34 @@ func TestUnbindSkipsStaleConn(t *testing.T) {
 	}
 }
 
-// TestPushRawFallback 验证推送通道选择：battle 优先，缺省回退 biz。
-func TestPushRawFallback(t *testing.T) {
+// TestPushRawSingleChannel 验证推送寻址：只走当前唯一业务通道，重绑后旧连接不再收到。
+func TestPushRawSingleChannel(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
 	biz := &fakeConn{id: 1, kind: "ws"}
-	if _, err := m.Bind(ctx, "p-1", biz.conn(), ChannelBiz, "token-1"); err != nil {
-		t.Fatalf("Bind biz: %v", err)
+	if _, err := m.Bind(ctx, "p-1", biz.conn(), "token-1"); err != nil {
+		t.Fatalf("Bind: %v", err)
 	}
 	if err := m.PushRaw("p-1", "/push/A", []byte("x")); err != nil {
-		t.Fatalf("回退推送失败: %v", err)
+		t.Fatalf("推送失败: %v", err)
 	}
 	if len(biz.sent) != 1 {
-		t.Fatalf("biz 连接应收到 1 条: %d", len(biz.sent))
+		t.Fatalf("连接应收到 1 条: %d", len(biz.sent))
 	}
 
-	bat := &fakeConn{id: 2, kind: "kcp"}
-	if _, err := m.Bind(ctx, "p-1", bat.conn(), ChannelBattle, "token-1"); err != nil {
-		t.Fatalf("Bind battle: %v", err)
+	// 重绑新连接（挤下线/重连形态）：推送只落新连接，旧连接不再收到。
+	next := &fakeConn{id: 2, kind: "tcp"}
+	if _, err := m.Bind(ctx, "p-1", next.conn(), "token-2"); err != nil {
+		t.Fatalf("重绑: %v", err)
 	}
 	if err := m.PushRaw("p-1", "/push/B", []byte("y")); err != nil {
-		t.Fatalf("优先推送失败: %v", err)
+		t.Fatalf("重绑后推送失败: %v", err)
 	}
-	if len(bat.sent) != 1 {
-		t.Fatalf("battle 连接应收到 1 条: %d", len(bat.sent))
+	if len(next.sent) != 1 {
+		t.Fatalf("新连接应收到 1 条: %d", len(next.sent))
 	}
 	if len(biz.sent) != 1 {
-		t.Fatalf("biz 连接不应再收到: %d", len(biz.sent))
+		t.Fatalf("旧连接不应再收到: %d", len(biz.sent))
 	}
 
 	if err := m.PushRaw("p-none", "/push/C", nil); !errors.Is(err, ErrSessionNotFound) {
@@ -342,7 +316,7 @@ func TestPushRawFallback(t *testing.T) {
 func TestSweepExpiredSessions(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	// 伪造心跳过期。
@@ -370,7 +344,7 @@ func TestSweepExpiredSessions(t *testing.T) {
 func TestSweepSkipsFreshSessions(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if n := m.SweepOnce(ctx); n != 0 {
@@ -387,7 +361,7 @@ func TestStartHonorsSweepInterval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m, _ := newTestEnv(t, "gw-1", Options{TTL: 2 * time.Second, SweepInterval: 10 * time.Millisecond})
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "token-1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "token-1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	// 直接把本地心跳拨到过期（免等 2s）：清扫只以本地 LastHeartbeat 判定。
@@ -434,13 +408,11 @@ func TestRouteLegacyValueCompatibility(t *testing.T) {
 // TestRouteJSONRoundtrip 验证路由 JSON 序列化往返。
 func TestRouteJSONRoundtrip(t *testing.T) {
 	r := &Route{
-		InstanceID:   "gw-2",
-		Token:        "token-x",
-		BizConnID:    3,
-		BizKind:      "tcp",
-		BattleConnID: 4,
-		BattleKind:   "kcp",
-		UpdatedAt:    123,
+		InstanceID: "gw-2",
+		Token:      "token-x",
+		ConnID:     3,
+		Kind:       "tcp",
+		UpdatedAt:  123,
 	}
 	b, err := json.Marshal(r)
 	if err != nil {

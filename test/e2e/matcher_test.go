@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
@@ -23,6 +24,7 @@ type recordSink struct {
 	mu        sync.Mutex
 	published []startedCall
 	started   []startedCall
+	issued    []string
 }
 
 type startedCall struct {
@@ -30,10 +32,14 @@ type startedCall struct {
 	playerIDs         []string
 }
 
-func (s *recordSink) PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string) error {
-	// 真实 nats 发布（断言事件到达总线）。
+func (s *recordSink) PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string, tickets *battlev1.IssueEntryTicketReply) error {
+	// 真实 nats 发布（断言事件到达总线）：事件带 battle 回执的接入层面列表与逐人票据。
 	payload, err := protojson.Marshal(&matcherv1.MatchStartedEvent{
-		MatchId: matchID, BattleId: battleID, PlayerIds: playerIDs,
+		MatchId:         matchID,
+		BattleId:        battleID,
+		PlayerIds:       playerIDs,
+		BattleEndpoints: tickets.GetEndpoints(),
+		BattleTickets:   tickets.GetTickets(),
 	})
 	if err == nil {
 		_ = nats.Publish(ctx, s.nc, e2eTopics.MatchStarted(), payload)
@@ -53,6 +59,15 @@ func (s *recordSink) Start(_ context.Context, battleID, matchID string, playerID
 	defer s.mu.Unlock()
 	s.started = append(s.started, startedCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
 	return nil
+}
+
+// IssueEntryTicket 实现 biz.BattleTicketIssuer：e2e 用固定桩回执
+// （真出票链路在 battle 侧单测覆盖；此处只关心成局事件与会话链路）。
+func (s *recordSink) IssueEntryTicket(_ context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.issued = append(s.issued, battleID)
+	return &battlev1.IssueEntryTicketReply{Endpoints: itEdgeEndpoints}, nil
 }
 
 // TestE2EMatcherQueue 验证 M6 验收：双 ticket 入队 →

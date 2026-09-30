@@ -42,7 +42,7 @@ func (b *BattleActor) JoinBattle(ctx core.ActorContext, req *battlev1.JoinBattle
 		return nil, err
 	}
 	return &battlev1.JoinBattleReply{
-		Meta:         sessionMeta(b.battleID, b.cfg.TickInterval),
+		Meta:         sessionMeta(b.battleID, b.cfg.TickInterval, b.cfg.MaxPlayers),
 		CurrentFrame: reconnect.GetCurrentFrame(),
 		Snapshot:     reconnect.GetSnapshot(),
 	}, nil

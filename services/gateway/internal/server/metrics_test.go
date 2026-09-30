@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/metricstest"
 	"github.com/huangyuCN/atlas/metrics"
@@ -57,21 +57,21 @@ func TestRelayForwardMetrics(t *testing.T) {
 	mr, natsURL, _ := newSharedBackends(t)
 	rec := metricstest.New()
 	env := newGWEnvMeter(t, "gw-a", mr.Addr(), natsURL, rec)
+	env.login(t, 1, "p-1")
 
-	token := battleToken(t, env, "p-1")
-	ctx := connCtx(transport.KindKCP, opJoinBattle, 77, token)
-	env.forward(t, ctx, opJoinBattle, &battlev1.JoinBattleReq{BattleId: "b-1"})
-	if got := rec.CounterValue(MetricGatewayRequests, "op", opJoinBattle, "result", resultSuccess); got != 1 {
+	env.forward(t, connCtx(transport.KindTCP, opEnterMatch, 1, ""), opEnterMatch,
+		&gamev1.EnterMatchQueueReq{Ruleset: "casual"})
+	if got := rec.CounterValue(MetricGatewayRequests, "op", opEnterMatch, "result", resultSuccess); got != 1 {
 		t.Fatalf("Forward success 计数 = %v, 期望 1", got)
 	}
 
 	// 未绑定身份：同一 op 记 error。
-	badCtx := connCtx(transport.KindKCP, opJoinBattle, 5, "")
-	if _, err := env.g.Relay().Forward(badCtx, env.relayEntry(t, opJoinBattle),
-		&battlev1.JoinBattleReq{BattleId: "b-1"}); err == nil {
+	badCtx := connCtx(transport.KindTCP, opEnterMatch, 5, "")
+	if _, err := env.g.Relay().Forward(badCtx, env.relayEntry(t, opEnterMatch),
+		&gamev1.EnterMatchQueueReq{Ruleset: "casual"}); err == nil {
 		t.Fatal("未绑定身份应报错")
 	}
-	if got := rec.CounterValue(MetricGatewayRequests, "op", opJoinBattle, "result", resultError); got != 1 {
+	if got := rec.CounterValue(MetricGatewayRequests, "op", opEnterMatch, "result", resultError); got != 1 {
 		t.Fatalf("Forward error 计数 = %v, 期望 1", got)
 	}
 }

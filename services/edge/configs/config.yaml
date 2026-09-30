@@ -1,0 +1,73 @@
+# edge（接入层）服务配置：裸 L4 转发器，无状态、可水平扩多实例（规格 §2.1）。
+# 客户端成局后凭「接入层地址 + battle_ticket」直连这里，接入层验票后按 battle_id
+# 查 actor 目录定位属主节点，再转发到该节点的帧面端口；不解析帧协议正文。
+runtime:
+  name: edge
+  # id 缺省取 <服务名>-<主机名>：多实例部署时必须显式配唯一 id（否则指标/日志无法区分实例）；
+  # 接入层不注册实例（客户端地址由 battle 的 edge.endpoint 统一下发），故 id 只作观测标签。
+  env: test
+  # namespace 是**唯一命名空间字段**：actor 目录前缀 /atlas/actors/<ns> 与注册中心键前缀
+  # /atlas/services/<ns> 都由它派生（框架 namespace.Derive）。**必须显式配置，缺失即启动失败**；
+  # 必须与 battle 侧同值，否则查不到战斗属主（表现为大量 backend_unavailable）。
+  namespace: test
+registry:
+  etcd:
+    endpoints:
+      - 127.0.0.1:12379
+server:
+  # 接入层对外只有「各接入面监听 + 健康检查」：不启 gRPC、不注册域服务。
+  http:
+    addr: 0.0.0.0:9480
+    timeout: 30s
+edge:
+  # ticket_key 是入场票据的 AEAD 密钥（base64 的 32 字节）：**缺失/长度不符即启动失败**，
+  # 且必须与 services/battle 的 battle.ticket_key 完全同值（同值才能互通）。
+  # 下面这串仅供本地开发（字节 0x01..0x20）。
+  ticket_key: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+  # frame_service 是 battle 注册的**帧面实例**服务名：接入层按目录得到的属主 node_id
+  # 从这些实例里选同节点的那个，并读实例元数据里的传输面端口（端口不写死、不进票据）。
+  frame_service: battle-frame
+  # actor_namespace 是 actor 目录命名空间（空 = 取 runtime.namespace）。
+  # actor_namespace: test
+  # listeners 是接入面列表：name 必须与 battle 帧面实例元数据里的端口键一致（ws/kcp/udp）；
+  # carrier 决定 hello 载体（WS 升级请求 / 会话前 hello 段 / 数据报首包 hello → flow-id）。
+  # 地址与 battle 的 edge_endpoints（面→地址列表，2C 起为多面）逐字对齐：
+  # 客户端拿到的 ws 地址就是这里的 7100（kcp/udp 面为 7101/7102）。
+  listeners:
+    - name: ws # WS 面：HTTP 升级请求带票（?ticket= 或 X-Atlas-Ticket）
+      network: NETWORK_TCP
+      addr: 0.0.0.0:7100
+      carrier: CARRIER_WS_UPGRADE
+    - name: kcp # KCP 面：与 udp 面同为数据报载体（首包 hello 换 flow-id，后续包带前缀），
+                #          只是后端端口指向 battle 的 KCP 监听；框架不允许 stream_hello 配在 UDP 面
+      network: NETWORK_UDP
+      addr: 0.0.0.0:7101
+      carrier: CARRIER_DATAGRAM
+    - name: udp # UDP 面：首包 hello 换 flow-id，后续包带 flow-id
+      network: NETWORK_UDP
+      addr: 0.0.0.0:7102
+      carrier: CARRIER_DATAGRAM
+  # 资源保护（规格 §3.4）：并发流上限 / 空闲回收 / 新连接速率 / 每 IP 连接数。
+  max_streams: 4096
+  idle_timeout: 60s
+  new_conn_rate: 200
+  max_per_ip: 16
+  # 后端拨号与握手面读取超时（空 = 框架缺省 5s）。
+  dial_timeout: 5s
+  # 数据报面静默探活：静默 probe_after 后向该流发探针（缺省回放最近一次客户端数据包），
+  # probe_timeout 内无回应即拆流并计数 edge_probe_failures_total。
+  probe_after: 30s
+  probe_timeout: 10s
+log:
+  level: info
+  format: text
+  file: logs/edge.log
+
+# 可观测性：OTLP 链路导出端点（必须带 scheme：grpc/grpcs/http/https；空或不配 = noop 不导出）
+# 与 Prometheus 抓取端点（接入层指标 edge_streams_active / edge_bytes_total /
+# edge_ticket_rejected_total{reason} / edge_streams_teared_down_total{reason} /
+# edge_probe_failures_total 在这里被抓取；空或不配 = noop）。
+observability:
+  otlp: grpc://127.0.0.1:4317
+  metrics:
+    prometheus: 0.0.0.0:9154

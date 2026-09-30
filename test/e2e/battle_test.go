@@ -2,164 +2,17 @@ package e2e
 
 import (
 	"context"
-	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
-	"sync"
 	"testing"
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	pkgmongo "github.com/huangyuCN/atlas-game-layout/pkg/mongo"
-	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	battleassemble "github.com/huangyuCN/atlas-game-layout/services/battle/assemble"
 	gwassemble "github.com/huangyuCN/atlas-game-layout/services/gateway/assemble"
 	matcherassemble "github.com/huangyuCN/atlas-game-layout/services/matcher/assemble"
-	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
-	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	atlasgrpc "github.com/huangyuCN/atlas/transport/grpc"
-	natsgo "github.com/nats-io/nats.go"
-	"go.mongodb.org/mongo-driver/bson"
-	"google.golang.org/protobuf/encoding/protojson"
 )
-
-// battleClient 是一端战斗客户端（SDK ws 单通道：业务+战斗共用连接），
-// 记录服务端推送的帧广播与战斗结束通知。
-type battleClient struct {
-	sess     *sdkclient.Session
-	cli      *sdkclient.Client
-	battle   *battlev1opclient.BattleService
-	playerID string
-	token    string
-
-	mu     sync.Mutex
-	frames []*battlev1.FrameBroadcast
-	ends   []*battlev1.BattleEndNotify
-}
-
-// newBattleClient 注册登录并挂接推送监听。
-func newBattleClient(t *testing.T, ctx context.Context, gw *gwassemble.Gateway) *battleClient {
-	t.Helper()
-	sess, cli := dialWSSession(t, gw.WSURL)
-	loginFlow(t, ctx, sess)
-	c := &battleClient{
-		sess:     sess,
-		cli:      cli,
-		battle:   battlev1opclient.NewBattleService(cli),
-		playerID: sess.PlayerID(),
-		token:    sess.Token(),
-	}
-	c.watchNotifies()
-	return c
-}
-
-// watchNotifies 挂接推送监听（帧广播/战斗结束通知记录）。
-func (c *battleClient) watchNotifies() {
-	h := func(operation string, payload []byte) {
-		switch operation {
-		case battlev1opclient.BattleServicePushOps.FrameBroadcast:
-			var fb battlev1.FrameBroadcast
-			if err := protojson.Unmarshal(payload, &fb); err != nil {
-				return
-			}
-			c.mu.Lock()
-			c.frames = append(c.frames, &fb)
-			c.mu.Unlock()
-		case battlev1opclient.BattleServicePushOps.BattleEndNotify:
-			var end battlev1.BattleEndNotify
-			if err := protojson.Unmarshal(payload, &end); err != nil {
-				return
-			}
-			c.mu.Lock()
-			c.ends = append(c.ends, &end)
-			c.mu.Unlock()
-		}
-	}
-	c.cli.On(battlev1opclient.BattleServicePushOps.FrameBroadcast, h)
-	c.cli.On(battlev1opclient.BattleServicePushOps.BattleEndNotify, h)
-}
-
-// joinBattle 加入战斗（战斗 actor 懒激活期间重试）。
-func (c *battleClient) joinBattle(t *testing.T, ctx context.Context, battleID string) *battlev1.JoinBattleReply {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var lastJoin *battlev1.JoinBattleReply
-	var lastErr error
-	for time.Now().Before(deadline) {
-		join, err := c.battle.JoinBattle(ctx, &battlev1.JoinBattleReq{BattleId: battleID})
-		if err == nil {
-			return join
-		}
-		lastJoin, lastErr = join, err
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("JoinBattle 重试耗尽: err=%v reply=%+v", lastErr, lastJoin)
-	return nil
-}
-
-// sendFrames 发送 [from,to] 帧输入（payload 单字节步进值）。
-func (c *battleClient) sendFrames(t *testing.T, ctx context.Context, battleID string, from, to uint64, step byte) {
-	t.Helper()
-	for i := from; i <= to; i++ {
-		err := c.battle.SendFrameInput(ctx, &battlev1.FrameInputReq{
-			BattleId: battleID,
-			Input:    &locksteppb.LockstepInput{FrameId: i, PlayerId: c.playerID, Payload: []byte{step}},
-		})
-		if err != nil {
-			t.Fatalf("SendFrameInput(%d): %v", i, err)
-		}
-	}
-}
-
-// waitFrames 等待收到至少 n 帧广播（断言超时失败）。
-func (c *battleClient) waitFrames(t *testing.T, n int) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		c.mu.Lock()
-		got := len(c.frames)
-		c.mu.Unlock()
-		if got >= n {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("仅收到 %d 帧广播", got)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// waitEnd 等待战斗结束通知并返回胜者。
-func (c *battleClient) waitEnd(t *testing.T) string {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		c.mu.Lock()
-		got := len(c.ends)
-		var winner string
-		if got > 0 {
-			winner = c.ends[0].GetWinnerPlayerId()
-		}
-		c.mu.Unlock()
-		if got > 0 {
-			return winner
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("未收到战斗结束通知")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-// lastFrame 返回最新一帧广播。
-func (c *battleClient) lastFrame() *battlev1.FrameBroadcast {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.frames) == 0 {
-		return nil
-	}
-	return c.frames[len(c.frames)-1]
-}
 
 // startMatcherForBattle 起 matcher 服务（真 sink：nats 发布 + battle actor 开局）。
 func startMatcherForBattle(t *testing.T, ctx context.Context) *matcherassemble.Matcher {
@@ -212,49 +65,8 @@ func queueTwo(t *testing.T, ctx context.Context, m *matcherassemble.Matcher, sta
 	return ""
 }
 
-// subscribeSettled 订阅战斗结算事件。
-func subscribeSettled(t *testing.T, nc *natsgo.Conn) <-chan *battlev1.BattleSettledEvent {
-	t.Helper()
-	ch := make(chan *battlev1.BattleSettledEvent, 4)
-	if _, err := nats.Subscribe(nc, e2eTopics.Event("battle.settled"), func(_ string, data []byte) {
-		var ev battlev1.BattleSettledEvent
-		if err := protojson.Unmarshal(data, &ev); err == nil {
-			ch <- &ev
-		}
-	}); err != nil {
-		t.Fatalf("订阅结算事件: %v", err)
-	}
-	return ch
-}
-
-// battleObserver 是成局/结算事件订阅（nats 事件总线可观测性）。
-type battleObserver struct {
-	started <-chan *matcherv1.MatchStartedEvent
-	settled <-chan *battlev1.BattleSettledEvent
-}
-
-// newBattleObserver 建立观察 nats 连接并订阅成局与结算事件。
-func newBattleObserver(t *testing.T) *battleObserver {
-	t.Helper()
-	nc, err := nats.Connect(nats.Options{URL: itNatsURL, Name: "e2e-battle-observer"})
-	if err != nil {
-		t.Fatalf("nats: %v", err)
-	}
-	t.Cleanup(nc.Close)
-	startedCh := make(chan *matcherv1.MatchStartedEvent, 4)
-	if _, err := nats.Subscribe(nc, e2eTopics.MatchStarted(), func(_ string, data []byte) {
-		var ev matcherv1.MatchStartedEvent
-		if err := protojson.Unmarshal(data, &ev); err == nil {
-			startedCh <- &ev
-		}
-	}); err != nil {
-		t.Fatalf("订阅成局事件: %v", err)
-	}
-	return &battleObserver{started: startedCh, settled: subscribeSettled(t, nc)}
-}
-
-// TestE2EBattleFullLoop 验证 M7 验收：双客户端完成一局战斗，对局结果一致
-// （双方帧广播/结束通知一致 + 结算事件与 mongo 落库一致）。
+// TestE2EBattleFullLoop 验证 M7 验收（口径直连）：双客户端完成一局战斗，对局结果一致
+// （双方**直连**帧广播/结束通知一致 + 结算事件与 mongo 落库一致）。
 func TestE2EBattleFullLoop(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
@@ -264,11 +76,11 @@ func TestE2EBattleFullLoop(t *testing.T) {
 
 	newGame(t)
 	gw := newGateway(t, "a")
-	newBattle(t, nil)
+	battle := newBattle(t, nil)
 	obs := newBattleObserver(t)
 	m := startMatcherForBattle(t, ctx)
-	a := newBattleClient(t, ctx, gw)
-	b := newBattleClient(t, ctx, gw)
+	a := newBattleClient(t, ctx, gw, battle, frameKCP)
+	b := newBattleClient(t, ctx, gw, battle, frameKCP)
 	battleID := queueTwo(t, ctx, m, obs.started, a, b)
 
 	playFullBattle(t, ctx, a, b, battleID)
@@ -278,6 +90,8 @@ func TestE2EBattleFullLoop(t *testing.T) {
 // playFullBattle 双方加入、发送帧输入并等待双方结束通知（胜者一致）。
 func playFullBattle(t *testing.T, ctx context.Context, a, b *battleClient, battleID string) {
 	t.Helper()
+	a.waitTicket(t)
+	b.waitTicket(t)
 	a.joinBattle(t, ctx, battleID)
 	b.joinBattle(t, ctx, battleID)
 	a.sendFrames(t, ctx, battleID, 1, 20, 1)
@@ -315,37 +129,49 @@ func assertBattleEndConsistency(t *testing.T, ctx context.Context, a, b *battleC
 	assertResultSaved(t, ctx, battleID, a.playerID)
 }
 
-// TestE2EBattleReconnect 验证断线重连专项：中途断开 → 重新加入（快照回执）
-// → 补帧（缺失帧拉取）→ 双方结局一致。
+// TestE2EBattleReconnect 验证断线重连专项（口径直连）：直连帧连接断开 → 以同一张票重连
+// （业务连接 Resume 免密恢复）→ 重新加入（快照回执）→ 补帧（缺失帧拉取）→ 双方结局一致；
+// 掉线窗口内回座不得判负（规格 §9.4：取消计时 + 连接重登记 + 既有 SyncFrames 补帧）。
 func TestE2EBattleReconnect(t *testing.T) {
 	if reason := probeMiddlewares(t); reason != "" {
 		t.Skipf("集成环境不可用: %s", reason)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 
-	// 拉长战线（25 格）留足断线重连窗口。
+	// 拉长战线（25 格）并放慢帧间隔：留足「断开 → 空闲超时发现 → 窗口内重连」的观察期。
+	// 掉线窗口 5s（数据报面空闲读超时 = 1/3 ≈ 1.67s）：既能让断开被真正发现，又远大于重连耗时。
 	cfg := battleassemble.DefaultBattleConfig()
 	cfg.TrackLen = 25
+	cfg.TickInterval = int64(300 * time.Millisecond)
+	cfg.OfflineTimeout = 5 * time.Second
 	newGame(t)
 	gw := newGateway(t, "a")
-	newBattle(t, &cfg)
+	battle := newBattle(t, &cfg)
 	obs := newBattleObserver(t)
 	m := startMatcherForBattle(t, ctx)
-	a := newBattleClient(t, ctx, gw)
-	b := newBattleClient(t, ctx, gw)
+	a := newBattleClient(t, ctx, gw, battle, frameKCP)
+	b := newBattleClient(t, ctx, gw, battle, frameKCP)
 	battleID := queueTwo(t, ctx, m, obs.started, a, b)
 
+	a.waitTicket(t)
+	b.waitTicket(t)
 	a.joinBattle(t, ctx, battleID)
 	b.joinBattle(t, ctx, battleID)
 	a.sendFrames(t, ctx, battleID, 1, 40, 1)
 	b.sendFrames(t, ctx, battleID, 1, 40, 0)
-	a2 := dropAndReconnect(t, ctx, gw, a, battleID)
+	floor := dropAndReconnect(t, ctx, gw, battle, a, battleID, cfg.OfflineTimeout/3+500*time.Millisecond)
+
+	// 回座：未判负（无出局广播）、未提前结算、直连恢复后继续收到新帧。
+	a.assertNoOut(t)
+	b.assertNoOut(t)
+	a.assertNoEnd(t)
+	a.waitFrameAfter(t, floor)
 
 	// 双方结局一致（a 服务器侧输入延续推进 → a 胜）。
-	winnerA2, winnerB := a2.waitEnd(t), b.waitEnd(t)
-	if winnerA2 != a.playerID || winnerB != a.playerID {
-		t.Fatalf("重连后结局不一致: a=%q b=%q want %q", winnerA2, winnerB, a.playerID)
+	winnerA, winnerB := a.waitEnd(t), b.waitEnd(t)
+	if winnerA != a.playerID || winnerB != a.playerID {
+		t.Fatalf("重连后结局不一致: a=%q b=%q want %q", winnerA, winnerB, a.playerID)
 	}
 	select {
 	case ev := <-obs.settled:
@@ -357,21 +183,44 @@ func TestE2EBattleReconnect(t *testing.T) {
 	}
 }
 
-// dropAndReconnect 断开 a 的连接后重连：加入（快照回执）+ 补帧（缺失帧拉取）。
-func dropAndReconnect(t *testing.T, ctx context.Context, gw *gwassemble.Gateway, a *battleClient, battleID string) *battleClient {
+// dropAndReconnect 断开 a 的直连帧连接后重连，返回断开瞬间的帧号（回座后新帧的判据）：
+//   - 直连帧面：用同一张票重连（帧槽逐帧带票），重新 JoinBattle（回执携带当前帧与快照）
+//     并 SyncFrames 拉取断点之前的帧；
+//   - 业务连接：同样断线重连（Resume 免密恢复绑定）——业务与战斗是两条独立连接，
+//     直连后不再"共通道"，两者互不影响；
+//   - detectWait：断开后先等这么久再重连，让帧面空闲读超时真正发现掉线并投递掉线事件，
+//     从而覆盖「打点 → 窗口内回座取消计时」这条路径（而不是靠重连接管把断开事件盖过去）。
+func dropAndReconnect(t *testing.T, ctx context.Context, gw *gwassemble.Gateway, b *battleassemble.Battle, a *battleClient, battleID string, detectWait time.Duration) uint64 {
 	t.Helper()
-	// a 收到 3 帧后断开（模拟掉线）。
+	// a 收到 3 帧后断开直连帧连接（模拟掉线）。
 	a.waitFrames(t, 3)
-	_ = a.cli.Close()
+	floor := a.lastFrame().GetFrame().GetFrameId()
+	if err := a.frame.close(); err != nil {
+		t.Fatalf("关闭直连帧连接: %v", err)
+	}
+	time.Sleep(detectWait) // 等空闲读超时把掉线事件送进 actor（窗口内仍可回座）
+
+	a.frame = dialDirectFrame(t, ctx, a.kind, frameAddrOf(b, a.kind), a.ticketOf)
+	a.frame.notify(a.watchDirect)
+
+	// 业务连接重连（Resume）：身份与推送通道恢复（战斗连接独立，不受影响）。
+	if err := a.cli.Close(); err != nil {
+		t.Fatalf("关闭业务连接: %v", err)
+	}
+	sess, cli := dialWSSession(t, gw.WSURL)
+	if _, err := sess.Restore(ctx, a.token, a.playerID); err != nil {
+		t.Fatalf("重连 Resume: %v", err)
+	}
+	a.sess, a.cli = sess, cli
+	a.watchNotifies()
 
 	// a 重新连接并加入（回执携带当前帧与快照）。
-	a2 := newBattleClientWithToken(t, ctx, gw, a)
-	join := a2.joinBattle(t, ctx, battleID)
+	join := a.joinBattle(t, ctx, battleID)
 	if join.GetCurrentFrame() < 3 || join.GetSnapshot() == nil {
 		t.Fatalf("重连加入回执缺快照: %+v", join)
 	}
 	// 补帧：从 0 拉取缺失帧（断点之前的全部帧）。
-	sync, err := a2.battle.SyncFrames(ctx, &battlev1.SyncFramesReq{BattleId: battleID, LastSeenFrame: 0})
+	sync, err := a.syncFrames(ctx, battleID, 0)
 	if err != nil {
 		t.Fatalf("SyncFrames: %v", err)
 	}
@@ -379,25 +228,7 @@ func dropAndReconnect(t *testing.T, ctx context.Context, gw *gwassemble.Gateway,
 		t.Fatalf("补帧回执不符: frames=%d current=%d joinCurrent=%d",
 			len(sync.GetMissed()), sync.GetCurrentFrame(), join.GetCurrentFrame())
 	}
-	return a2
-}
-
-// newBattleClientWithToken 以既有令牌重建 ws 连接（断线重连场景：Resume 免密恢复绑定）。
-func newBattleClientWithToken(t *testing.T, ctx context.Context, gw *gwassemble.Gateway, prev *battleClient) *battleClient {
-	t.Helper()
-	sess, cli := dialWSSession(t, gw.WSURL)
-	if _, err := sess.Restore(ctx, prev.token, prev.playerID); err != nil {
-		t.Fatalf("重连 Resume: %v", err)
-	}
-	c := &battleClient{
-		sess:     sess,
-		cli:      cli,
-		battle:   battlev1opclient.NewBattleService(cli),
-		playerID: prev.playerID,
-		token:    prev.token,
-	}
-	c.watchNotifies()
-	return c
+	return floor
 }
 
 // settledWinnerOf 从结算事件取胜者玩家 ID。
@@ -408,37 +239,4 @@ func settledWinnerOf(ev *battlev1.BattleSettledEvent) string {
 		}
 	}
 	return ""
-}
-
-// assertResultSaved 断言 mongo 已落库战斗结果且胜者一致。
-func assertResultSaved(t *testing.T, ctx context.Context, battleID, winner string) {
-	t.Helper()
-	mc, err := pkgmongo.NewClient(ctx, pkgmongo.Options{URI: itMongoURI, Database: itMongoDB})
-	if err != nil {
-		t.Fatalf("mongo: %v", err)
-	}
-	defer mc.Close(ctx)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var res struct {
-			Players []struct {
-				PlayerID string `bson:"player_id"`
-				Win      bool   `bson:"win"`
-				Score    int32  `bson:"score"`
-			} `bson:"players"`
-		}
-		err := mc.Collection("battle_results").FindOne(ctx, bson.M{"_id": battleID}).Decode(&res)
-		if err == nil {
-			for _, p := range res.Players {
-				if p.PlayerID == winner && (!p.Win || p.Score != 1) {
-					t.Fatalf("落库胜者不符: %+v", res.Players)
-				}
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("战斗结果未落库: %v", err)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
 }

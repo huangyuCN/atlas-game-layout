@@ -1,4 +1,5 @@
-// Package server 负责 battle 服务的传输层构造：gRPC 双面（域 op 的 rpc/ 平面）+ HTTP（健康检查）。
+// Package server 负责 battle 服务的传输层构造：gRPC 双面（域 op 的 rpc/ 平面）+ 直连帧面
+// （KCP/UDP/WS，见 frames.go）+ HTTP（健康检查）。
 // 启动参数来自 server.grpc / server.http 配置（字段见 protobuf/configs/server.proto，
 // 缺省约定见 docs/config.md）；中间件与过滤器由 pkg/middleware 经 fx 注入（业务可用 fx.Decorate 追加）；
 // 依赖装配见 internal/app；服务启停归属驱动方
@@ -37,8 +38,10 @@ type GRPCServerSet struct {
 }
 
 // NewGRPCServers 构造 battle 的两个 gRPC 面并注册域 rpc/ 平面（注册细节见 registerBattleServices）：
-// Edge 接口（access=CLIENT：加入对局/帧上行/帧同步，经网关转发）→ edge listener；
-// Internal 接口（access=INTERNAL：开局/查询，服务间调用）→ internal listener。
+// Edge 接口（access=CLIENT：加入对局/帧上行/帧同步）→ edge listener——**本项目不启用**：
+// 阶段 3 批次 5 起战斗帧由客户端凭 battle_ticket 直连接入层、再由接入层转发到本服务的
+// 直连帧面（见 frames.go），既不进网关也不进 Edge gRPC 面，故 edge_addr 留空；
+// Internal 接口（access=INTERNAL：开局/取票/查询，服务间调用）→ internal listener。
 // 两面各自独立地址与生命周期（server.grpc.edge_addr / internal_addr，空 = 不启用该面），
 // 都挂 opgrpc 一元拦截器（入站 metadata→ctx、错误→status，挂载点见 serverutil.GRPCServers）；
 // 注册错面在编译期即失败（Register...Edge/Internal 的形参类型即本面接口）。

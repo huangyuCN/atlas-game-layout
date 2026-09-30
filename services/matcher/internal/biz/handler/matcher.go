@@ -11,6 +11,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/lib/idgen"
 	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
+	getlog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/matchmaker"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -169,6 +170,10 @@ func (h *MatcherHandler) watchTicket(playerID, ticketID, partyID string) {
 // onCompleted 处理成局：按 matchID 幂等（同局每张 ticket 各触发一次，
 // 仅首个处理者执行，见 biz.MatchSettleDeduper——去重前置避免双写关联）。
 // 对局关联写入全部参战玩家（整队票含全队成员）。
+//
+// 顺序固定为「开局 → 取票 → 发布成局事件」（规格 §5）：票必须先于连接到达客户端
+// （直连后 JoinBattle 本身就在直连通道上）；取票失败即**不发**成局事件——事件里没有票与
+// 接入层地址，下发只会让客户端拿着空票连不上（客户端可经查询接口恢复，见 GetMatchStatus）。
 func (h *MatcherHandler) onCompleted(ev matchmaker.TicketEvent) {
 	if ev.Match == nil {
 		return
@@ -187,9 +192,15 @@ func (h *MatcherHandler) onCompleted(ev matchmaker.TicketEvent) {
 		// battle 关联：开局推送丢失后，玩家重登可经查询接口恢复加入。
 		_ = h.mapper.SetBattle(ctx, pid, battleID, ticketTTL)
 	}
-	_ = h.sink.PublishStarted(ctx, battleID, ev.Match.ID, playerIDs)
-	// 开局调用（可观测）：失败不阻断事件发布。
+	// 开局调用：失败不阻断出票尝试（未开局时按空名单出票失败，事件随之不下发）。
 	_ = h.sink.Start(ctx, battleID, ev.Match.ID, playerIDs)
+	tickets, err := h.sink.IssueEntryTicket(ctx, battleID)
+	if err != nil {
+		getlog.GetLogger().Error("matcher: 取票失败，成局事件不下发",
+			"battle", battleID, "match", ev.Match.ID, "err", err)
+		return
+	}
+	_ = h.sink.PublishStarted(ctx, battleID, ev.Match.ID, playerIDs, tickets)
 }
 
 // onFailed 处理失败终态：发布失败事件（整队票按名册快照推送）并清理映射。

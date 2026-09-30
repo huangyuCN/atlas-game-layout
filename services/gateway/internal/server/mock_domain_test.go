@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
-	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/opcall"
 	"google.golang.org/protobuf/proto"
 )
@@ -22,25 +19,17 @@ import (
 // 桩同时记录「投递了什么、以什么身份投递」：metadata 三键（player/request/sender）
 // 是跨进程链路的关键假设，投递内容对了而身份错了同样算失败。
 type mockDomain struct {
-	loginReqs     []*gamev1.LoginReq                   // 登录投递记录（版本门槛用例断言"未触达域"）
-	logoutMsgs    []*gamev1.LogoutMsg                  // 登出投递记录
-	matchEnters   []*gamev1.EnterMatchQueueReq         // 入队投递记录
-	matchCanceled bool                                 // 取消投递记录
-	joinOK        bool                                 // 加入战斗裁决（默认放行）
-	frameInputs   map[string][]*battlev1.FrameInputReq // battleID → 帧输入序列（Tell 投递）
-	reconnects    map[string][]*battlev1.SyncFramesReq // battleID → 补帧请求序列
-	methods       []string                             // 被调用的 operation 序列（顺序断言用）
-	callInfos     map[string]opcall.CallInfo           // operation → 最后一次调用身份
+	loginReqs     []*gamev1.LoginReq           // 登录投递记录（版本门槛用例断言"未触达域"）
+	logoutMsgs    []*gamev1.LogoutMsg          // 登出投递记录
+	matchEnters   []*gamev1.EnterMatchQueueReq // 入队投递记录
+	matchCanceled bool                         // 取消投递记录
+	methods       []string                     // 被调用的 operation 序列（顺序断言用）
+	callInfos     map[string]opcall.CallInfo   // operation → 最后一次调用身份
 }
 
-// newMockDomain 构造域服务桩（默认放行加入战斗）。
+// newMockDomain 构造域服务桩。
 func newMockDomain() *mockDomain {
-	return &mockDomain{
-		joinOK:      true,
-		frameInputs: make(map[string][]*battlev1.FrameInputReq),
-		reconnects:  make(map[string][]*battlev1.SyncFramesReq),
-		callInfos:   make(map[string]opcall.CallInfo),
-	}
+	return &mockDomain{callInfos: make(map[string]opcall.CallInfo)}
 }
 
 // Invoke 实现 opcall.MethodInvoker：记录方法名与调用身份，按请求类型分派并写出回执。
@@ -69,11 +58,6 @@ func (m *mockDomain) handle(playerID string, req any) (proto.Message, error) {
 	case *gamev1.LogoutMsg:
 		m.logoutMsgs = append(m.logoutMsgs, r)
 		return nil, nil
-	case *battlev1.FrameInputReq:
-		m.frameInputs[r.GetBattleId()] = append(m.frameInputs[r.GetBattleId()], r)
-		return nil, nil
-	case *battlev1.JoinBattleReq, *battlev1.SyncFramesReq, *battlev1.CreateBattleRequest:
-		return m.askBattle(playerID, req)
 	case *gamev1.EnterMatchQueueReq, *gamev1.CancelMatchReq, *gamev1.GetMatchStatusReq:
 		return m.askMatch(playerID, req)
 	case *gamev1.CreatePartyReq, *gamev1.JoinPartyReq, *gamev1.LeavePartyReq,
@@ -150,45 +134,6 @@ func (m *mockDomain) askParty(playerID string, req any) (proto.Message, error) {
 		}, nil
 	case *gamev1.QueuePartyReq:
 		return &gamev1.PartyQueueReply{TicketId: "t-party-1"}, nil
-	default:
-		return nil, fmt.Errorf("mock: 未知请求类型 %T", req)
-	}
-}
-
-// askBattle 返回战斗类桩回执（加入按 joinOK 裁决；补帧记录投递并回执缺失帧）。
-func (m *mockDomain) askBattle(playerID string, req any) (proto.Message, error) {
-	switch r := req.(type) {
-	case *battlev1.JoinBattleReq:
-		if !m.joinOK {
-			return nil, errorv1.ErrBattleNotFound("玩家不在该战斗参战名单")
-		}
-		return &battlev1.JoinBattleReply{
-			Meta: &locksteppb.SessionMeta{
-				SessionId:        r.GetBattleId(),
-				MaxPlayers:       2,
-				TickMillis:       100,
-				InputDelayFrames: 0,
-				Mode:             locksteppb.LockstepMode_LOCKSTEP_MODE_SERVER_AUTHORITATIVE,
-			},
-			CurrentFrame: 3,
-			Snapshot: &locksteppb.SnapshotMeta{
-				FrameId:   2,
-				StateHash: []byte("hash"),
-				SizeBytes: 8,
-			},
-		}, nil
-	case *battlev1.SyncFramesReq:
-		m.reconnects[r.GetBattleId()] = append(m.reconnects[r.GetBattleId()], r)
-		return &battlev1.SyncFramesReply{
-			CurrentFrame: 5,
-			Missed: []*locksteppb.FrameInputs{
-				{FrameId: 4, Inputs: []*locksteppb.LockstepInput{
-					{FrameId: 4, PlayerId: playerID, Payload: []byte("x")},
-				}},
-			},
-		}, nil
-	case *battlev1.CreateBattleRequest:
-		return &battlev1.CreateBattleReply{BattleId: r.GetBattleId()}, nil
 	default:
 		return nil, fmt.Errorf("mock: 未知请求类型 %T", req)
 	}

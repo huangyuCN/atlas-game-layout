@@ -32,7 +32,7 @@ const (
 type MinClientVersionMode int32
 
 const (
-	// MIN_CLIENT_VERSION_MODE_OFF 关闭校验（缺省）：不读客户端版本，不拒绝。
+	// MIN_CLIENT_VERSION_MODE_OFF 与缺省同义：门槛为空时仅记录；门槛非空时**仍强制**。
 	MinClientVersionMode_MIN_CLIENT_VERSION_MODE_OFF MinClientVersionMode = 0
 	// MIN_CLIENT_VERSION_MODE_NEGOTIATE 只协商：记录并暴露客户端版本，不拒绝（灰度期观察用）。
 	MinClientVersionMode_MIN_CLIENT_VERSION_MODE_NEGOTIATE MinClientVersionMode = 1
@@ -94,10 +94,13 @@ type Runtime struct {
 	// 取值限 [A-Za-z0-9_-]，非法字符同样启动失败。env 仅作链路与指标标签，不参与任何前缀派生。
 	// 缺省约定与五面派生表见 docs/config.md。
 	Namespace string `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	// min_client_version 是允许登录的最低客户端版本（semver，如 1.4.0）；空 = 不设门槛。
-	// 仅当 min_client_version_mode = ENFORCE 时才会据此拒绝低于该版本的客户端登录。
+	// min_client_version 是允许登录的最低客户端版本（semver，如 1.4.0）。
+	// **空 = 仅记录**（放行并打日志，保持既有行为）；**非空 = 登录期强制**：低于该版本、
+	// 未上报版本或版本串无法识别的客户端在建会话之前就被拒绝（reason CLIENT_VERSION_TOO_LOW）。
+	// 阶段 3 起战斗帧由客户端凭票据直连，老客户端会「匹配成功但连不上」，故门槛成为必需。
 	MinClientVersion string `protobuf:"bytes,6,opt,name=min_client_version,json=minClientVersion,proto3" json:"min_client_version,omitempty"`
-	// min_client_version_mode 是客户端版本门槛的执行模式（缺省 OFF）：灰度期用 NEGOTIATE 只记录不拒绝。
+	// min_client_version_mode 是客户端版本门槛的执行模式：**缺省/OFF/ENFORCE 同义**（只要门槛非空即强制，
+	// 刻意不做「漏配 mode 就静默降级」——那正是「匹配成功但连不上」的成因）；仅显式 NEGOTIATE 才降级为只记录。
 	MinClientVersionMode MinClientVersionMode `protobuf:"varint,7,opt,name=min_client_version_mode,json=minClientVersionMode,proto3,enum=atlas.configs.MinClientVersionMode" json:"min_client_version_mode,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache

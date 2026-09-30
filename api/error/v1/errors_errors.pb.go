@@ -1261,6 +1261,104 @@ func WrapBattleEnded(cause error, format string, args ...interface{}) *errors.Er
 	return ErrBattleEnded(format, args...).WithCause(cause)
 }
 
+// 直连入场票据（阶段 3 批次 2）：battle 帧槽验票失败的两个 reason——帧有回执，故回结构化错误；
+// 接入层拒绝走 L4 断开 + 指标标签（不进 proto，见规格 §4 错误语义分层）。
+func IsBattleTicketInvalid(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "BATTLE_TICKET_INVALID" || e.Code != 401 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "3004"
+}
+
+// 直连入场票据（阶段 3 批次 2）：battle 帧槽验票失败的两个 reason——帧有回执，故回结构化错误；
+// 接入层拒绝走 L4 断开 + 指标标签（不进 proto，见规格 §4 错误语义分层）。
+func ErrBattleTicketInvalid(format string, args ...interface{}) *errors.Error {
+	return errors.New(401, "BATTLE_TICKET_INVALID", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "3004",
+		"biz_reason": "BattleTicketInvalid",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonBattleTicketInvalid 返回当前错误的 reason 常量值。
+func ReasonBattleTicketInvalid() string {
+	return "BATTLE_TICKET_INVALID"
+}
+
+// CodeBattleTicketInvalid 返回当前错误对应的 HTTP 状态码。
+func CodeBattleTicketInvalid() int {
+	return 401
+}
+
+// BizCodeBattleTicketInvalid 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeBattleTicketInvalid() int32 {
+	return 3004
+}
+
+// NewBattleTicketInvalid 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewBattleTicketInvalid(message string) *errors.Error {
+	return errors.New(401, "BATTLE_TICKET_INVALID", message).WithMetadata(map[string]string{
+		"biz_code":   "3004",
+		"biz_reason": "BattleTicketInvalid",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapBattleTicketInvalid 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapBattleTicketInvalid(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrBattleTicketInvalid(format, args...).WithCause(cause)
+}
+
+// 直连票据已过期
+func IsBattleTicketExpired(err error) bool {
+	if err == nil {
+		return false
+	}
+	e := errors.FromError(err)
+	if e.Reason != "BATTLE_TICKET_EXPIRED" || e.Code != 401 {
+		return false
+	}
+	return e.Metadata != nil && e.Metadata["biz_code"] == "3005"
+}
+
+// 直连票据已过期
+func ErrBattleTicketExpired(format string, args ...interface{}) *errors.Error {
+	return errors.New(401, "BATTLE_TICKET_EXPIRED", fmt.Sprintf(format, args...)).WithMetadata(map[string]string{
+		"biz_code":   "3005",
+		"biz_reason": "BattleTicketExpired",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// ReasonBattleTicketExpired 返回当前错误的 reason 常量值。
+func ReasonBattleTicketExpired() string {
+	return "BATTLE_TICKET_EXPIRED"
+}
+
+// CodeBattleTicketExpired 返回当前错误对应的 HTTP 状态码。
+func CodeBattleTicketExpired() int {
+	return 401
+}
+
+// BizCodeBattleTicketExpired 返回当前错误对应的业务错误码（枚举值）。
+func BizCodeBattleTicketExpired() int32 {
+	return 3005
+}
+
+// NewBattleTicketExpired 创建一个固定 message 的错误（不使用 fmt.Sprintf）。
+func NewBattleTicketExpired(message string) *errors.Error {
+	return errors.New(401, "BATTLE_TICKET_EXPIRED", message).WithMetadata(map[string]string{
+		"biz_code":   "3005",
+		"biz_reason": "BattleTicketExpired",
+	}).WithClass(errors.ClassBusiness) // 业务错误码生成物一律标注业务类（日志按类定级、不计入故障率）
+}
+
+// WrapBattleTicketExpired 以指定错误作为 cause，创建一个带 message 的错误。
+func WrapBattleTicketExpired(cause error, format string, args ...interface{}) *errors.Error {
+	return ErrBattleTicketExpired(format, args...).WithCause(cause)
+}
+
 // 通用
 func IsInternal(err error) bool {
 	if err == nil {
@@ -1416,6 +1514,12 @@ func matchKnown(e *errors.Error) (*errors.Error, bool) {
 		return e, true
 	}
 	if IsBattleEnded(e) {
+		return e, true
+	}
+	if IsBattleTicketInvalid(e) {
+		return e, true
+	}
+	if IsBattleTicketExpired(e) {
 		return e, true
 	}
 	if IsInternal(e) {

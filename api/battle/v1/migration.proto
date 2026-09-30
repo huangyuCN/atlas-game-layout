@@ -1,0 +1,97 @@
+// 战斗 actor 迁移的线格式（阶段 3 批次 7，规格 §8）：迁移期把一局战斗的状态从旧属主
+// 搬到新属主，搬的是「lockstep 会话快照 + 参战名单 + 帧状态」三件。
+//
+// 为什么单独一份文件而不是塞进 battle_service.proto：本文件只承载**迁移控制面**的消息，
+// 不进 atlas.route.v1 注解（不产生 opclient/rpc/matcher 侧产物），改动面被限制在
+// 「battle 服务的迁移实现 + 本文件的 Go 产物」；战斗业务契约（客户端 op）零改动。
+syntax = "proto3";
+
+package battle.v1;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1";
+
+import "api/lockstep/lockstep.proto";
+
+// BattleMigrationState 是一局战斗在迁移窗口内的完整可搬运状态。
+// 生命周期：旧属主 PrepareMigration 产出 → 迁移编排器 Stage 到新属主的本机收件箱 →
+// 新属主拉起战斗 actor 时消费（写进会话存储后拉起会话 actor，会话 OnStart 依快照恢复）。
+message BattleMigrationState {
+  // battle_id 是本局战斗 ID（收件箱按它索引，新属主按它取回状态）。
+  string battle_id = 1;
+  // match_id 是本局匹配 ID（结算事件原样沿用，迁移不得丢失）。
+  string match_id = 2;
+  // players 是参战名单（顺序不保证，消费侧按集合使用）。
+  repeated string players = 3;
+  // last_frame 是最近一次帧广播的帧号（掉线判负的结算帧号口径）。
+  uint64 last_frame = 4;
+  // settled 表示本局是否已结算（已结算的局不需要迁移，但状态必须如实搬运）。
+  bool settled = 5;
+  // offline_marked 是迁移窗口内已打点掉线、尚未起算的玩家（窗口关闭后重新起算）。
+  repeated string offline_marked = 6;
+  // snapshot_frame 是会话快照的帧号（新属主恢复后的起始帧，与旧属主导出时严格一致）。
+  uint64 snapshot_frame = 7;
+  // snapshot_state 是会话状态的序列化字节（模拟器快照，不透明）。
+  bytes snapshot_state = 8;
+  // snapshot_hash 是快照状态哈希（一致性与反作弊比对）。
+  uint64 snapshot_hash = 9;
+  // inputs 是快照帧之前的帧输入日志（补帧语义用：客户端重连后 SyncFrames 需要它）。
+  repeated atlas.game.lockstep.LockstepInput inputs = 10;
+  // source_epoch 是导出时旧属主的目录 epoch（栅栏：新属主 epoch 必须更大才认这份状态）。
+  uint64 source_epoch = 11;
+  // source_node 是导出时旧属主的节点 ID（排障与审计用）。
+  string source_node = 12;
+}
+
+// PrepareBattleMigrationRequest 请求旧属主进入迁移窗口并导出状态（actor 平面 Ask）。
+message PrepareBattleMigrationRequest {
+  // battle_id 是目标战斗 ID（与 PID 的 uid 一致，显式带上便于日志与校验）。
+  string battle_id = 1;
+}
+
+// ResumeBattleMigrationRequest 请求旧属主退出迁移窗口并恢复计时（仅在迁移中止时发出；
+// 迁移成功时旧属主整个 actor 已被 drain，无需也无法恢复）。
+message ResumeBattleMigrationRequest {
+  // battle_id 是目标战斗 ID。
+  string battle_id = 1;
+}
+
+// StageBattleMigrationRequest 把导出状态预置到新属主节点的本机收件箱（跨节点 Tell）。
+// 必须在拉起新属主之前送达：新属主的 OnStart 要在**建立会话 actor 之前**把快照写进会话存储。
+message StageBattleMigrationRequest {
+  // state 是待搬运的一局状态。
+  BattleMigrationState state = 1;
+}
+
+// TakeBattleMigrationRequest 由新属主的战斗 actor 在 OnStart 向本机收件箱取状态（Ask）。
+message TakeBattleMigrationRequest {
+  // battle_id 是目标战斗 ID。
+  string battle_id = 1;
+}
+
+// TakeBattleMigrationReply 是取状态回执：found=false 表示本机没有该局的待恢复状态
+// （正常启动、或迁移编排尚未 stage）。
+message TakeBattleMigrationReply {
+  // state 是待恢复状态（found=false 时为零值）。
+  BattleMigrationState state = 1;
+  // found 表示收件箱是否命中该局（命中即消费，重复取返回 found=false）。
+  bool found = 2;
+}
+
+// MigrateBattleRequest 触发一次战斗 actor 迁移（管理/运维入口，寻址到**当前属主节点**的
+// 迁移管理 actor）。
+message MigrateBattleRequest {
+  // battle_id 是待迁移的战斗 ID。
+  string battle_id = 1;
+  // target_node 是目标节点 ID；空 = 由编排器从候选节点里选（排除当前属主）。
+  string target_node = 2;
+}
+
+// MigrateBattleReply 是迁移结果回执。
+message MigrateBattleReply {
+  // from_node 是迁出节点（迁移前的属主）。
+  string from_node = 1;
+  // to_node 是迁入节点（迁移后的属主）。
+  string to_node = 2;
+  // epoch 是迁入后目录里的新 epoch（单调递增，旧 epoch 的投递自此被判 EpochMismatch）。
+  uint64 epoch = 3;
+}

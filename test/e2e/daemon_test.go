@@ -66,7 +66,10 @@ func TestDaemonProbe(t *testing.T) {
 	if reg.GetPlayerId() == "" {
 		t.Fatal("注册回执缺少 player_id（幽灵实例吞消息的典型症状）")
 	}
-	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{PlayerId: reg.GetPlayerId(), Password: "pw"}); err != nil {
+	// 登录必须带客户端版本：网关的 min_client_version 门槛在登录期强制（规格 §11 第 7 项）。
+	if _, err := sess.Login(ctx, &gatewayv1.LoginRequest{
+		PlayerId: reg.GetPlayerId(), Password: "pw", ClientVersion: itClientVersion,
+	}); err != nil {
 		t.Fatalf("守护形态登录失败: %v", err)
 	}
 	if _, err := sess.Heartbeat(ctx); err != nil {

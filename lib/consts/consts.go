@@ -13,6 +13,33 @@ const (
 	ServiceGame    = "game"
 	ServiceMatcher = "matcher"
 	ServiceBattle  = "battle"
+	// ServiceEdge 是接入层服务名（裸 L4 转发，规格 §2：成局后客户端直连它）。
+	ServiceEdge = "edge"
+	// ServiceBattleFrame 是 battle 额外注册的**帧面实例**服务名（规格 §2.1）：
+	// 接入层 Resolver 先查 actor 目录得属主 node_id，再按该服务名选同节点的帧面实例与端口。
+	ServiceBattleFrame = "battle-frame"
+)
+
+// 帧面实例的元数据契约（规格 §2.1「实例元数据含 node_id 与 kcp/udp/ws 端口」）：
+// battle 注册 battle-frame 实例时写入，接入层 Resolver 读取；端口不写死、不进票据。
+const (
+	// FrameMetaNodeID 是帧面实例所属的 actor 节点 ID（与目录里的属主 node_id 比对）。
+	FrameMetaNodeID = "node_id"
+	// FrameMetaHost 是该节点对客户端可达的主机（可省略，缺省取实例端点里的主机）。
+	FrameMetaHost = "host"
+	// FrameMetaPortWS 是 WS 帧面端口。
+	FrameMetaPortWS = "ws"
+	// FrameMetaPortKCP 是 KCP 帧面端口。
+	FrameMetaPortKCP = "kcp"
+	// FrameMetaPortUDP 是 UDP 帧面端口。
+	FrameMetaPortUDP = "udp"
+	// ActorTypeBattle 是战斗 actor 的类型段：PID 形如 battle:<battle_id>。
+	ActorTypeBattle = "battle"
+	// ActorTypeBattleMigrate 是战斗迁移收件箱/编排 actor 的类型段：PID 形如
+	// battlemigrate:<node_id>（每节点一个，负责预置待恢复状态并触发迁移，规格 §8）。
+	// 收件箱必须**本机**：新属主的战斗 actor 在 OnStart 里向它取状态，
+	// 且状态要在会话 actor 建立之前写进会话存储。
+	ActorTypeBattleMigrate = "battlemigrate"
 )
 
 // 运行环境（runtime.env **仅作标签**：链路资源 deployment.environment.name 与指标 env 标签，

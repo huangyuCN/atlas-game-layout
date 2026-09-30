@@ -39,6 +39,23 @@ const (
 // 代码里不再出现路径字面量。
 var itNS = fmt.Sprintf("it-%d", time.Now().UnixNano())
 
+// 集成测试的出票配置（阶段 3 批次 2C）：battle 装配必须给出票据密钥与接入层各面地址，
+// 否则 app.newActorConfig 直接失败（缺失即启动失败是刻意设计）。密钥为 base64 的 32 字节。
+const itTicketKey = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+
+// itClientVersion 是 e2e 客户端上报的版本：网关的 min_client_version 门槛在登录期强制
+// （模板配置 0.1.0，发布时会上调为首个支持直连的 SDK 版本），故取一个远高于任何门槛的值，
+// 避免门槛上调后这些用例再次变红；门槛本身的行为由 version_gate_test.go 专门覆盖。
+const itClientVersion = "9.9.9"
+
+// itEdgeEndpoints 是接入层的「面→地址」列表（与 services/edge 的监听面一致：
+// ws=tcp:7100、kcp=udp:7101、udp=udp:7102；单地址无法让 SDK 知道该拨哪个端口）。
+var itEdgeEndpoints = []*battlev1.EdgeEndpoint{
+	{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_WS, Address: "127.0.0.1:7100"},
+	{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_KCP, Address: "127.0.0.1:7101"},
+	{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_UDP, Address: "127.0.0.1:7102"},
+}
+
 // itDerived 是本次运行的五面派生结果（注册键前缀 / actor subject / 业务 topic /
 // redis 键 / etcd 目录全由它取），与进程内装配（assemble → newBootstrap）同源。
 var itDerived = mustDerive(itNS)
@@ -175,6 +192,8 @@ func newBattle(t *testing.T, cfg *battleassemble.BattleConfig) *battleassemble.B
 		MongoDB:       itMongoDB,
 		BattleCfg:     cfg,
 		Namespace:     itNS,
+		TicketKey:     itTicketKey,
+		EdgeEndpoints: itEdgeEndpoints,
 	})
 	if err != nil {
 		t.Fatalf("battle 装配: %v", err)

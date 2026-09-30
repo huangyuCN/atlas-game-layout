@@ -19,6 +19,7 @@ package game.v1;
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/game/v1;gamev1";
 
 import "api/atlas/v1/route.proto";
+import "api/battle/v1/battle_service.proto";
 import "api/common/v1/common.proto";
 import "api/matcher/v1/match_events.proto";
 import "google/protobuf/empty.proto";
@@ -162,13 +163,21 @@ message PartyQueueReply {
 
 // ---- 服务端推送（撮合域，按连接路由下发；op 为消息完整名）----
 
-// MatchStartedNotify 服务端推送：匹配成功开局通知（含 battle 实例地址）。
+// MatchStartedNotify 服务端推送：匹配成功开局通知（含接入层各面地址与收件玩家本人的票据）。
 message MatchStartedNotify {
   option (atlas.route.v1.push) = true;
   string match_id = 1;
   string battle_id = 2;
   repeated string player_ids = 3;
-  string endpoint = 4;
+  // 4 曾是 string endpoint（单个接入层地址）：接入层分面监听后改为按传输面下发列表
+  //（endpoints），旧号保留禁用，避免误用导致语义漂移。
+  reserved 4;
+  // battle_ticket 是**收件玩家本人**那张入场票据（由扇出方按人填；
+  // 名单里没有该玩家时不下发空票——空票连不上接入层，只会误导客户端）。
+  bytes battle_ticket = 5;
+  // endpoints 是接入层「传输面 → 地址」列表（对所有人相同，由扇出方照抄成局事件）。
+  // SDK 按自身支持的传输面取一个，缺该面即明确报错（不得回退猜端口、不得静默换面）。
+  repeated battle.v1.EdgeEndpoint endpoints = 6;
 }
 
 // MatchFailedNotify 服务端推送：匹配失败/超时/取消通知。

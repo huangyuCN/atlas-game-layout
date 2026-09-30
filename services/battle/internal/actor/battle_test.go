@@ -7,6 +7,7 @@ import (
 	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
@@ -14,50 +15,11 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	lockstepimpl "github.com/huangyuCN/atlas/contrib/lockstep"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
+	"github.com/huangyuCN/atlas/metrics"
 )
 
 // playerType 是发起者 sender 的 actor 类型名（与 gamev1actor.PlayerServiceActorType 一致）。
 const playerType = "player"
-
-// memNotifier 是下行通知的内存实现（帧/结束通知记录）。
-type memNotifier struct {
-	mu     sync.Mutex
-	frames map[string][]*locksteppb.LockstepFrame // playerID → 帧序列
-	ends   map[string][]string                    // playerID → 胜者序列
-}
-
-func newMemNotifier() *memNotifier {
-	return &memNotifier{frames: make(map[string][]*locksteppb.LockstepFrame), ends: make(map[string][]string)}
-}
-
-func (n *memNotifier) PublishFrame(_ context.Context, playerID, _ string, f *locksteppb.LockstepFrame) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.frames[playerID] = append(n.frames[playerID], f)
-	return nil
-}
-
-func (n *memNotifier) PublishEnd(_ context.Context, playerID, _, winner string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.ends[playerID] = append(n.ends[playerID], winner)
-	return nil
-}
-
-// snapshots 返回两个玩家的帧快照（测试断言用）。
-func (n *memNotifier) snapshots() (map[string][]*locksteppb.LockstepFrame, map[string][]string) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	frames := make(map[string][]*locksteppb.LockstepFrame, len(n.frames))
-	for k, v := range n.frames {
-		frames[k] = append([]*locksteppb.LockstepFrame(nil), v...)
-	}
-	ends := make(map[string][]string, len(n.ends))
-	for k, v := range n.ends {
-		ends[k] = append([]string(nil), v...)
-	}
-	return frames, ends
-}
 
 // memResultRepo 是结算结果仓储的内存实现。
 type memResultRepo struct {
@@ -85,6 +47,70 @@ func (p *memPublisher) PublishSettled(_ context.Context, ev *battlev1.BattleSett
 	return nil
 }
 
+// memPusher 是直连推送端口的内存实现（帧/结束/出局通知与关闭对局的记录）。
+type memPusher struct {
+	mu     sync.Mutex
+	frames map[string][]*locksteppb.LockstepFrame // playerID → 帧序列
+	ends   map[string][]string                    // playerID → 胜者序列
+	outs   map[string][]outRecord                 // playerID → 出局广播序列
+	closed []string                               // 已关闭的对局 ID（结算后回收，规格 §9.8）
+}
+
+// newMemPusher 构造直连推送内存实现。
+func newMemPusher() *memPusher {
+	return &memPusher{
+		frames: make(map[string][]*locksteppb.LockstepFrame),
+		ends:   make(map[string][]string),
+		outs:   make(map[string][]outRecord),
+	}
+}
+
+// PublishFrame 实现 biz.BattlePusher：记录直连帧广播。
+func (p *memPusher) PublishFrame(_ context.Context, playerID, _ string, f *locksteppb.LockstepFrame) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.frames[playerID] = append(p.frames[playerID], f)
+	return nil
+}
+
+// PublishEnd 实现 biz.BattlePusher：记录直连结束通知。
+func (p *memPusher) PublishEnd(_ context.Context, playerID, _, winner string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ends[playerID] = append(p.ends[playerID], winner)
+	return nil
+}
+
+// PublishOut 实现 biz.BattlePusher：记录玩家出局广播（掉线判负，规格 §9.3）。
+func (p *memPusher) PublishOut(_ context.Context, playerID, _, outPlayerID string, reason battlev1.PlayerOutReason) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.outs[playerID] = append(p.outs[playerID], outRecord{playerID: outPlayerID, reason: reason})
+	return nil
+}
+
+// CloseBattle 实现 biz.BattlePusher：记录关闭的对局。
+func (p *memPusher) CloseBattle(battleID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closed = append(p.closed, battleID)
+}
+
+// snapshots 返回帧/结束通知与关闭对局的快照（测试断言用）。
+func (p *memPusher) snapshots() (map[string][]*locksteppb.LockstepFrame, map[string][]string, []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	frames := make(map[string][]*locksteppb.LockstepFrame, len(p.frames))
+	for k, v := range p.frames {
+		frames[k] = append([]*locksteppb.LockstepFrame(nil), v...)
+	}
+	ends := make(map[string][]string, len(p.ends))
+	for k, v := range p.ends {
+		ends[k] = append([]string(nil), v...)
+	}
+	return frames, ends, append([]string(nil), p.closed...)
+}
+
 // localRT 适配 core.LocalRuntime 到战斗 actor 的 Runtime 接口（剥离可选参数）。
 type localRT struct{ *core.LocalRuntime }
 
@@ -107,14 +133,43 @@ func (l localRT) Ask(ctx context.Context, pid types.PID, req any, opts ...core.S
 type battleEnv struct {
 	rt        *core.LocalRuntime
 	pid       types.PID
-	notifier  *memNotifier
+	pusher    *memPusher
 	result    *memResultRepo
 	publisher *memPublisher
 	reg       *pubsub.Registry
 }
 
+// testBattleConfig 返回战斗 actor 的测试参数（短帧间隔加速测试）。
+func testBattleConfig() Config {
+	return Config{
+		TickInterval:  int64(10 * time.Millisecond),
+		TrackLen:      DefaultTrackLen,
+		MaxFrames:     DefaultMaxFrames,
+		SnapshotEvery: DefaultSnapshotEvery,
+	}
+}
+
+// battleDeps 是战斗 actor 测试装配的可选依赖（掉线策略用例注入在场复核端口与指标）。
+type battleDeps struct {
+	Presence biz.ConnPresence  // 掉线事件应用前的在场复核端口（nil = 一律视为不在场）
+	Metrics  metrics.Collector // 指标采集器（nil = noop）
+}
+
 // newBattleEnv 起本地 actor 运行时并拉起战斗 actor（短帧间隔加速测试）。
 func newBattleEnv(t *testing.T) *battleEnv {
+	t.Helper()
+	return newBattleEnvWith(t, testBattleConfig())
+}
+
+// newBattleEnvWith 以给定战斗参数起本地 actor 运行时并拉起战斗 actor
+// （出票用例注入票据密钥/TTL/接入层地址）。
+func newBattleEnvWith(t *testing.T, cfg Config) *battleEnv {
+	t.Helper()
+	return newBattleEnvDeps(t, cfg, battleDeps{})
+}
+
+// newBattleEnvDeps 以给定战斗参数与可选依赖起本地 actor 运行时并拉起战斗 actor。
+func newBattleEnvDeps(t *testing.T, cfg Config, d battleDeps) *battleEnv {
 	t.Helper()
 	rt, err := core.NewLocalRuntime()
 	if err != nil {
@@ -128,7 +183,7 @@ func newBattleEnv(t *testing.T) *battleEnv {
 	if err != nil {
 		t.Fatalf("pubsub: %v", err)
 	}
-	notifier := newMemNotifier()
+	pusher := newMemPusher()
 	result := &memResultRepo{}
 	publisher := &memPublisher{}
 	err = rt.Register(NewProps(Props{
@@ -136,14 +191,11 @@ func newBattleEnv(t *testing.T) *battleEnv {
 		Registry:   reg,
 		Storage:    lockstepimpl.NewMemoryStorage(),
 		ResultRepo: result,
-		Notifier:   notifier,
+		Pusher:     pusher,
 		Publisher:  publisher,
-		Cfg: Config{
-			TickInterval:  int64(10 * time.Millisecond),
-			TrackLen:      DefaultTrackLen,
-			MaxFrames:     DefaultMaxFrames,
-			SnapshotEvery: DefaultSnapshotEvery,
-		},
+		Presence:   d.Presence,
+		Metrics:    d.Metrics,
+		Cfg:        cfg,
 	}))
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -155,8 +207,11 @@ func newBattleEnv(t *testing.T) *battleEnv {
 	if _, err := rt.Spawn(context.Background(), pid); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	return &battleEnv{rt: rt, pid: pid, notifier: notifier, result: result, publisher: publisher, reg: reg}
+	return &battleEnv{rt: rt, pid: pid, pusher: pusher, result: result, publisher: publisher, reg: reg}
 }
+
+// newTestContext 返回测试用后台上下文（避免逐处 context.Background()）。
+func newTestContext() context.Context { return context.Background() }
 
 // ask 以具体消息对象向战斗 actor 请求（同节点直传形态，生成的桩 switch 直接命中）。
 // 适用服务端内部调用（无发起者 sender，如开局/状态查询）。
@@ -275,10 +330,10 @@ func assertSavedResult(t *testing.T, env *battleEnv) {
 	}
 }
 
-// assertFramesConsistent 断言帧广播与结束通知双方一致。
+// assertFramesConsistent 断言直连帧广播与结束通知双方一致（战斗域通知只走直连）。
 func assertFramesConsistent(t *testing.T, env *battleEnv) {
 	t.Helper()
-	frames, ends := env.notifier.snapshots()
+	frames, ends, _ := env.pusher.snapshots()
 	aFrames, bFrames := frames["p-a"], frames["p-b"]
 	if len(aFrames) == 0 || len(aFrames) != len(bFrames) {
 		t.Fatalf("帧广播数不一致: a=%d b=%d", len(aFrames), len(bFrames))
@@ -393,7 +448,7 @@ func TestHashBytes(t *testing.T) {
 
 // TestSessionMeta 验证会话元信息字段。
 func TestSessionMeta(t *testing.T) {
-	meta := sessionMeta("b-1", int64(100*time.Millisecond))
+	meta := sessionMeta("b-1", int64(100*time.Millisecond), DefaultMaxPlayers)
 	if meta.GetSessionId() != "b-1" || meta.GetMaxPlayers() != 2 || meta.GetTickMillis() != 100 ||
 		meta.GetMode() != locksteppb.LockstepMode_LOCKSTEP_MODE_SERVER_AUTHORITATIVE {
 		t.Fatalf("会话元信息不符: %+v", meta)

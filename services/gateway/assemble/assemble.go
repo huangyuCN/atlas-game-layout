@@ -1,6 +1,6 @@
 // Package assemble 提供 gateway 服务的进程内（嵌入式）装配入口：
 // 与进程形态共用 internal/app 的同一张 fx 依赖图与同一套启停路径
-// （bootstrap.Boot → atlas.App：启动五协议服务端、注册实例、注销与停机），
+// （bootstrap.Boot → atlas.App：启动业务协议服务端、注册实例、注销与停机），
 // 仅不注册进程信号——宿主/测试进程的信号不能被本实例拦下。
 // WS 与进程形态一致：由 WS Server 独立监听，端点取自身 Endpoint()
 // （WS Handler 对路径不敏感，客户端拨 ws://host:port 即可）。
@@ -8,6 +8,9 @@ package assemble
 
 import (
 	"context"
+	"net/url"
+	"slices"
+	"sort"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
@@ -37,11 +40,18 @@ type Options struct {
 // Gateway 是装配完成的 gateway 实例句柄。
 type Gateway struct {
 	TCPURL  string // 业务通道（tcp，host:port）
-	WSURL   string // 单通道形态（ws://host:port，业务+战斗共用）
-	KCPURL  string // 战斗通道（kcp，host:port）
-	UDPURL  string // 战斗通道（udp，host:port）
+	WSURL   string // 业务通道（ws://host:port）
 	HTTPURL string // 健康检查（http，host:port）
+	// schemes 是本实例实际监听的端点 scheme 集合（升序）：业务面 + 健康面，
+	// **不含** kcp/udp（战斗帧面不在网关，见 ListenSchemes）。
+	schemes []string
 	stop    func(ctx context.Context) error
+}
+
+// ListenSchemes 返回本实例实际监听的端点 scheme（升序副本）。
+// 破坏性断言与运维核对用：战斗帧面（kcp/udp）必须不在其中。
+func (g *Gateway) ListenSchemes() []string {
+	return slices.Clone(g.schemes)
 }
 
 // graphHandles 从依赖图回捞句柄所需组件。
@@ -52,31 +62,44 @@ type graphHandles struct {
 }
 
 // New 装配并启动一个 gateway 实例：映射配置 → bootstrap.Boot 启动依赖图
-// （含推送订阅、会话清扫与域服务客户端），由 atlas.App 统一启动五协议服务端并注册实例。
+// （含推送订阅、会话清扫与域服务客户端），由 atlas.App 统一启动业务协议服务端并注册实例。
 func New(ctx context.Context, o Options) (*Gateway, error) {
 	var h graphHandles
 	cfg, err := newBootstrap(o)
 	if err != nil {
 		return nil, err
 	}
+	// 只要求业务协议与健康/edge 面就绪：战斗帧面（kcp/udp）自阶段 3 批次 5 起不在网关，
+	// 故既不声明也不等待——少一个 scheme 就是"没监听"，不需要额外的运行时判空。
 	inst, urls, err := bootstrap.Boot(ctx, cfg, gwapp.Module, &h,
-		serverutil.SchemeTCP, serverutil.SchemeWS, serverutil.SchemeKCP,
-		serverutil.SchemeUDP, serverutil.SchemeHTTP, serverutil.SchemeGRPCEdge)
+		serverutil.SchemeTCP, serverutil.SchemeWS,
+		serverutil.SchemeHTTP, serverutil.SchemeGRPCEdge)
 	if err != nil {
 		return nil, err
 	}
 	return &Gateway{
 		TCPURL:  urls[serverutil.SchemeTCP].Host,
 		WSURL:   urls[serverutil.SchemeWS].String(),
-		KCPURL:  urls[serverutil.SchemeKCP].Host,
-		UDPURL:  urls[serverutil.SchemeUDP].Host,
 		HTTPURL: urls[serverutil.SchemeHTTP].Host,
+		schemes: sortedSchemes(urls),
 		stop:    inst.Stop,
 	}, nil
 }
 
+// sortedSchemes 归集就绪端点 scheme（升序；供破坏性断言与运维核对"到底监听了哪几面"）。
+func sortedSchemes(urls map[string]*url.URL) []string {
+	schemes := make([]string, 0, len(urls))
+	for scheme, u := range urls {
+		if u != nil {
+			schemes = append(schemes, scheme)
+		}
+	}
+	sort.Strings(schemes)
+	return schemes
+}
+
 // Stop 停止 gateway 实例并释放全部资源
-// （注销实例 → 停五协议服务端 → 组件逆序回收，均由 atlas.App 驱动）。
+// （注销实例 → 停业务协议服务端 → 组件逆序回收，均由 atlas.App 驱动）。
 func (g *Gateway) Stop(ctx context.Context) error {
 	if g.stop == nil {
 		return nil
@@ -109,8 +132,7 @@ func newBootstrap(o Options) (*conf.Bootstrap, error) {
 			Http:      &configspb.Server_HTTP{Addr: randomPort},
 			Tcp:       &configspb.Server_TCP{Addr: randomPort},
 			Websocket: &configspb.Server_WebSocket{Addr: randomPort},
-			Kcp:       &configspb.Server_KCP{Addr: randomPort},
-			Udp:       &configspb.Server_UDP{Addr: randomPort},
+			// 战斗帧面（kcp/udp）**刻意不配**：网关不再监听它们（阶段 3 批次 5）。
 		},
 		Data: &configspb.Data{
 			Redis: &configspb.Data_Redis{Addrs: o.RedisAddrs},

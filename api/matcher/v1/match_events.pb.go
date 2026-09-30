@@ -10,6 +10,7 @@
 package matcherv1
 
 import (
+	v1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -141,13 +142,18 @@ func (PartyRosterReason) EnumDescriptor() ([]byte, []int) {
 
 // MatchStartedEvent 匹配成功（battle 已创建）。
 type MatchStartedEvent struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	MatchId        string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
-	BattleId       string                 `protobuf:"bytes,2,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
-	PlayerIds      []string               `protobuf:"bytes,3,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
-	BattleEndpoint string                 `protobuf:"bytes,4,opt,name=battle_endpoint,json=battleEndpoint,proto3" json:"battle_endpoint,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MatchId   string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	BattleId  string                 `protobuf:"bytes,2,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
+	PlayerIds []string               `protobuf:"bytes,3,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
+	// battle_tickets 是按人签发的入场票据名单（复用 battle 域的 BattleTicketEntry，
+	// 不另定义同形消息）；消费方扇出通知时按人取自己那张填入 battle_ticket。
+	BattleTickets []*v1.BattleTicketEntry `protobuf:"bytes,5,rep,name=battle_tickets,json=battleTickets,proto3" json:"battle_tickets,omitempty"`
+	// battle_endpoints 是接入层「传输面 → 地址」列表（来源是 battle 配置 edge_endpoints，
+	// matcher 只搬运；对所有人相同）。消费方按自身传输面取一个，缺该面即明确报错。
+	BattleEndpoints []*v1.EdgeEndpoint `protobuf:"bytes,6,rep,name=battle_endpoints,json=battleEndpoints,proto3" json:"battle_endpoints,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MatchStartedEvent) Reset() {
@@ -201,11 +207,18 @@ func (x *MatchStartedEvent) GetPlayerIds() []string {
 	return nil
 }
 
-func (x *MatchStartedEvent) GetBattleEndpoint() string {
+func (x *MatchStartedEvent) GetBattleTickets() []*v1.BattleTicketEntry {
 	if x != nil {
-		return x.BattleEndpoint
+		return x.BattleTickets
 	}
-	return ""
+	return nil
+}
+
+func (x *MatchStartedEvent) GetBattleEndpoints() []*v1.EdgeEndpoint {
+	if x != nil {
+		return x.BattleEndpoints
+	}
+	return nil
 }
 
 // MatchFailedEvent 匹配失败（超时/取消/异常）：单玩家 ticket 终态，
@@ -353,13 +366,14 @@ var File_api_matcher_v1_match_events_proto protoreflect.FileDescriptor
 const file_api_matcher_v1_match_events_proto_rawDesc = "" +
 	"\n" +
 	"!api/matcher/v1/match_events.proto\x12\n" +
-	"matcher.v1\"\x93\x01\n" +
+	"matcher.v1\x1a\"api/battle/v1/battle_service.proto\"\xf9\x01\n" +
 	"\x11MatchStartedEvent\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1b\n" +
 	"\tbattle_id\x18\x02 \x01(\tR\bbattleId\x12\x1d\n" +
 	"\n" +
-	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12'\n" +
-	"\x0fbattle_endpoint\x18\x04 \x01(\tR\x0ebattleEndpoint\"\x9e\x01\n" +
+	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12C\n" +
+	"\x0ebattle_tickets\x18\x05 \x03(\v2\x1c.battle.v1.BattleTicketEntryR\rbattleTickets\x12B\n" +
+	"\x10battle_endpoints\x18\x06 \x03(\v2\x17.battle.v1.EdgeEndpointR\x0fbattleEndpointsJ\x04\b\x04\x10\x05\"\x9e\x01\n" +
 	"\x10MatchFailedEvent\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1d\n" +
 	"\n" +
@@ -401,20 +415,24 @@ func file_api_matcher_v1_match_events_proto_rawDescGZIP() []byte {
 var file_api_matcher_v1_match_events_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_api_matcher_v1_match_events_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_api_matcher_v1_match_events_proto_goTypes = []any{
-	(MatchFailReason)(0),      // 0: matcher.v1.MatchFailReason
-	(PartyRosterReason)(0),    // 1: matcher.v1.PartyRosterReason
-	(*MatchStartedEvent)(nil), // 2: matcher.v1.MatchStartedEvent
-	(*MatchFailedEvent)(nil),  // 3: matcher.v1.MatchFailedEvent
-	(*PartyRosterEvent)(nil),  // 4: matcher.v1.PartyRosterEvent
+	(MatchFailReason)(0),         // 0: matcher.v1.MatchFailReason
+	(PartyRosterReason)(0),       // 1: matcher.v1.PartyRosterReason
+	(*MatchStartedEvent)(nil),    // 2: matcher.v1.MatchStartedEvent
+	(*MatchFailedEvent)(nil),     // 3: matcher.v1.MatchFailedEvent
+	(*PartyRosterEvent)(nil),     // 4: matcher.v1.PartyRosterEvent
+	(*v1.BattleTicketEntry)(nil), // 5: battle.v1.BattleTicketEntry
+	(*v1.EdgeEndpoint)(nil),      // 6: battle.v1.EdgeEndpoint
 }
 var file_api_matcher_v1_match_events_proto_depIdxs = []int32{
-	0, // 0: matcher.v1.MatchFailedEvent.reason:type_name -> matcher.v1.MatchFailReason
-	1, // 1: matcher.v1.PartyRosterEvent.reason:type_name -> matcher.v1.PartyRosterReason
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 0: matcher.v1.MatchStartedEvent.battle_tickets:type_name -> battle.v1.BattleTicketEntry
+	6, // 1: matcher.v1.MatchStartedEvent.battle_endpoints:type_name -> battle.v1.EdgeEndpoint
+	0, // 2: matcher.v1.MatchFailedEvent.reason:type_name -> matcher.v1.MatchFailReason
+	1, // 3: matcher.v1.PartyRosterEvent.reason:type_name -> matcher.v1.PartyRosterReason
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_api_matcher_v1_match_events_proto_init() }

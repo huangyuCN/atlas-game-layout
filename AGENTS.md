@@ -3,8 +3,10 @@
 ## 项目概述
 
 本仓库是面向**游戏单仓**的参考实现与脚手架模板（基于 [Atlas](https://github.com/huangyuCN/atlas)），
-以 **gateway / game / matcher / battle** 四服务覆盖 注册 → 登录 → 匹配 → 战斗 → 结算 的完整游戏闭环，
-内置五协议接入、actor 集群（仅托管方 game/battle 持有运行时；gateway/matcher 是调用方）、lockstep 帧同步、分布式会话与可编程装配（fx）。
+以 **gateway / game / matcher / battle / edge** 五服务覆盖 注册 → 登录 → 匹配 → 战斗 → 结算 的完整游戏闭环，
+内置业务面接入（网关 tcp/ws + http + grpc）、actor 集群（仅托管方 game/battle 持有运行时；gateway/matcher 是调用方）、
+lockstep 帧同步、分布式会话与可编程装配（fx）。**战斗帧不做网关透传**：成局后客户端凭「接入层地址 + 战斗票据」
+直连 `edge`，由 `edge` 按 `battle_id` 查目录选属主并 L4 转发到 battle 帧面（KCP/UDP/WS）。
 
 **模板使用方式**：
 - 用 `atlas new my-game -r https://github.com/huangyuCN/atlas-game-layout` 以本模板生成自己的项目；
@@ -60,6 +62,7 @@ Atlas 类型仅在 `pkg/` 装配层使用。`go.mod` 以本地 `replace` 指向 
   - **枚举优先（杜绝魔法值）**：协议与代码中语义有限的值（状态/原因/类型/级别等）**必须**定义为 proto enum 或 Go 常量集合，杜绝散落的魔法字符串/数字——客户端拿到的是自解释的枚举名（protojson 默认下发枚举名）。协议新增 reason/状态/类型字段一律用 enum 类型；发现存量魔法值，在改造到该处时一并枚举化。自由文本（如操作备注、错误描述）不在此列；纯路由键（如推送 operation 的消息完整名）是协议寻址键，不属魔法值。
 - **调用链追踪自检（跨模块/跨服务变更必须执行）**：修改跨模块、跨进程（如集群路由、消息投递、RPC 调用）的逻辑后，**必须**从入口点出发，跟踪完整的调用链并验证每一跳的关键假设（PID 格式、地址映射、消息编解码、端口/主题命名等）是否匹配。仅 `go build` 通过不足以证明链路正确。
   - **业务 op 的入口边界（2026-09-25 起）**：客户端 op 经**网关按注解路由表经 gRPC 调域 `rpc/` 平面的 Edge 面**（`grpc-edge` 端点）——**网关与 matcher 不持有 actor 集群运行时**，它们只是 actor 平面的调用方（`make check-deps` 机器化这条边界）；actor 平面（NATS 节点消息、跨节点投递）只服务**托管方 game/battle** 的节点内与跨节点投递。改客户端 op 链路时要跟踪的是「网关查路由表 → `opcall.DeliverRemote` → `opgrpc.NewInvoker` 按方法寻址 → 域 Edge 面接入层 → `opcall.PIDFrom` 还原 PID → actor 投递」；改集群互调才走 `actor/` 子包的 `ClusterClient`（按 PID 寻址）。两条路径的寻址方式（按方法 vs 按 PID）不可混用。
+  - **战斗帧直连的入口边界（2026-09-29 / 阶段 3 起）**：`battle.v1.BattleService` 的 CLIENT op（JoinBattle / SendFrameInput / SyncFrames）**不走网关**——成局推送带「接入层各面地址 + 本局票据」→ 客户端直连 `edge` → `edge` 用同一张票查 actor 目录定位属主 → L4 转发到 battle 帧面（KCP/UDP/WS）→ 帧槽验票得身份 → **本地投递**（`opcall.Deliver` + 本地 actor，按 PID）。网关既不监听 KCP/UDP，也不合并 battle 路由表：经网关发战斗 op 在帧引擎层**明确失败**（`TRANSPORT_NOT_FOUND`，不是静默丢弃）。改这条链路时要跟踪的是「hello 验票 → 目录属主 → `battle-frame` 实例端口 → 帧槽票据 → `frameops.Handler` 查表 → 本地投递」。
   - **公共抽象**：多处重复或可被清晰命名的逻辑，**必须**提取为包内/跨包的**公共函数**（或小型类型与方法），避免复制粘贴；提取时保持命名与现有代码风格一致。
   - **命名不得以包名开头**：包内导出的函数名、类型名、变量名杜绝以包名作为前缀。调用侧在使用时本身带有包名限定（如 `session.NewManager`），若函数名再以包名开头将形成冗余（`session.SessionNewManager`），且会触发 IDE 警告 "Name starts with the package name"。正确做法：`session.NewManager`（而非 `session.SessionNewManager`）。提交前可用 `make lint`（scripts/check-pkgname）自动检查全部导出标识符（函数/类型/变量/方法）是否以包名开头。
 - **代码注释语言**：所有手写代码注释必须使用中文，包括 Go doc 注释、行内注释、复杂逻辑说明和测试意图说明。允许保留英文的情况仅限专有协议字段、外部标准名、错误码、指标名、trace attribute 名、第三方 API 原文，以及 protobuf/OpenAPI/工具生成文件中的生成注释。
@@ -81,20 +84,23 @@ Atlas 类型仅在 `pkg/` 装配层使用。`go.mod` 以本地 `replace` 指向 
 
 ```
 atlas-game-layout/              ← Go module: github.com/huangyuCN/atlas-game-layout
-├── services/                   ← 四服务（每服务独立可运行）
-│   ├── gateway/                ← 接入层：五协议接入 + 分布式会话 + 挤下线 + 下行推送
+├── services/                   ← 五服务（每服务独立可运行）
+│   ├── gateway/                ← 业务面接入（tcp/ws + http + grpc）+ 分布式会话 + 挤下线 + 下行推送
 │   ├── game/                   ← 玩家业务（cow 聚合根 + 三级缓存）
-│   ├── matcher/                ← 撮合（matchmaker + 等级相近规则）
-│   └── battle/                 ← 战斗（actor + lockstep 会话 + 结算）
+│   ├── matcher/                ← 撮合（matchmaker + 等级相近规则 + 开局取票）
+│   ├── battle/                 ← 战斗（actor + lockstep 会话 + 直连帧面 KCP/UDP/WS + 结算）
+│   └── edge/                   ← 接入层（战斗帧 L4 转发：hello 验票 + 目录查属主 + 探活拆流）
 ├── api/                        ← 协议定义（proto + 生成代码），按服务分目录
 ├── lib/                        ← 代码级公共定义（无框架依赖）：consts / idgen / session / errors / gametime
 ├── pkg/                        ← 每服务公共装配与通用工具：actor / redis / nats / mongo / etcd / registry
 │                                / bootstrap（配置+日志+App 组装）/ fxkit（跨服务 fx 泛型）/ serverutil
+│                                / frameroute（帧 op 路由注册）/ matchpush（成局通知逐人构造）
 │                                / observability（追踪+指标）/ enumconv / metricstest / spanstest
 ├── protobuf/                   ← 内部配置 proto（configs/*）
 ├── deploy/                     ← 中间件 docker-compose
-├── scripts/e2e                 ← 双客户端闭环脚本（双形态）
-├── scripts/loadtest            ← 帧通道压测（KCP vs WS）
+├── scripts/e2e                 ← 双客户端闭环脚本（形态：dual/single/party/fault/kick/freeze/direct）
+├── scripts/loadtest            ← 帧通道压测（**当前不可用**：仍按旧「网关 KCP 战斗通道」驱动，
+│                                  待阶段 3 批次 8 改写为直连驱动，勿据此得出容量结论）
 ├── scripts/sdksession          ← SDK 会话协议接缝适配（模板生成描述符 → SessionProtocol）
 ├── test/e2e                    ← 进程内端到端测试（真中间件，不可达自动跳过）
 ├── third_party/                ← 第三方 proto 依赖
@@ -116,8 +122,9 @@ services/<svc>/
     ├── biz/         ← 业务逻辑（usecase + handler：实现生成的服务接口）
     ├── data/        ← 数据访问（repo/models）
     ├── infra/       ← 基础设施接入（如 redis/nats client 装配，gateway/battle 有）
-    ├── server/      ← 传输层服务注册（tcp/ws/kcp/grpc/http 等）
+    ├── server/      ← 传输层服务注册（业务 tcp/ws/grpc/http；battle 另有直连帧面 KCP/UDP/WS）
     ├── actor/       ← actor 集群接入（game/battle 有）
+    ├── resolver/    ← 后端解析（仅 edge：actor 目录 → 属主节点 → battle 帧面实例端口）
     └── session/     ← 分布式会话（仅 gateway）
 ```
 
@@ -129,8 +136,8 @@ services/<svc>/
   - **rpc 面**（`api/<域>/v1/rpc/`）：`<Service>Edge`（access=CLIENT，**客户端面**）与 `<Service>Internal`（access=INTERNAL，**服务面**）双接口 + 各自 `Register…`/`New…`（自带 `grpc.ServiceDesc`，**域 proto 不再需要 `--go-grpc_out`**）+ `<Service>Client`（服务面的类型化 gRPC 客户端，仅供跨服务调用）；
   - **opclient 面**（`api/<域>/v1/opclient/`）：会话通道 CLIENT op stub（Go/TS/C#，仅导出 access=CLIENT 方法；TS/C# 零 protobuf 运行时依赖）+ 推送 op 常量（消息级 `push` 注解生成，值 = 消息完整名）。
   - **信任边界**：Edge 与 Internal 注册到**两个独立 listener**（端口隔离即信任边界）；"把 Internal 实现注册到 Edge"在编译期即不成立（形参类型不同）。
-- 客户端 op 的投递统一走框架 `opcall`：生成的 `rpc/` 方法体为 `opcall.CallFromContext(ctx, rt, entry, req)` 一行组合（域内落地）；**网关侧为 `relay.Table` 查表 + `opcall.PlanFor`（发起者/观测头/去重键）+ `opcall.DeliverRemote`（跨服务调用的唯一投递入口，按路由条目的方法寻址）**，后端是 `opgrpc.NewInvoker(domainclient.Resolver)`（按 `grpc-edge` 端点拨域 Edge 面）；`opcall.Deliver`（按 PID 寻址）只用于**集群内已解析出 PID** 的投递。回执归一为 `opcall.ReplyOf`；
-- **注册 `rpc/` 平面到 listener 时必须挂 `opgrpc` 拦截器**（服务端 `opgrpc.UnaryServerInterceptor()`：metadata→ctx + 错误投影；客户端 `opgrpc.UnaryClientInterceptor()`：ctx→metadata），否则跨进程身份与 reason 判定不成立。域 `rpc/` 面的 listener 注册**已落地**：`services/{game,battle}/internal/server/server.go` 各把 `New<S>Edge`/`New<S>Internal` 注册到 `server.grpc` 的 edge/internal 两个 listener（端口隔离即信任边界）；
+- 客户端 op 的投递统一走框架 `opcall`：生成的 `rpc/` 方法体为 `opcall.CallFromContext(ctx, rt, entry, req)` 一行组合（域内落地）；**网关侧为 `relay.Table` 查表 + `opcall.PlanFor`（发起者/观测头/去重键）+ `opcall.DeliverRemote`（跨服务调用的唯一投递入口，按路由条目的方法寻址）**，后端是 `opgrpc.NewInvoker(domainclient.Resolver)`（按 `grpc-edge` 端点拨域 Edge 面）；`opcall.Deliver`（按 PID 寻址）只用于**已解析出 PID** 的投递——集群内互调，以及**战斗帧的本地投递**（帧面验票得身份 → `frameops.LocalDeliverer` → 本地战斗 actor）。回执归一为 `opcall.ReplyOf`；
+- **注册 `rpc/` 平面到 listener 时必须挂 `opgrpc` 拦截器**（服务端 `opgrpc.UnaryServerInterceptor()`：metadata→ctx + 错误投影；客户端 `opgrpc.UnaryClientInterceptor()`：ctx→metadata），否则跨进程身份与 reason 判定不成立。域 `rpc/` 面的 listener 注册**已落地**：`services/game/internal/server/server.go` 把 `New<Service>Edge`/`New<Service>Internal` 注册到 `server.grpc` 的 edge/internal 两个 listener（端口隔离即信任边界）；**battle 只注册 Internal 面**——阶段 3（2026-09-29）起战斗帧由客户端直连接入层再到 battle 帧面（`services/battle/internal/server/frames.go`），`server.grpc.edge_addr` 留空 = 该面不启用；
 - 每个 rpc 必须使用**独立请求消息**（actor 分发按消息类型路由，生成期即校验）；
 - 错误**上抛**（`return nil, err`，结构化 error 经集群 error 通道往返），**不包 `Ok:false` 回执**；
 - 本地消息（如定时快照 `tickSnapshot`）经 `core.WithLocalTell[T]` 类型路由注册；
@@ -147,14 +154,14 @@ services/<svc>/
 
 | 协议面 | 位置 | 特征 |
 |---|---|---|
-| 客户端 op（SDK 消费） | 域 proto 的 `service`，rpc 标 `access: ACCESS_CLIENT`（service 级默认 + rpc 级覆盖） | 身份来自会话/字段（`uid`/`uid_field`），**业务消息不含身份字段**；SDK 导出；**网关按注解路由表经 gRPC 调域 `rpc/` 平面的 Edge 面**（`grpc-edge` 端点），网关不持有 actor 集群运行时 |
+| 客户端 op（SDK 消费） | 域 proto 的 `service`，rpc 标 `access: ACCESS_CLIENT`（service 级默认 + rpc 级覆盖） | 身份来自会话/字段（`uid`/`uid_field`），**业务消息不含身份字段**；SDK 导出；**业务域**由网关按注解路由表经 gRPC 调域 `rpc/` 平面的 Edge 面（`grpc-edge` 端点），网关不持有 actor 集群运行时；**battle 域例外**：CLIENT op 由客户端凭 `battle_ticket` 直连接入层 → battle 帧面（KCP/UDP/WS），帧面验票后本地投递，网关不承载 |
 | 服务端内部方法 | 同一 service 的 rpc 标 `access: ACCESS_INTERNAL` | 服务间 gRPC（如 game 的 Login/Logout），客户端 stub 不导出 |
 | 推送（服务端 → 客户端） | 消息级注解 `option (atlas.route.v1.push) = true;` | 推送 op = 消息完整名；生成三语言常量；不进路由表 |
 | 会话生命周期 | `api/gateway/v1/session.proto`（**留在模板原地**，R13） | Gateway 自留：四传输生成桩 + `opclient` 会话 stub + 协议描述符（`SessionProtocolOps`/`Token`/`PlayerID`/`ExpiresAt`）；三 SDK 经 `SessionProtocol` 接缝接入（**P4 落地**）|
 | 管理面（P7） | `api/admin/**`（P7 新增） | 普通 gRPC 面（`--go-grpc_out`），只注册到 **internal listener** |
 
 - 改协议 → `make proto` → 产物落四类平面（根包消息 + 路由表 / `actor/` / `rpc/` / `opclient/`）；
-- 新增业务 op 流程：改 proto（补注解与限流/生命周期字段）→ `make proto` → 在 `services/<svc>/internal/actor/` 实现 actor 面方法 → 网关零代码（路由表驱动，客户端 op 由网关经 gRPC 转到该域 Edge 面）；
+- 新增业务 op 流程：改 proto（补注解与限流/生命周期字段）→ `make proto` → 在 `services/<svc>/internal/actor/` 实现 actor 面方法 → 网关零代码（路由表驱动，客户端 op 由网关经 gRPC 转到该域 Edge 面）。**战斗帧 op 例外**：它不进网关路由表，由 battle 侧帧面注册（`pkg/frameroute`，见 `services/battle/internal/server/frames.go`）并在字节面直连投递；新增战斗 op 时**不要**往网关白名单里加 battle；
 - 客户端 op 与 actor 分发**共用同一份 service/消息**（不再有 gateway ↔ 域 的镜像投影服务）；`gateway.v1` 只留会话协议与推送；
 - **手写代码与生成代码同目录**：生成文件有明确生成头（Code generated），不得手改；手写文件注释用中文。
 
@@ -215,7 +222,8 @@ fx.Module 化的可复用装配件与跨服务通用工具（**可复用的通�
 
 | 面 | 寻址来源 | 空值行为 |
 |----|----------|----------|
-| 网关转域 Edge 面（CLIENT op：`relay.Table` + `opcall.DeliverRemote`，按方法寻址） | 请求字段（`battle_id`）或会话身份，按注解 `uid`/`uid_field` | 一律拒绝（不回落） |
+| 网关转域 Edge 面（**业务域** CLIENT op：`relay.Table` + `opcall.DeliverRemote`，按方法寻址） | 请求字段（`battle_id`）或会话身份，按注解 `uid`/`uid_field` | 一律拒绝（不回落） |
+| battle 直连帧面（**战斗帧** CLIENT op：`frameops.Handler` 查表 + `opcall.Deliver`，按 PID 寻址） | 帧面从帧槽 `battle_ticket` 解出 `player_id`（发起者），目标仍是请求字段 `battle_id`（`uid_field`） | 票无效/过期/非参战即拒（结构化 reason）；解析不到 PID 即拒 |
 | `rpc/` 平面的 Edge/Internal 面（gRPC 接入） | 同上（`opcall.PIDFrom` 从 metadata/请求解析） | 拒绝 |
 | `actor/` 平面的 `<Service>ClusterClient`（集群内互调） | 调用方显式给 PID（`battle:<battleID>`，由 `idgen.Battle()` 分配） | 拒绝 |
 
@@ -243,7 +251,7 @@ actor 平面（NATS 节点消息、广播主题、etcd 归属目录）**与注�
 
 - **六协议的启动参数全部在 `protobuf/configs/server.proto` 罗列**：gRPC（`stream_timeout`/`max_recv_msg_size`/`reflection`/`metadata`/`admin`）、HTTP（`path_prefix`/`strict_slash`/`max_request_body`）、TCP（`no_delay`/读写缓冲/`keep_alive`/`pool_size`/`idle_timeout`/`write_timeout`/`max_conns`/`max_body_size`/`tls`）、WebSocket（`path`/`pool_size`/`buffer_size`/`read_limit`/`subprotocols`/`tls` 等）、KCP（`idle_timeout`/`write_timeout`/`max_conns`）、UDP（`pool_size`/`idle_timeout`/`max_peers`）；两端共有 `network`/`addr`/`timeout`/`tls`（KCP/UDP 无 TLS）。函数值项（`WithCheckOrigin`/`WithCodec`/`WithMiddleware`）配置表达不了，不进配置面。
 - 配置 → 选项 → 构造只此一份：`pkg/serverutil` 的 `*Options` + `*Server`（`HTTPOptions`/`GRPCOptions`/`TCPOptions`/`WSOptions`/`KCPOptions`/`UDPOptions` 与对应构造器），服务侧只写「构造 + 注册 handler」。
-- **网关的接入协议按节启用**：`server.tcp`/`server.websocket`/`server.kcp`/`server.udp` 不配该节 = 该协议不启用（不监听端口、不注册 handler），模板按部署形态只暴露需要的通道。
+- **接入协议按节启用**：`server.tcp`/`server.websocket` 不配该节 = 该协议不启用（不监听端口、不注册 handler）。**网关只剩 tcp/ws 业务面**（阶段 3 批次 5 起删除 `server.kcp`/`server.udp`）；`server.kcp`/`server.udp`/`server.websocket` 三节现在是 **battle 的直连帧面**（`services/battle/internal/server/frames.go`），供接入层转发与客户端直连，参数映射同一份 `pkg/serverutil`。
 - **空值 = 交给底层默认**：字符串为空、数值为 0、`optional` 字段未设置，都不追加对应选项——避免「不配就变行为」与「配了等于没配」。`strict_slash` 因此必须是 `optional bool`（底层默认 true，proto3 的 bool 默认 false）；`network` 是 `optional Server.Network` 枚举（语义有限值不散落字符串，映射见 `pkg/serverutil.networkOf`）。
 - 时长字段一律字符串（`config.ParseDuration`，如 `30s`），解析失败在启动期报错；`registry.ttl` 同格式。
 - 服务端构造函数返回具体类型（`*atlashttp.Server` / `*atlasgrpc.Server`），fx 图必须用 `fx.As(new(transport.Server))` 才能按接口进 `servers` 组。
@@ -284,10 +292,10 @@ actor 平面（NATS 节点消息、广播主题、etcd 归属目录）**与注�
 | 目录 | 职责 |
 |------|------|
 | `deploy/docker-compose/` | 中间件编排（etcd 12379 / redis 16379 / nats 14222 / mongo 27017）|
-| `scripts/e2e/` | 双客户端闭环验证（`make e2e`；dual/single 形态）|
-| `scripts/loadtest/` | 帧通道压测（`go run ./scripts/loadtest ...`）|
+| `scripts/e2e/` | 双客户端闭环验证（`make e2e`；形态 dual/single/party/fault/kick/freeze/direct）|
+| `scripts/loadtest/` | 帧通道压测（`go run ./scripts/loadtest ...`）——**当前不可用**：仍按旧「网关 KCP 战斗通道」驱动（帧发到网关），而网关已删除 KCP/UDP 与战斗 op 路由；待阶段 3 批次 8 改写为直连驱动后再用 |
 | `scripts/sdksession/` | SDK 会话协议接缝适配：会话 op 名/凭据提取/被挤下线识别取自生成描述符，`test/e2e` 与两个脚本共用一份（未注入接缝时 SDK 会话全部报 `ErrNoSessionProtocol`）|
-| `test/e2e/` | 进程内端到端测试（真中间件，不可达自动 Skipf 跳过）|
+| `test/e2e/` | 进程内端到端测试（真中间件，不可达自动 Skipf 跳过）；战斗帧面相关：`framedirect_test.go`（KCP/UDP 直连）、`gateway_battle_op_test.go`（网关拒绝战斗 op + 不监听 KCP/UDP）、`battle_offline_test.go`（掉线超时判负）|
 | `deploy/observability/` | 观测栈与**指标命名表/面板位**（M7 预留位，见该目录 `README.md`）|
 | `docs/superpowers/specs/2026-09-24-v2-reserved-slots.md` | 统一设计 v2 的 M3–M7 预留位登记（只留位置，不写实现）|
 
@@ -295,19 +303,23 @@ actor 平面（NATS 节点消息、广播主题、etcd 归属目录）**与注�
 
 ```bash
 # 构建 / 运行
-make build                # 构建四服务到 ./bin（自动注入 git 版本/提交/构建时间）
+make build                # 构建五服务到 ./bin（自动注入 git 版本/提交/构建时间）
+make build-battle         # 构建单个服务（同样走 -ldflags 版本注入）
 make build VERSION=v1.0.0 # 显式指定版本（CI 打 tag 时用；见 .github/workflows/release.yml）
-make run-all              # 一键起四服务（前台交错输出，Ctrl-C 全部退出）
+make run-all              # 一键起五服务（前台交错输出，Ctrl-C 全部退出）
 make compose              # 起中间件（etcd/redis/nats/mongo）
 
 # 测试
 go test ./...             # 单元测试（内存/内嵌中间件）
 go test ./test/e2e/       # 端到端（需真中间件；不可达自动跳过）
-make lint                 # 命名规范检查（导出标识符不得以包名开头）
+make lint                 # 四查：包名前缀 + Go doc 注释 + 重复代码 + 依赖边界
 
-# e2e 闭环 / 压测
-make e2e                          # TCP 业务 + KCP 战斗（dual 形态）
-make e2e -e E2E_MODE=single       # WS 单通道
+# e2e 闭环
+make e2e                          # TCP 业务通道 + KCP 直连帧面（dual 形态）
+make e2e -e E2E_MODE=single       # WS 业务通道 + WS 直连帧面
+make e2e -e E2E_MODE=direct       # 不经接入层，直连 battle 帧端口（-transport kcp|udp|ws）
+
+# 压测（**当前不可用**，待阶段 3 批次 8 改写为直连驱动）
 go run ./scripts/loadtest -transport kcp -inputs 500 -window 5s
 
 # Proto 代码生成

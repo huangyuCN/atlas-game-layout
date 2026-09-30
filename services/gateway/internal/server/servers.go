@@ -6,9 +6,7 @@ import (
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/serverutil"
 	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
-	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
-	udpt "github.com/huangyuCN/atlas/transport/udp"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
 )
 
@@ -17,29 +15,21 @@ func NewTCPServer(cfg *conf.Bootstrap) (*tcpt.Server, error) {
 	return serverutil.TCPServer(cfg.GetServer().GetTcp())
 }
 
-// NewWSServer 构造 WebSocket 服务端（单通道形态同时承载业务与战斗协议；
-// 启动参数全部来自 server.websocket 配置）。
+// NewWSServer 构造 WebSocket 业务通道服务端（启动参数全部来自 server.websocket 配置）。
+// 战斗帧不走本服务：客户端凭 battle_ticket 直连接入层 → battle 帧面。
 func NewWSServer(cfg *conf.Bootstrap) (*wst.Server, error) {
 	return serverutil.WSServer(cfg.GetServer().GetWebsocket())
 }
 
-// NewKCPServer 构造 KCP 战斗通道服务端（启动参数全部来自 server.kcp 配置）。
-func NewKCPServer(cfg *conf.Bootstrap) (*kcpt.Server, error) {
-	return serverutil.KCPServer(cfg.GetServer().GetKcp())
-}
-
-// NewUDPServer 构造 UDP 战斗通道服务端（启动参数全部来自 server.udp 配置）。
-func NewUDPServer(cfg *conf.Bootstrap) (*udpt.Server, error) {
-	return serverutil.UDPServer(cfg.GetServer().GetUdp())
-}
-
-// RegisterGatewayHandlers 将会话生命周期与透传引擎注册到各协议 Server：
+// RegisterGatewayHandlers 将会话生命周期与透传引擎注册到业务协议 Server：
 // 会话接口（gateway.v1.Session，Gateway 自留）以 meteredSession 打点装饰注册 +
 // 透传路由表（域 service 的 access=CLIENT op，运行时注册，注解驱动）；
-// 四传输同构（连接即会话，UDP/KCP 按帧槽验证）。
 // 协议可选：仅对配置声明了的协议注册（conf 协议节 nil = 该协议不启用，
 // Server 不注册 handler 也不进启停组——对外不可用，模板可按需裁剪）。
-func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server, g *Gateway) error {
+//
+// 战斗帧面（KCP/UDP）与战斗 op 自阶段 3 批次 5 起不在此注册：网关只承载业务 op，
+// 经网关发战斗 op 会在帧引擎层明确失败（TRANSPORT_NOT_FOUND，不是静默丢弃）。
+func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *wst.Server, g *Gateway) error {
 	// 会话接口统一打点装饰（自留接口与透传共用 gateway_requests_total）。
 	sess := newMeteredSession(g, g.meter)
 	if cfg.TCPEnabled() {
@@ -56,22 +46,6 @@ func RegisterGatewayHandlers(cfg *conf.Bootstrap, tcpSrv *tcpt.Server, wsSrv *ws
 		}
 		if err := RegisterRelayWSServer(wsSrv, g.Relay()); err != nil {
 			return fmt.Errorf("server: 注册 WS 透传路由失败: %w", err)
-		}
-	}
-	if cfg.KCPEnabled() {
-		if err := gatewayv1.RegisterSessionKCPServer(kcpSrv, sess); err != nil {
-			return fmt.Errorf("server: 注册 KCP 会话协议失败: %w", err)
-		}
-		if err := RegisterRelayKCPServer(kcpSrv, g.Relay()); err != nil {
-			return fmt.Errorf("server: 注册 KCP 透传路由失败: %w", err)
-		}
-	}
-	if cfg.UDPEnabled() {
-		if err := gatewayv1.RegisterSessionUDPServer(udpSrv, sess); err != nil {
-			return fmt.Errorf("server: 注册 UDP 会话协议失败: %w", err)
-		}
-		if err := RegisterRelayUDPServer(udpSrv, g.Relay()); err != nil {
-			return fmt.Errorf("server: 注册 UDP 透传路由失败: %w", err)
 		}
 	}
 	return nil

@@ -53,12 +53,10 @@ type meteredSession struct {
 	meter metrics.Collector
 }
 
-// 编译期断言：装饰器满足四协议的会话 Server 接口（方法集与 Gateway 一致）。
+// 编译期断言：装饰器满足业务协议的会话 Server 接口（方法集与 Gateway 一致）。
 var (
 	_ gatewayv1.SessionTCPServer = (*meteredSession)(nil)
 	_ gatewayv1.SessionWSServer  = (*meteredSession)(nil)
-	_ gatewayv1.SessionKCPServer = (*meteredSession)(nil)
-	_ gatewayv1.SessionUDPServer = (*meteredSession)(nil)
 )
 
 // newMeteredSession 包装会话接口（meter 为 nil 时打点自动短路）。

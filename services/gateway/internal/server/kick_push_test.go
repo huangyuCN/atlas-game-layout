@@ -1,16 +1,19 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
 	gatewayv1opclient "github.com/huangyuCN/atlas-game-layout/api/gateway/v1/opclient"
 	"testing"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
+	"github.com/huangyuCN/atlas/contrib/edge/ticket"
 	"github.com/huangyuCN/atlas/transport"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -139,11 +142,36 @@ func TestMatchStartedNotifyRelay(t *testing.T) {
 	env := newGWEnv(t, "gw-a", mr, natsURL)
 	env.login(t, 1, "p-1")
 
-	// 发布成局事件（matcher 侧形态）。
+	// 每位参战玩家一张**自己的**票（票即身份凭据：通知必须逐人构造，绝不得群发同一份）。
+	key := []byte("0123456789abcdef0123456789abcdef")
+	now := time.Now()
+	ticketA, err := ticket.Encode(ticket.Ticket{
+		Version: ticket.Version1, KID: 1, PlayerID: "p-1", BattleID: "b-1",
+		IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+	}, key)
+	if err != nil {
+		t.Fatalf("签票 A: %v", err)
+	}
+	ticketB, err := ticket.Encode(ticket.Ticket{
+		Version: ticket.Version1, KID: 1, PlayerID: "p-2", BattleID: "b-1",
+		IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+	}, key)
+	if err != nil {
+		t.Fatalf("签票 B: %v", err)
+	}
+
+	// 发布成局事件（matcher 侧形态：接入层面→地址列表 + 逐人票据名单）。
 	payload, err := protojson.Marshal(&matcherv1.MatchStartedEvent{
 		MatchId:   "m-1",
 		BattleId:  "b-1",
 		PlayerIds: []string{"p-1", "p-2"},
+		BattleEndpoints: []*battlev1.EdgeEndpoint{
+			{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_WS, Address: "127.0.0.1:7100"},
+		},
+		BattleTickets: []*battlev1.BattleTicketEntry{
+			{PlayerId: "p-1", Ticket: ticketA},
+			{PlayerId: "p-2", Ticket: ticketB},
+		},
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -154,19 +182,35 @@ func TestMatchStartedNotifyRelay(t *testing.T) {
 		t.Fatalf("发布成局事件: %v", err)
 	}
 
-	// 参战玩家收到开局通知（含对局 ID、battle ID 与参战名单）。
+	// 参战玩家收到开局通知（含对局 ID、battle ID、参战名单、接入层地址与他自己的票）。
 	if !waitFor(2*time.Second, func() bool {
 		return hasPush(env.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify)
 	}) {
 		t.Fatalf("未收到开局通知: %+v", env.push.snapshot())
 	}
 	pushes := env.push.snapshot()
+	raw := pushes[len(pushes)-1].payload
 	var n gamev1.MatchStartedNotify
-	if err := protojson.Unmarshal(pushes[len(pushes)-1].payload, &n); err != nil {
+	if err := protojson.Unmarshal(raw, &n); err != nil {
 		t.Fatalf("开局通知解码: %v", err)
 	}
 	if n.GetBattleId() != "b-1" || n.GetMatchId() != "m-1" || len(n.GetPlayerIds()) != 2 {
 		t.Fatalf("开局通知不符: %+v", &n)
+	}
+	if got := n.GetEndpoints(); len(got) != 1 ||
+		got[0].GetTransport() != battlev1.EdgeTransport_EDGE_TRANSPORT_WS || got[0].GetAddress() != "127.0.0.1:7100" {
+		t.Fatalf("接入层面列表不符: %v", got)
+	}
+	// 收到的必须是自己那张票（可解出自己的身份），且**全文不得出现别人的票**。
+	if !bytes.Equal(n.GetBattleTicket(), ticketA) {
+		t.Fatalf("通知未携带本人票据: got %d 字节", len(n.GetBattleTicket()))
+	}
+	decoded, err := ticket.Decode(n.GetBattleTicket(), key)
+	if err != nil || decoded.PlayerID != "p-1" || decoded.BattleID != "b-1" {
+		t.Fatalf("本人票据解码不符: %+v err=%v", decoded, err)
+	}
+	if bytes.Contains(raw, ticketB) {
+		t.Fatal("通知里出现了其他玩家的票据（凭据泄露）")
 	}
 }
 

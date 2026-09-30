@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
@@ -159,18 +160,24 @@ func (m *fakeMapper) GetBattle(_ context.Context, playerID string) (string, erro
 	return m.battles[playerID], nil
 }
 
-// fakeSink 是成局观察方的记录实现（发布与开局调用分开记录）。
+// fakeSink 是成局观察方的记录实现（发布/开局调用/取票分开记录，seq 记录调用顺序）。
 type fakeSink struct {
 	mu        sync.Mutex
+	seq       []string
 	published []startCall
 	started   []startCall
 	failed    []failCall
 	rosters   []rosterCall
+	issued    []string
+	// tickets 是取票回执桩（nil 用最小回执）；issueErr 非空时取票失败。
+	tickets  *battlev1.IssueEntryTicketReply
+	issueErr error
 }
 
 type startCall struct {
 	battleID, matchID string
 	playerIDs         []string
+	tickets           *battlev1.IssueEntryTicketReply
 }
 
 type failCall struct {
@@ -178,10 +185,11 @@ type failCall struct {
 	reason   matcherv1.MatchFailReason
 }
 
-func (s *fakeSink) PublishStarted(_ context.Context, battleID, matchID string, playerIDs []string) error {
+func (s *fakeSink) PublishStarted(_ context.Context, battleID, matchID string, playerIDs []string, tickets *battlev1.IssueEntryTicketReply) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.published = append(s.published, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
+	s.seq = append(s.seq, "publish")
+	s.published = append(s.published, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs, tickets: tickets})
 	return nil
 }
 
@@ -195,8 +203,26 @@ func (s *fakeSink) PublishFailed(_ context.Context, ticketID string, _ []string,
 func (s *fakeSink) Start(_ context.Context, battleID, matchID string, playerIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.seq = append(s.seq, "start")
 	s.started = append(s.started, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
 	return nil
+}
+
+// IssueEntryTicket 实现 biz.BattleTicketIssuer：记录取票调用并回放桩回执。
+func (s *fakeSink) IssueEntryTicket(_ context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq = append(s.seq, "issue")
+	s.issued = append(s.issued, battleID)
+	if s.issueErr != nil {
+		return nil, s.issueErr
+	}
+	if s.tickets != nil {
+		return s.tickets, nil
+	}
+	return &battlev1.IssueEntryTicketReply{Endpoints: []*battlev1.EdgeEndpoint{
+		{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_WS, Address: "edge.test:7100"},
+	}}, nil
 }
 
 // PublishRoster 实现 biz.PartyRosterPublisher：名册变更事件记录（party 域测试断言用）。

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	battleactor "github.com/huangyuCN/atlas-game-layout/services/battle/internal/actor"
 	"github.com/huangyuCN/atlas/namespace"
 )
@@ -18,6 +20,9 @@ func TestNewBootstrap(t *testing.T) {
 		MongoURI:      "mongodb://127.0.0.1:27017",
 		MongoDB:       "battle_it",
 		Namespace:     "p5-a",
+		TicketKey:     "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+		TicketTTL:     "45s",
+		EdgeEndpoints: testEdgeEndpoints(),
 	}
 	cfg, err := newBootstrap(opts)
 	if err != nil {
@@ -47,15 +52,62 @@ func TestNewBootstrap(t *testing.T) {
 	if got := cfg.GetData().GetMongo().GetDatabase(); got != "battle_it" {
 		t.Errorf("data.mongo.database = %q", got)
 	}
-	// 进程内形态两个 gRPC 面都显式写随机端口（空 = 不启用该面，不能靠留空）。
-	if got := cfg.GetServer().GetGrpc().GetEdgeAddr(); got != "127.0.0.1:0" {
-		t.Errorf("server.grpc.edge_addr = %q, 期望缺省 127.0.0.1:0", got)
+	// 进程内形态只启用 internal gRPC 面（随机端口）；edge 面自阶段 3 批次 5 起停用
+	// （客户端战斗 op 直连帧面，不再经网关转 Edge 面）——留空即不监听，这是刻意的破坏性切换。
+	if got := cfg.GetServer().GetGrpc().GetEdgeAddr(); got != "" {
+		t.Errorf("server.grpc.edge_addr = %q, 期望留空（Edge 面不再启用）", got)
 	}
 	if got := cfg.GetServer().GetGrpc().GetInternalAddr(); got != "127.0.0.1:0" {
 		t.Errorf("server.grpc.internal_addr = %q, 期望缺省 127.0.0.1:0", got)
 	}
 	if got := cfg.GetServer().GetHttp().GetAddr(); got != "127.0.0.1:0" {
 		t.Errorf("server.http.addr = %q, 期望缺省 127.0.0.1:0", got)
+	}
+	// 出票三件随进程内形态装配进 bootstrap.battle 段（校验在 app.newActorConfig）。
+	if got := cfg.GetBattle().GetTicketKey(); got != opts.TicketKey {
+		t.Errorf("battle.ticket_key = %q, 期望 %q", got, opts.TicketKey)
+	}
+	if got := cfg.GetBattle().GetTicketTtl(); got != "45s" {
+		t.Errorf("battle.ticket_ttl = %q, 期望 45s", got)
+	}
+	if got := cfg.GetBattle().GetEdgeEndpoints(); len(got) != len(opts.EdgeEndpoints) {
+		t.Errorf("battle.edge_endpoints 面数 = %d, 期望 %d", len(got), len(opts.EdgeEndpoints))
+	} else {
+		for i, want := range opts.EdgeEndpoints {
+			if got[i].GetTransport() != want.GetTransport() || got[i].GetAddress() != want.GetAddress() {
+				t.Errorf("battle.edge_endpoints[%d] = %s/%s, 期望 %s/%s", i,
+					got[i].GetTransport(), got[i].GetAddress(), want.GetTransport(), want.GetAddress())
+			}
+		}
+	}
+}
+
+// testEdgeEndpoints 返回三面接入层地址（ws/kcp/udp；单地址无法让 SDK 知道该拨哪个端口）。
+func testEdgeEndpoints() []*battlev1.EdgeEndpoint {
+	return []*battlev1.EdgeEndpoint{
+		{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_WS, Address: "edge.example.com:7100"},
+		{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_KCP, Address: "edge.example.com:7101"},
+		{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_UDP, Address: "edge.example.com:7102"},
+	}
+}
+
+// TestApplyOverrideKeepsTicketConfig 验证战斗参数覆盖只动战斗参数：
+// 票据密钥/TTL/接入层面列表由配置决定，不得被 e2e 的参数覆盖抹掉。
+func TestApplyOverrideKeepsTicketConfig(t *testing.T) {
+	base := battleactor.DefaultConfig()
+	base.TicketKey = []byte("0123456789abcdef0123456789abcdef")
+	base.TicketTTL = 45 * time.Second
+	base.EdgeEndpoints = testEdgeEndpoints()
+
+	got := applyOverride(base, &BattleConfig{TickInterval: 7, TrackLen: 8, MaxFrames: 9, SnapshotEvery: 10})
+	if got.TickInterval != 7 || got.TrackLen != 8 || got.MaxFrames != 9 || got.SnapshotEvery != 10 {
+		t.Errorf("战斗参数未被覆盖: %+v", got)
+	}
+	if len(got.TicketKey) != 32 || got.TicketTTL != 45*time.Second || len(got.EdgeEndpoints) != 3 {
+		t.Errorf("票据三件被覆盖抹掉: %+v", got)
+	}
+	if same := applyOverride(base, nil); same.TicketKey == nil {
+		t.Errorf("nil 覆盖应原样透传基础配置: %+v", same)
 	}
 }
 
@@ -104,13 +156,12 @@ func assertNamespaceFaces(t *testing.T, got, want string) {
 }
 
 // TestBattleConfigRoundTrip 验证 BattleConfig 与 actor.Config 的镜像映射无丢失
-// （两类型字段一一对应，是 e2e 注入自定义战斗参数的唯一通道）。
+// （两类型的四个战斗参数字段一一对应，是 e2e 注入自定义战斗参数的唯一通道）。
 func TestBattleConfigRoundTrip(t *testing.T) {
 	in := BattleConfig{TickInterval: 42, TrackLen: 25, MaxFrames: 7, SnapshotEvery: 3}
-	got := in.toActor()
-	want := battleactor.Config{TickInterval: 42, TrackLen: 25, MaxFrames: 7, SnapshotEvery: 3}
-	if got != want {
-		t.Fatalf("toActor() = %+v, 期望 %+v", got, want)
+	got := applyOverride(battleactor.Config{}, &in)
+	if got.TickInterval != 42 || got.TrackLen != 25 || got.MaxFrames != 7 || got.SnapshotEvery != 3 {
+		t.Fatalf("applyOverride() = %+v, 期望四个战斗参数被覆盖", got)
 	}
 
 	// DefaultBattleConfig 应完整填充默认参数（非零）。

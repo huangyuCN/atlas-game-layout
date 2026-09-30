@@ -1,6 +1,6 @@
 // Package app 是 gateway 服务的唯一装配之家：
 // Module 列出全部组件清单（infra → 会话 → 域服务客户端 → server 分层），
-// 进程形态（cmd/main + atlas App 驱动启停）与进程内形态
+// 进程形态（cmd/main + atlas.App 驱动启停）与进程内形态
 // （assemble 经 bootstrap.Boot 驱动启停）共用同一张依赖图。
 package app
 
@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 
-	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gamev1rpc "github.com/huangyuCN/atlas-game-layout/api/game/v1/rpc"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
@@ -25,9 +24,7 @@ import (
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
 	atlashttp "github.com/huangyuCN/atlas/transport/http"
-	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
-	udpt "github.com/huangyuCN/atlas/transport/udp"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
 	natsgo "github.com/nats-io/nats.go"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -37,7 +34,7 @@ import (
 // Module 是 gateway 服务的完整装配清单。
 // 依赖来源（*conf.Bootstrap / *clientv3.Client）由驱动方供给。
 //
-// 五协议 Server 一律进 group:"servers"，两种形态（进程形态 cmd/main、
+// 业务协议 Server 一律进 group:"servers"，两种形态（进程形态 cmd/main、
 // 进程内形态 services/gateway/assemble）都由 atlas.App 启停与注册。
 var Module = fx.Module("gateway",
 	// 中间件/过滤器默认链（业务可用 fx.Decorate 追加自己的）。
@@ -52,12 +49,10 @@ var Module = fx.Module("gateway",
 		fxkit.Topics[*conf.Bootstrap], // 业务 topic 命名空间（与 actor 平面同源）
 		fxkit.NewPublisher,            // 业务事件发布入口（连接 + 命名空间收口）
 		NewNatsConn,
-		// ── server：五协议传输层 + gRPC edge 面构造（启停归属驱动方）──
+		// ── server：业务协议传输层 + gRPC edge 面构造（启停归属驱动方）──
 		server.NewHTTPServer,
 		server.NewTCPServer,
 		server.NewWSServer,
-		server.NewKCPServer,
-		server.NewUDPServer,
 		// gRPC 双面：本轮只启用 edge 面（暂不注册域服务），internal 面留空不启用；
 		// fx.Out 自带 servers 组标签，未启用的面为 nil。
 		server.NewGRPCServers,
@@ -77,29 +72,30 @@ var Module = fx.Module("gateway",
 	),
 )
 
-// serverSet 把五协议 Server 汇入 servers 组（供 atlas.App 统一启停）：
+// serverSet 把业务协议 Server 汇入 servers 组（供 atlas.App 统一启停）：
 // 具体类型同时直供 newGateway 装配（fx 组注解会把结果移出类型空间，
 // 故用聚合器双路提供；组值统一为 transport.Server 接口形态）。
+//
+// 战斗帧面（KCP/UDP）不在网关：客户端凭 battle_ticket 直连接入层 → battle 帧面
+// （阶段 3 批次 5 的破坏性切换，旧承载路径已删除）。
 type serverSet struct {
 	fx.Out
 
 	HTTP transport.Server `group:"servers"`
-	// 业务四协议按配置可选：未启用的协议为 nil（fx 值组不允许 optional，
+	// 业务协议按配置可选：未启用的协议为 nil（fx 值组不允许 optional，
 	// 故由 pkg/bootstrap.activeServers 在消费侧过滤——nil 进 atlas.App 会 panic）。
 	TCP transport.Server `group:"servers"`
 	WS  transport.Server `group:"servers"`
-	KCP transport.Server `group:"servers"`
-	UDP transport.Server `group:"servers"`
 }
 
-// newServerSet 聚合五协议 Server 到 servers 组与嵌入式子组。
-// 业务四协议（TCP/WS/KCP/UDP）按配置可选：conf 协议节 nil 时不进启停组
+// newServerSet 聚合业务协议 Server 到 servers 组与嵌入式子组。
+// 两类协议（TCP/WS）按配置可选：conf 协议节 nil 时不进启停组
 // （Server 已构造但不被 Start——不监听端口；handler 注册同样跳过，对外不可用），
 // 模板可按部署形态只暴露需要的协议；HTTP（管理面/健康检查）始终启用。
 func newServerSet(
 	cfg *conf.Bootstrap,
 	httpSrv *atlashttp.Server,
-	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
+	tcpSrv *tcpt.Server, wsSrv *wst.Server,
 ) serverSet {
 	set := serverSet{HTTP: httpSrv}
 	if cfg.TCPEnabled() {
@@ -108,16 +104,10 @@ func newServerSet(
 	if cfg.WebSocketEnabled() {
 		set.WS = wsSrv
 	}
-	if cfg.KCPEnabled() {
-		set.KCP = kcpSrv
-	}
-	if cfg.UDPEnabled() {
-		set.UDP = udpSrv
-	}
 	return set
 }
 
-// newGateway 装配统一 handler 并注册到各协议 Server。
+// newGateway 装配统一 handler 并注册到各业务协议 Server。
 func newGateway(
 	cfg *conf.Bootstrap,
 	sess *session.Manager,
@@ -126,7 +116,7 @@ func newGateway(
 	meter metrics.Collector,
 	nc *natsgo.Conn,
 	pub *pkgnats.Publisher,
-	tcpSrv *tcpt.Server, wsSrv *wst.Server, kcpSrv *kcpt.Server, udpSrv *udpt.Server,
+	tcpSrv *tcpt.Server, wsSrv *wst.Server,
 ) (*server.Gateway, error) {
 	instanceID := ""
 	if r := cfg.GetRuntime(); r != nil {
@@ -135,16 +125,17 @@ func newGateway(
 	// 透传引擎：合并各域生成的注解路由表（operation → actor 寻址规则），
 	// 业务 op 按条目寻址经 Edge 面（gRPC）投递到域服务；新增域 op 时 gateway 无需改代码
 	// （表由 protoc 生成，access=CLIENT 的方法注册传输路由）。
-	table, err := relay.Merge(gamev1.PlayerServiceRouteTable, battlev1.BattleServiceRouteTable)
+	//
+	// **服务白名单在这里显式声明**：battle 的 CLIENT op 自阶段 3 批次 5 起不再经网关
+	// （客户端直连接入层 → battle 帧面），故 BattleServiceRouteTable 不参与合并——
+	// 经网关发战斗 op 在帧引擎层明确失败，不再是静默的"表里没有"。
+	table, err := relay.Merge(gamev1.PlayerServiceRouteTable)
 	if err != nil {
 		return nil, fmt.Errorf("gateway: 透传路由表合并失败: %w", err)
 	}
-	g := server.NewGateway(instanceID, table, sess, inv, players, meter, nc, pub, tcpSrv, wsSrv, kcpSrv, udpSrv,
+	g := server.NewGateway(instanceID, table, sess, inv, players, meter, nc, pub, tcpSrv, wsSrv,
 		server.NewVersionGate(cfg.GetRuntime()))
-	// 通道绑定副作用（Gateway 会话模型的领域知识，装配声明——不进注解协议）：
-	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道（battle 帧推送寻址）。
-	g.Relay().WithChannelBinding("/battle.v1.BattleService/JoinBattle", relay.Slot(session.ChannelBattle))
-	if err := server.RegisterGatewayHandlers(cfg, tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
+	if err := server.RegisterGatewayHandlers(cfg, tcpSrv, wsSrv, g); err != nil {
 		return nil, err
 	}
 	return g, nil

@@ -36,6 +36,8 @@ func TestGraphStaticValidation(t *testing.T) {
 
 // TestNewServerSetTrimsDisabledProtocols 验证协议裁剪：未声明（server.<proto> 缺失）的协议
 // 不进 servers 值组——nil 进组会让 atlas.App 对着空服务端调 Start 而 panic。
+// 战斗帧面（KCP/UDP）不在网关：serverSet 里根本没有这两个字段（阶段 3 批次 5 删除），
+// 故"网关照旧监听 9003/9004"在类型层即不成立。
 func TestNewServerSetTrimsDisabledProtocols(t *testing.T) {
 	cfg := &conf.Bootstrap{Server: &configspb.Server{
 		Http:      &configspb.Server_HTTP{Addr: "127.0.0.1:0"},
@@ -54,20 +56,18 @@ func TestNewServerSetTrimsDisabledProtocols(t *testing.T) {
 	if err != nil {
 		t.Fatalf("构造 WebSocket 服务端失败: %v", err)
 	}
-	kcpSrv, err := serverutil.KCPServer(cfg.GetServer().GetKcp())
-	if err != nil {
-		t.Fatalf("构造 KCP 服务端失败: %v", err)
-	}
-	udpSrv, err := serverutil.UDPServer(cfg.GetServer().GetUdp())
-	if err != nil {
-		t.Fatalf("构造 UDP 服务端失败: %v", err)
-	}
 
-	set := newServerSet(cfg, httpSrv, tcpSrv, wsSrv, kcpSrv, udpSrv)
+	set := newServerSet(cfg, httpSrv, tcpSrv, wsSrv)
 	if set.HTTP == nil || set.TCP == nil || set.WS == nil {
 		t.Fatalf("已声明协议应进启停组: %+v", set)
 	}
-	if set.KCP != nil || set.UDP != nil {
-		t.Fatalf("未声明协议不应进启停组: kcp=%v udp=%v", set.KCP, set.UDP)
+	// 未声明协议（WS 缺失的形态）不进启停组。
+	bare := &conf.Bootstrap{Server: &configspb.Server{
+		Http: &configspb.Server_HTTP{Addr: "127.0.0.1:0"},
+		Tcp:  &configspb.Server_TCP{Addr: "127.0.0.1:0"},
+	}}
+	trimmed := newServerSet(bare, httpSrv, tcpSrv, wsSrv)
+	if trimmed.WS != nil {
+		t.Fatalf("未声明的 WebSocket 不应进启停组: %+v", trimmed)
 	}
 }

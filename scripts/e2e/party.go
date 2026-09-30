@@ -86,14 +86,14 @@ func partyCancelPath(ctx context.Context, c *player) error {
 	return nil
 }
 
-// connectN 建立 n 个客户端（奇数下标走单通道 WS，偶数走双通道，覆盖两形态）。
+// connectN 建立 n 个客户端（奇数下标走 WS 形态，偶数走 TCP 形态，覆盖两条业务通道）。
 func connectN(n int, a addrs) (ps []*player, err error) {
 	for i := 0; i < n; i++ {
 		var p *player
 		if i%2 == 1 {
-			p, err = newSinglePlayer(a.ws) // 与 [2] 形态对齐：奇数下标走单通道（示例覆盖）
+			p, err = newSinglePlayer(a.ws, a.battleWS) // 与 [2] 形态对齐：奇数下标走 WS 业务通道
 		} else {
-			p, err = newDualPlayer(a.tcp, a.kcp)
+			p, err = newDualPlayer(a.tcp, a.battleKCP)
 		}
 		if err != nil {
 			return nil, err

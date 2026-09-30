@@ -6,12 +6,22 @@ package matcher.v1;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/matcher/v1;matcherv1";
 
+import "api/battle/v1/battle_service.proto";
+
 // MatchStartedEvent 匹配成功（battle 已创建）。
 message MatchStartedEvent {
   string match_id = 1;
   string battle_id = 2;
   repeated string player_ids = 3;
-  string battle_endpoint = 4;
+  // 4 曾是 string battle_endpoint（单个接入层地址）：接入层分面监听后改为按传输面
+  // 下发列表（battle_endpoints），旧号保留禁用，避免误用导致语义漂移。
+  reserved 4;
+  // battle_tickets 是按人签发的入场票据名单（复用 battle 域的 BattleTicketEntry，
+  // 不另定义同形消息）；消费方扇出通知时按人取自己那张填入 battle_ticket。
+  repeated battle.v1.BattleTicketEntry battle_tickets = 5;
+  // battle_endpoints 是接入层「传输面 → 地址」列表（来源是 battle 配置 edge_endpoints，
+  // matcher 只搬运；对所有人相同）。消费方按自身传输面取一个，缺该面即明确报错。
+  repeated battle.v1.EdgeEndpoint battle_endpoints = 6;
 }
 
 // MatchFailReason 是匹配失败原因（客户端可读枚举，对齐状态机终态与处置来源）。

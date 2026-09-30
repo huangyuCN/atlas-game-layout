@@ -3,6 +3,7 @@
 // 序列化语义（protojson）：字段名 lowerCamelCase、int64/uint64 与 bytes 为 string、
 // 零值省略 → 全部字段可缺省；枚举以枚举名（字符串）下发。
 
+import type { EdgeEndpoint } from "../../../battle/v1/opclient/battle_service_pb.js";
 import type { PlayerSummary } from "../../../common/v1/opclient/common_pb.js";
 import type { MatchFailReason, PartyRosterReason } from "../../../matcher/v1/opclient/match_events_pb.js";
 import type { MatchState } from "../../../matcher/v1/opclient/matcher_pb.js";
@@ -118,7 +119,8 @@ export interface MatchStartedNotify {
   matchId?: string; // game.v1.MatchStartedNotify.match_id
   battleId?: string; // game.v1.MatchStartedNotify.battle_id
   playerIds?: string[]; // game.v1.MatchStartedNotify.player_ids
-  endpoint?: string; // game.v1.MatchStartedNotify.endpoint
+  battleTicket?: string // base64; // game.v1.MatchStartedNotify.battle_ticket
+  endpoints?: EdgeEndpoint[]; // game.v1.MatchStartedNotify.endpoints
 }
 
 export interface MatchFailedNotify {

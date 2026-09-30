@@ -1,17 +1,16 @@
 // Package infra 提供 battle 服务的外部依赖装配：
-// mongo（结算落库）、nats（帧广播 + 结算事件）、actor 集群运行时。
+// mongo（结算落库）、nats（结算事件）、actor 集群运行时。
+// 战斗域通知（帧广播/战斗结束）不走 nats：经帧引擎直连推送（见 biz.BattlePusher）。
 package infra
 
 import (
 	"context"
 	"fmt"
-	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
-	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	natsgo "github.com/nats-io/nats.go"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -19,43 +18,13 @@ import (
 // settledTopicSuffix 是结算事件主题后缀（atlas.<ns>.event.battle.settled）。
 const settledTopicSuffix = "battle.settled"
 
-// NewNatsConn 装配 NATS 连接（帧广播 + 结算事件）。
+// NewNatsConn 装配 NATS 连接（结算事件发布）。
 func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 	url := ""
 	if d := cfg.GetData(); d != nil && d.GetNats() != nil {
 		url = d.GetNats().GetUrl()
 	}
 	return pkgnats.Connect(pkgnats.Options{URL: url, Name: "battle"})
-}
-
-// NatsBattleNotifier 是战斗下行通知实现（nats → gateway → 客户端）。
-type NatsBattleNotifier struct {
-	pub *pkgnats.Publisher
-}
-
-// NewNatsBattleNotifier 构造下行通知器。
-func NewNatsBattleNotifier(pub *pkgnats.Publisher) *NatsBattleNotifier {
-	return &NatsBattleNotifier{pub: pub}
-}
-
-// PublishFrame 实现 biz.BattleNotifier：
-// 以 atlas.<ns>.push.<playerID> 信封（type=FrameBroadcast，op 为消息完整名）下发一帧。
-func (f *NatsBattleNotifier) PublishFrame(ctx context.Context, playerID, battleID string, frame *locksteppb.LockstepFrame) error {
-	payload, err := protojson.Marshal(&battlev1.FrameBroadcast{BattleId: battleID, Frame: frame})
-	if err != nil {
-		return fmt.Errorf("infra: 帧广播编码失败: %w", err)
-	}
-	return f.pub.PublishEnvelope(ctx, playerID, battlev1opclient.BattleServicePushOps.FrameBroadcast, payload)
-}
-
-// PublishEnd 实现 biz.BattleNotifier：
-// 以 atlas.<ns>.push.<playerID> 信封（type=BattleEndNotify，op 为消息完整名）下发战斗结束通知。
-func (f *NatsBattleNotifier) PublishEnd(ctx context.Context, playerID, battleID, winner string) error {
-	payload, err := protojson.Marshal(&battlev1.BattleEndNotify{BattleId: battleID, WinnerPlayerId: winner})
-	if err != nil {
-		return fmt.Errorf("infra: 结束通知编码失败: %w", err)
-	}
-	return f.pub.PublishEnvelope(ctx, playerID, battlev1opclient.BattleServicePushOps.BattleEndNotify, payload)
 }
 
 // NatsSettlePublisher 是结算事件发布实现。
@@ -78,7 +47,4 @@ func (p *NatsSettlePublisher) PublishSettled(ctx context.Context, ev *battlev1.B
 }
 
 // 静态保证实现接口。
-var (
-	_ biz.BattleNotifier  = (*NatsBattleNotifier)(nil)
-	_ biz.SettlePublisher = (*NatsSettlePublisher)(nil)
-)
+var _ biz.SettlePublisher = (*NatsSettlePublisher)(nil)

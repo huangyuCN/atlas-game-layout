@@ -130,13 +130,15 @@ func NewNatsEventPublisher(pub *pkgnats.Publisher) *NatsEventPublisher {
 	return &NatsEventPublisher{pub: pub}
 }
 
-// PublishStarted 实现 biz.MatchEventPublisher（主题 atlas.<ns>.event.match.started）。
-func (p *NatsEventPublisher) PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string) error {
+// PublishStarted 实现 biz.MatchEventPublisher（主题 atlas.<ns>.event.match.started）：
+// 事件带上 battle 回执的接入层面列表与逐人票据（matcher 只搬运，不重组票、不改地址）。
+func (p *NatsEventPublisher) PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string, tickets *battlev1.IssueEntryTicketReply) error {
 	payload, err := protojson.Marshal(&matcherv1.MatchStartedEvent{
-		MatchId:        matchID,
-		BattleId:       battleID,
-		PlayerIds:      playerIDs,
-		BattleEndpoint: "", // M7 battle 服务接入后填充
+		MatchId:         matchID,
+		BattleId:        battleID,
+		PlayerIds:       playerIDs,
+		BattleEndpoints: tickets.GetEndpoints(),
+		BattleTickets:   tickets.GetTickets(),
 	})
 	if err != nil {
 		return fmt.Errorf("infra: 成局事件编码失败: %w", err)
@@ -197,6 +199,16 @@ func (s *BattleGRPCStarter) Start(ctx context.Context, battleID, matchID string,
 	return nil
 }
 
+// IssueEntryTicket 实现 biz.BattleTicketIssuer：经类型化 gRPC 客户端按对局取票
+// （IssueEntryTicketReq.BattleId 即寻址字段；出票在 battle actor 内完成，matcher 不持密钥）。
+func (s *BattleGRPCStarter) IssueEntryTicket(ctx context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
+	reply, err := s.cli.IssueEntryTicket(ctx, &battlev1.IssueEntryTicketReq{BattleId: battleID})
+	if err != nil {
+		return nil, fmt.Errorf("infra: 取票调用失败: %w", err)
+	}
+	return reply, nil
+}
+
 // NewMatchmakerRuntime 装配 matchmaker redis 运行时
 // （等级相近灵活组队规则集 + 本地 Placement）。
 func NewMatchmakerRuntime(cli *pkredis.Client) (*matchredis.Runtime, error) {
@@ -242,24 +254,27 @@ func (LocalPlacement) Place(_ context.Context, m matchmaker.Match) (matchmaker.A
 	}, nil
 }
 
-// Sink 是成局观察方的默认组合（nats 发布 + actor 开局调用）。
+// Sink 是成局观察方的默认组合（nats 发布 + battle 开局调用与取票）。
 // server 装配与可编程装配共用同一实现。
 type Sink struct {
 	publisher biz.MatchEventPublisher
 	starter   biz.BattleStarter
+	issuer    biz.BattleTicketIssuer
 }
 
-// NewSink 构造默认成局观察方。
+// NewSink 构造默认成局观察方（开局与取票都由 battle internal 面客户端承担）。
 func NewSink(pub *pkgnats.Publisher, cli battlev1rpc.BattleServiceClient) *Sink {
+	battle := NewBattleGRPCStarter(cli)
 	return &Sink{
 		publisher: NewNatsEventPublisher(pub),
-		starter:   NewBattleGRPCStarter(cli),
+		starter:   battle,
+		issuer:    battle,
 	}
 }
 
-// PublishStarted 实现 biz.MatchEventSink：转发成局事件到内部发布器。
-func (s *Sink) PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string) error {
-	return s.publisher.PublishStarted(ctx, battleID, matchID, playerIDs)
+// PublishStarted 实现 biz.MatchEventSink：转发成局事件（含 battle 回执的票据）到内部发布器。
+func (s *Sink) PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string, tickets *battlev1.IssueEntryTicketReply) error {
+	return s.publisher.PublishStarted(ctx, battleID, matchID, playerIDs, tickets)
 }
 
 // PublishFailed 实现 biz.MatchEventSink：转发失败事件到内部发布器。
@@ -270,6 +285,11 @@ func (s *Sink) PublishFailed(ctx context.Context, ticketID string, playerIDs []s
 // Start 实现 biz.BattleStarter：转发开局调用到内部 starter。
 func (s *Sink) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
 	return s.starter.Start(ctx, battleID, matchID, playerIDs)
+}
+
+// IssueEntryTicket 实现 biz.BattleTicketIssuer：转发取票调用到内部取票端口。
+func (s *Sink) IssueEntryTicket(ctx context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
+	return s.issuer.IssueEntryTicket(ctx, battleID)
 }
 
 // RedisSettleDeduper 是成局结算去重的 redis 实现（SETNX 幂等，跨实例安全）。
@@ -296,6 +316,7 @@ var (
 	_ biz.PlayerTicketMapper    = (*RedisPlayerTicketMapper)(nil)
 	_ biz.MatchEventPublisher   = (*NatsEventPublisher)(nil)
 	_ biz.BattleStarter         = (*BattleGRPCStarter)(nil)
+	_ biz.BattleTicketIssuer    = (*BattleGRPCStarter)(nil)
 	_ biz.MatchEventSink        = (*Sink)(nil)
 	_ biz.MatchSettleDeduper    = (*RedisSettleDeduper)(nil)
 	_ matchmaker.PlacementQueue = LocalPlacement{}

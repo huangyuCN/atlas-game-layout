@@ -1,8 +1,9 @@
 # atlas-game-layout
 
-基于 [Atlas](https://github.com/huangyuCN/atlas) 的游戏单仓模板：**gateway / game / matcher / battle** 四服务，
-覆盖 注册 → 登录 → 匹配 → 战斗 → 结算 的完整游戏闭环，内置五协议接入、actor 集群、lockstep 帧同步、
-分布式会话与可编程装配。
+基于 [Atlas](https://github.com/huangyuCN/atlas) 的游戏单仓模板：**gateway / game / matcher / battle / edge** 五服务，
+覆盖 注册 → 登录 → 匹配 → 战斗 → 结算 的完整游戏闭环，内置业务面接入（tcp/ws + http + grpc）、actor 集群、
+lockstep 帧同步、分布式会话与可编程装配。**战斗帧不经网关**：成局后客户端凭「接入层地址 + 战斗票据」
+直连接入层（`services/edge`），由接入层 L4 转发到 battle 帧面（KCP/UDP/WS）。
 
 ## 三步开箱
 
@@ -10,17 +11,18 @@
 # 1. 用 Atlas CLI 生成项目（以本模板生成自己的仓库）
 atlas new my-game -r https://github.com/huangyuCN/atlas-game-layout
 
-# 2. 起中间件并一键运行四服务（前台交错输出，Ctrl-C 全部退出）
+# 2. 起中间件并一键运行五服务（前台交错输出，Ctrl-C 全部退出）
 cd my-game
 make compose     # Docker：etcd 12379 / redis 16379 / nats 14222 / mongo 27017
-make run-all     # 四服务按 services/*/configs/config.yaml 端口启动
+make run-all     # 五服务按 services/*/configs/config.yaml 端口启动
 
-# 3. 另开终端跑 e2e 闭环脚本（双客户端双形态）
-make e2e                          # TCP 业务 + KCP 战斗（双通道）
-make e2e -e E2E_MODE=single       # WS 单通道
+# 3. 另开终端跑 e2e 闭环脚本（双客户端多形态）
+make e2e                          # TCP 业务通道 + KCP 直连帧面
+make e2e -e E2E_MODE=single       # WS 业务通道 + WS 直连帧面
 ```
 
-通过标准：脚本以 `e2e 闭环通过（dual/single 形态）` 结尾，非零退出即失败。
+通过标准：脚本以 `e2e 闭环通过（<形态> 形态）` 结尾，非零退出即失败；形态可选
+`dual / single / party / fault / kick / freeze / direct`（`direct` 不经接入层、直连 battle 帧端口）。
 
 ## 目录结构
 
@@ -29,17 +31,18 @@ api/            # 协议定义（proto + 生成代码），按服务分目录
 lib/            # 代码级公共定义：consts / idgen / session / errors / gametime
 pkg/            # 每服务公共装配（fx.Module 化）：actor / redis / nats / mongo / etcd / registry /
                 # bootstrap（配置加载+日志+App 组装） / fxkit（跨服务 fx 泛型提供器） / serverutil
-services/       # 四服务：
-                #   gateway  —— 五协议接入 + 分布式会话 + 挤下线 + 下行推送
+services/       # 五服务：
+                #   gateway  —— 业务面接入（tcp/ws + http + grpc）+ 分布式会话 + 挤下线 + 下行推送
                 #   game     —— 玩家业务（cow 聚合根 + 三级缓存）
-                #   matcher  —— 撮合（matchmaker + 等级相近规则）
-                #   battle   —— 战斗（actor + lockstep 会话 + 结算）
+                #   matcher  —— 撮合（matchmaker + 等级相近规则 + 出票）
+                #   battle   —— 战斗（actor + lockstep 会话 + 直连帧面 KCP/UDP/WS + 结算）
+                #   edge     —— 接入层（战斗帧 L4 转发：hello 验票 + 目录查属主 + 探活拆流）
                 # 每服务统一「唯一装配之家」形态：internal/app 集中列出全部组件清单，
                 # 进程形态（atlas.App）与嵌入式形态（assemble，fx 编程式启动）共用同一张
                 # 依赖图；internal/{conf,infra,biz,data,server} 只做各自职责，不含装配逻辑。
 deploy/         # 中间件 docker-compose
-scripts/e2e     # 双客户端闭环脚本（双形态）
-scripts/loadtest# 帧通道压测（KCP vs WS）
+scripts/e2e     # 双客户端闭环脚本（多形态：dual/single/party/fault/kick/freeze/direct）
+scripts/loadtest# 帧通道压测（KCP vs WS；**当前不可用**，见下方说明）
 test/e2e        # 进程内端到端测试（真中间件，不可达自动跳过）
 ```
 
@@ -82,15 +85,40 @@ test/e2e        # 进程内端到端测试（真中间件，不可达自动跳�
 > proto 工具链：`make proto-tools` 优先收集 `ATLAS_BIN` 现成插件（`atlas upgrade` 安装目录），
 > 缺插件且存在 Atlas 源码时回退源码构建；均不可用时按报错指引执行 `atlas upgrade`。
 
-## 帧通道压测
+## 战斗帧直连（阶段 3）
+
+登录与业务 op 走网关；成局后战斗帧**不再经网关**：
+
+1. matcher 成局 → 调 battle 的 `IssueEntryTicket`（INTERNAL）逐人签票（AEAD 票据绑 `player_id` + `battle_id`）；
+2. 网关按人下发 `MatchStartedNotify{ endpoints[], battle_ticket }`——`endpoints` 是**接入层各传输面地址**
+   （battle 配置 `edge_endpoints` 是唯一来源），票是收件玩家自己那张（**逐人一份，不群发**）；
+3. 客户端按自己的传输面取地址 → hello 带票 → 接入层验票后按 `battle_id` 查 actor 目录选属主节点 →
+   L4 转发到该节点的 battle 帧面（KCP/UDP/WS，端口由 `battle-frame` 实例元数据给出，不写死）；
+4. battle 帧面在帧会话槽（`Atlas-Frame-Session`）验同一张票 → 身份进 ctx → 路由表 → **本地** actor 投递。
+
+两条硬约束：
+
+- 接入层与 battle 共持同一把 32 字节票据密钥（`edge.ticket_key` / `battle.ticket_key`，**缺失即启动失败**）；
+- 数据报面（KCP/UDP）没有关闭握手，掉线只能靠帧面空闲读超时发现：`server.kcp`/`server.udp` 的
+  `idle_timeout` 缺省取 `battle.offline_timeout` 的 1/3（15s → 5s），显式配置必须小于 `offline_timeout`，
+  否则**装配期启动失败**。跨机部署还要配 `battle.frame_advertise_host`（本节点帧端口对外可达主机），
+  它与 `edge_endpoints`（给客户端拨的接入层地址）语义不同，详见 `docs/config.md`。
+
+## 帧通道压测（**当前不可用，待批次 8 改写为直连驱动**）
+
+> ⚠️ 阶段 3 批次 5 起战斗帧不再经网关：`scripts/loadtest` 仍按旧的「网关 KCP 战斗通道」驱动
+> （SDK dual 形态把帧发到网关），而网关已删除 KCP/UDP 监听与战斗 op 路由，**照下面的命令跑必然失败**。
+> 在它按「经接入层直连 battle 帧面」改写前（归阶段 3 批次 8），不要引用它的任何数字。
 
 ```bash
-go run ./scripts/loadtest -transport kcp -inputs 500 -window 5s   # KCP 战斗通道
-go run ./scripts/loadtest -transport ws  -inputs 500 -window 5s   # WS 战斗通道
+# 以下命令当前不可用，保留原貌以便与批次 8 的改写对照
+go run ./scripts/loadtest -transport kcp -inputs 500 -window 5s   # 旧：网关 KCP 战斗通道
+go run ./scripts/loadtest -transport ws  -inputs 500 -window 5s   # 旧：网关 WS 战斗通道
 ```
 
 输出 `SUMMARY` JSON：帧输入往返延迟（P50/P95/P99、吞吐）与帧广播下行（fps、延迟）。
-基线归档见 Atlas 仓库 `docs/superpowers/benchmarks/game-template-frame-channel-*.md`。
+基线归档见 Atlas 仓库 `docs/superpowers/benchmarks/game-template-frame-channel-*.md`
+（2026-08-15 归档，口径为阶段 3 **前**的网关帧通道，与新链路不可直接对比）。
 
 ## 测试与 CI
 

@@ -46,6 +46,10 @@ enum ErrorReason {
   BattleNotFound = 3001 [(atlas.errors.code) = 404]; // 战斗不存在
   BattleFull = 3002 [(atlas.errors.code) = 409];     // 战斗已满
   BattleEnded = 3003 [(atlas.errors.code) = 409];    // 战斗已结束
+  // 直连入场票据（阶段 3 批次 2）：battle 帧槽验票失败的两个 reason——帧有回执，故回结构化错误；
+  // 接入层拒绝走 L4 断开 + 指标标签（不进 proto，见规格 §4 错误语义分层）。
+  BattleTicketInvalid = 3004 [(atlas.errors.code) = 401]; // 直连票据无效（会话槽缺失/密文非法/被篡改）
+  BattleTicketExpired = 3005 [(atlas.errors.code) = 401]; // 直连票据已过期
 
   // 通用
   Internal = 9001 [(atlas.errors.code) = 500]; // 服务内部错误

@@ -8,6 +8,7 @@
 
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using Atlas.Battle.V1;
 
 namespace Atlas.Matcher.V1;
 
@@ -44,8 +45,11 @@ public sealed class MatchStartedEvent
     [JsonPropertyName("playerIds")]
     public List<string>? PlayerIds { get; set; }
 
-    [JsonPropertyName("battleEndpoint")]
-    public string? BattleEndpoint { get; set; }
+    [JsonPropertyName("battleTickets")]
+    public List<BattleTicketEntry>? BattleTickets { get; set; }
+
+    [JsonPropertyName("battleEndpoints")]
+    public List<EdgeEndpoint>? BattleEndpoints { get; set; }
 
 }
 

@@ -15,22 +15,22 @@ func TestSessionMetricsBindUnbind(t *testing.T) {
 	m := newTestManager(t, "gw-1")
 	m.SetMeter(rec)
 
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "t1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "t1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
-	if got := rec.CounterValue(MetricSessionBinds, "channel", string(ChannelBiz)); got != 1 {
-		t.Fatalf("biz 绑定计数 = %v, 期望 1", got)
+	if got := rec.CounterValue(MetricSessionBinds); got != 1 {
+		t.Fatalf("绑定计数 = %v, 期望 1", got)
 	}
 	if got, ok := rec.GaugeValue(MetricSessions); !ok || got != 1 {
 		t.Fatalf("sessions gauge = %v,%v, 期望 1,true", got, ok)
 	}
 
-	// 同一玩家绑定战斗通道：会话数不变（多通道聚合），战斗通道绑定计数 +1。
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 2, kind: "kcp"}).conn(), ChannelBattle, "t1"); err != nil {
-		t.Fatalf("Bind battle: %v", err)
+	// 同一玩家重绑新连接（挤下线/重连形态）：会话数不变（一玩家一会话），绑定计数 +1。
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 2, kind: "tcp"}).conn(), "t1"); err != nil {
+		t.Fatalf("重绑: %v", err)
 	}
-	if got := rec.CounterValue(MetricSessionBinds, "channel", string(ChannelBattle)); got != 1 {
-		t.Fatalf("battle 绑定计数 = %v, 期望 1", got)
+	if got := rec.CounterValue(MetricSessionBinds); got != 2 {
+		t.Fatalf("重绑后绑定计数 = %v, 期望 2", got)
 	}
 	if got, _ := rec.GaugeValue(MetricSessions); got != 1 {
 		t.Fatalf("二次绑定后 sessions gauge = %v, 期望 1", got)
@@ -51,7 +51,7 @@ func TestSessionMetricsSweep(t *testing.T) {
 	m := newTestManagerWithTTL(t, "gw-1", 20*time.Millisecond)
 	m.SetMeter(rec)
 
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).connWithRef("conn:1"), ChannelBiz, "t1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).connWithRef("conn:1"), "t1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if _, ok := m.PlayerByToken("t1"); !ok {
@@ -80,7 +80,7 @@ func TestSessionMetricsSweep(t *testing.T) {
 func TestSessionMetricsNoopMeter(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t, "gw-1")
-	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), ChannelBiz, "t1"); err != nil {
+	if _, err := m.Bind(ctx, "p-1", (&fakeConn{id: 1, kind: "tcp"}).conn(), "t1"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	m.Unbind(ctx, "p-1", 1)

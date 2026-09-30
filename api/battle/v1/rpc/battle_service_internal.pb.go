@@ -18,6 +18,7 @@ import (
 type BattleServiceInternal interface {
 	Create(ctx context.Context, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
 	GetState(ctx context.Context, req *v1.GetStateReq) (*v1.GetStateReply, error)
+	IssueEntryTicket(ctx context.Context, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error)
 }
 
 // RegisterBattleServiceInternal 把服务面（access=INTERNAL，服务间经 gRPC 调用）注册到 gRPC server。
@@ -33,6 +34,7 @@ var battleServiceInternalDesc = grpc.ServiceDesc{
 	Methods: []grpc.MethodDesc{
 		{MethodName: "Create", Handler: handleBattleServiceInternalCreate},
 		{MethodName: "GetState", Handler: handleBattleServiceInternalGetState},
+		{MethodName: "IssueEntryTicket", Handler: handleBattleServiceInternalIssueEntryTicket},
 	},
 	Metadata: "api/battle/v1/battle_service.proto",
 }
@@ -67,6 +69,21 @@ func handleBattleServiceInternalGetState(srv any, ctx context.Context, dec func(
 	})
 }
 
+// handleBattleServiceInternalIssueEntryTicket 解包请求并经拦截器调用本面实现。
+func handleBattleServiceInternalIssueEntryTicket(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(v1.IssueEntryTicketReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BattleServiceInternal).IssueEntryTicket(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/battle.v1.BattleService/IssueEntryTicket"}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(BattleServiceInternal).IssueEntryTicket(ctx, req.(*v1.IssueEntryTicketReq))
+	})
+}
+
 // NewBattleServiceInternal 返回 actor 支撑的服务面（access=INTERNAL，服务间经 gRPC 调用）默认实现：
 // 按路由条目解析目标 PID（会话寻址取 ctx 身份、字段寻址取请求字段）并投递。
 // opts 是装配期注入的投递选项（观测头、追踪注入等），每次调用随消息附加。
@@ -98,4 +115,14 @@ func (a *battleServiceInternal) GetState(ctx context.Context, req *v1.GetStateRe
 		return nil, err
 	}
 	return opcall.Reply[*v1.GetStateReply](entry, rep)
+}
+
+// IssueEntryTicket 投递到目标 actor 并归一化回执。
+func (a *battleServiceInternal) IssueEntryTicket(ctx context.Context, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error) {
+	entry := v1.BattleServiceRouteTable["/battle.v1.BattleService/IssueEntryTicket"]
+	rep, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...)
+	if err != nil {
+		return nil, err
+	}
+	return opcall.Reply[*v1.IssueEntryTicketReply](entry, rep)
 }

@@ -123,6 +123,28 @@ var BattleServiceRouteTable = relay.Table{
 			return r.BattleId, r.BattleId != ""
 		},
 	},
+	"/battle.v1.BattleService/IssueEntryTicket": {
+		Operation:   "/battle.v1.BattleService/IssueEntryTicket",
+		Service:     "battle.v1.BattleService",
+		Method:      "IssueEntryTicket",
+		Actor:       "battle",
+		Access:      relay.AccessInternal,
+		UidSource:   relay.UidField,
+		IsTell:      false,
+		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+		NewRequest:  func() proto.Message { return new(IssueEntryTicketReq) },
+		NewReply:    func() proto.Message { return new(IssueEntryTicketReply) },
+		UidOf: func(req any) (string, bool) {
+			r, ok := req.(*IssueEntryTicketReq)
+			if !ok {
+				return "", false
+			}
+			return r.BattleId, r.BattleId != ""
+		},
+	},
 }
 
 // BattleServiceLifecycleTable 是 BattleService 的 op 生命周期表（含 INTERNAL op；供能力协商与废弃提示）。
@@ -167,6 +189,15 @@ var BattleServiceLifecycleTable = relay.LifecycleTable{
 		Operation:   "/battle.v1.BattleService/GetState",
 		Service:     "battle.v1.BattleService",
 		Method:      "GetState",
+		Access:      relay.AccessInternal,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/battle.v1.BattleService/IssueEntryTicket": {
+		Operation:   "/battle.v1.BattleService/IssueEntryTicket",
+		Service:     "battle.v1.BattleService",
+		Method:      "IssueEntryTicket",
 		Access:      relay.AccessInternal,
 		Since:       "",
 		Deprecated:  "",

@@ -9,6 +9,7 @@ import (
 
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
+	"github.com/huangyuCN/atlas-game-layout/pkg/matchpush"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -69,25 +70,39 @@ func (g *Gateway) relayEvent(operation string, data []byte,
 	}
 }
 
-// onMatchStarted 处理成局事件：向参战玩家推送开局通知
-// （MatchStartedNotify：对局 ID + battle ID + 参战名单 + 实例端点，规格 §7）。
+// onMatchStarted 处理成局事件：向参战玩家推送开局通知（MatchStartedNotify：
+// 对局 ID + battle ID + 参战名单 + 接入层地址 + **该玩家自己的**入场票据）。
+//
+// 为什么逐人构造而不是群发：battle_ticket 是直连入场凭据（持有即可在该局冒充该玩家），
+// 群发同一份 payload 等于把全房间的身份凭据互相泄露；故遍历名单逐人构造
+// （matchpush.NotifyFor）并逐人下发。无票者跳过——绝不下发空票：空票连不上接入层，
+// 只会把「服务端没出票」伪装成「客户端连不上」，比不下发更难排查。
 func (g *Gateway) onMatchStarted(_ string, data []byte) {
-	g.relayEvent(gamev1opclient.PlayerServicePushOps.MatchStartedNotify, data, func(_ context.Context) ([]string, []byte, bool) {
-		var ev matcherv1.MatchStartedEvent
-		if err := protojson.Unmarshal(data, &ev); err != nil {
-			return nil, nil, false
+	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	defer cancel()
+	var ev matcherv1.MatchStartedEvent
+	if err := protojson.Unmarshal(data, &ev); err != nil {
+		return // 事件总线消息允许丢失，恢复路径见查询接口
+	}
+	sent := 0
+	for _, pid := range ev.GetPlayerIds() {
+		notify, ok := matchpush.NotifyFor(&ev, pid)
+		if !ok {
+			continue
 		}
-		payload, err := protojson.Marshal(&gamev1.MatchStartedNotify{
-			MatchId:   ev.GetMatchId(),
-			BattleId:  ev.GetBattleId(),
-			PlayerIds: ev.GetPlayerIds(),
-			Endpoint:  ev.GetBattleEndpoint(),
-		})
+		payload, err := protojson.Marshal(notify)
 		if err != nil {
-			return nil, nil, false
+			continue
 		}
-		return ev.GetPlayerIds(), payload, true
-	})
+		if err := g.pub.PublishEnvelope(ctx, pid, gamev1opclient.PlayerServicePushOps.MatchStartedNotify, payload); err == nil {
+			sent++
+		}
+	}
+	if sent == 0 && len(ev.GetPlayerIds()) > 0 {
+		// 全名单都拿不到票：几乎必然是出票或配置问题，留痕（否则只会表现为"客户端连不上"）。
+		atlaslog.Error("gateway: 成局通知全名单无票，未下发任何通知",
+			"match", ev.GetMatchId(), "battle", ev.GetBattleId(), "players", len(ev.GetPlayerIds()))
+	}
 }
 
 // onMatchFailed 处理失败事件：向玩家推送失败/取消通知（MatchFailedNotify）。
@@ -165,7 +180,7 @@ func (g *Gateway) onKickNotice(_ string, data []byte) {
 	// 清理本地会话；redis 路由已被新实例覆盖，Unbind 的属主校验会跳过删除。
 	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
 	defer cancel()
-	if conn := sess.Biz; conn != nil {
+	if conn := sess.Conn; conn != nil {
 		g.sess.Unbind(ctx, kn.PlayerID, conn.ID)
 	}
 }

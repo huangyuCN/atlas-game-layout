@@ -13,6 +13,7 @@ import (
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas/contrib/actor/cluster"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
+	"github.com/huangyuCN/atlas/contrib/actor/rollout"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
 	etcdlocator "github.com/huangyuCN/atlas/contrib/locator/etcd"
 	"github.com/huangyuCN/atlas/metrics"
@@ -59,6 +60,10 @@ type Runtime struct {
 	ec      *clientv3.Client
 	nodeID  string // actor 节点 ID（= 注册实例 ID，见 Options.NodeID）
 	claimer nodeClaimer
+	// dir/tr 是本节点持有的目录与集群传输：迁移编排（drain / activate / 属主校验）
+	// 需要它们直接对接框架的 rollout.ClusterOps（见 Ops）。
+	dir cluster.Directory
+	tr  *cluster.NATSTransport
 	// releaseClaim 是节点归属的释放函数（Start 成功时设置，Shutdown 调用并置空）。
 	releaseClaim func(context.Context)
 }
@@ -78,7 +83,7 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		nc.Close()
 		return nil, err
 	}
-	inner, err := newClusterRuntime(opts, derived, nc, loc)
+	inner, dir, tr, err := newClusterRuntime(opts, derived, nc, loc)
 	if err != nil {
 		nc.Close()
 		_ = ec.Close()
@@ -88,7 +93,8 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	if claimer == nil {
 		claimer = etcdNodeClaimer{ec: ec, prefix: derived.EtcdDirectory, ttl: nodeLeaseTTL}
 	}
-	return &Runtime{inner: inner, nc: nc, ec: ec, nodeID: opts.NodeID, claimer: claimer}, nil
+	return &Runtime{inner: inner, nc: nc, ec: ec, nodeID: opts.NodeID, claimer: claimer,
+		dir: dir, tr: tr}, nil
 }
 
 // deriveOptions 校验必填项并派生命名空间五面：命名空间缺失或非法即报错
@@ -128,19 +134,21 @@ func newLocator(opts Options, derived namespace.Derived) (*clientv3.Client, *etc
 // newClusterRuntime 组装集群运行时（目录 + NATS 传输 + 可选发现/追踪/指标）。
 // 日志不显式注入：cluster 默认取 atlas 全局 Logger（bootstrap 已把本服务配置好的 Logger
 // 装进全局），再捕获一次只会在将来二次 SetLogger 时固化为旧实例。
-func newClusterRuntime(opts Options, derived namespace.Derived, nc *nats.Conn, loc *etcdlocator.Locator) (*cluster.Runtime, error) {
+func newClusterRuntime(opts Options, derived namespace.Derived, nc *nats.Conn,
+	loc *etcdlocator.Locator) (*cluster.Runtime, cluster.Directory, *cluster.NATSTransport, error) {
 	transport, err := cluster.NewNATSTransport(nc,
 		cluster.WithLocalNodeID(opts.NodeID), cluster.WithNamespace(derived.Namespace.String()))
 	if err != nil {
-		return nil, fmt.Errorf("actor: 创建 NATS 传输失败: %w", err)
+		return nil, nil, nil, fmt.Errorf("actor: 创建 NATS 传输失败: %w", err)
 	}
 	cfg := cluster.Config{
 		NodeID: opts.NodeID,
 		Mode:   cluster.ModeCluster,
 		Lease:  cluster.DefaultLease(),
 	}
+	dir := cluster.NewDirectory(loc, opts.NodeID, 10*time.Second)
 	rtOpts := []cluster.Option{
-		cluster.WithDirectory(cluster.NewDirectory(loc, opts.NodeID, 10*time.Second)),
+		cluster.WithDirectory(dir),
 		cluster.WithTransport(transport),
 	}
 	if opts.Discovery != nil && opts.ServiceName != "" {
@@ -154,9 +162,9 @@ func newClusterRuntime(opts Options, derived namespace.Derived, nc *nats.Conn, l
 	}
 	rt, err := cluster.NewRuntime(cfg, rtOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("actor: 创建集群运行时失败: %w", err)
+		return nil, nil, nil, fmt.Errorf("actor: 创建集群运行时失败: %w", err)
 	}
-	return rt, nil
+	return rt, dir, transport, nil
 }
 
 // Start 启动集群运行时：先声明节点 ID 归属（同 ID 冲突即启动失败，防静默串台），
@@ -220,6 +228,18 @@ func ParsePID(s string) (types.PID, error) { return types.ParsePID(s) }
 
 // Raw 返回底层集群运行时（高级场景）。
 func (r *Runtime) Raw() *cluster.Runtime { return r.inner }
+
+// NodeID 返回本节点 ID（= 注册实例 ID，actor 目录里的属主标识）。
+func (r *Runtime) NodeID() string { return r.nodeID }
+
+// Directory 返回本节点持有的 actor 目录（只读查询与扫描；迁移编排据此读属主与 epoch）。
+func (r *Runtime) Directory() cluster.Directory { return r.dir }
+
+// Ops 返回框架的集群操作面（drain / activate / verify，目录属主与 epoch 语义）。
+// 迁移编排以它为底座：战斗侧只在外面套一层「状态搬运」装饰（见 services/battle/internal/migrate）。
+func (r *Runtime) Ops() rollout.ClusterOps {
+	return cluster.NewClusterOps(r.dir, r.inner, "", cluster.WithDrainRemote(r.tr))
+}
 
 // CountByType 返回本节点指定 actor 类型的活跃实例数（供拉取式指标按需统计）。
 func (r *Runtime) CountByType(typ string) int {

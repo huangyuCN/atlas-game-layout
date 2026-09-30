@@ -1,12 +1,14 @@
 // BattleService 是战斗域的统一业务契约：客户端 op 与 actor 分发共用同一份
-// service/消息（帧通道 ws/kcp/udp/tcp 与集群内部同构，不再有镜像投影）。
+// service/消息（帧面 ws/kcp/udp 与集群内部同构，不再有镜像投影）。
 //
 // 身份语义（客体寻址）：
 //   - target PID = "battle:{battle_id}"（uid=UID_SOURCE_FIELD，battle_id 是
-//     客体参数/操作目标）；发起者玩家身份由 Gateway 注入投递 sender——
-//     战斗 actor 经 ActorContext.Sender() 取得加入者/输入者，消息体无身份字段；
-//   - access=CLIENT 为客户端 op（战斗通道 SDK 导出、Gateway 透传）；
-//     INTERNAL 为服务端内部（matcher 开局、管理面查询）。
+//     客体参数/操作目标）；发起者玩家身份由帧面 hello 里的 battle_ticket 解出后
+//     随本地投递注入——战斗 actor 经 ActorContext.Sender() 取得加入者/输入者，
+//     消息体无身份字段；
+//   - access=CLIENT 为客户端 op（战斗 SDK 导出；阶段 3 批次 5 起客户端凭成局推送的
+//     「接入层地址 + battle_ticket」直连接入层，由接入层转发到本服务帧面，帧不再经网关）；
+//     INTERNAL 为服务端内部（matcher 开局/取票、管理面查询）。
 syntax = "proto3";
 
 package battle.v1;
@@ -30,7 +32,7 @@ message JoinBattleReply {
   atlas.game.lockstep.SnapshotMeta snapshot = 3;
 }
 
-// FrameInputReq 帧输入上行（客户端 → gateway → battle actor 的 lockstep 输入通道）。
+// FrameInputReq 帧输入上行（客户端 → 接入层 → battle 帧面 → 本地 actor 的 lockstep 输入通道）。
 message FrameInputReq {
   string battle_id = 1;
   atlas.game.lockstep.LockstepInput input = 2;
@@ -51,6 +53,45 @@ message SyncFramesReply {
   repeated atlas.game.lockstep.FrameInputs missed = 3;
 }
 
+// IssueEntryTicketReq 出票请求：battle_id 是客体寻址字段
+//（目标 PID = battle:{battle_id}，rpc 面按 uid_field 解析并懒激活该战斗 actor）。
+message IssueEntryTicketReq {
+  string battle_id = 1;
+}
+
+// EdgeTransport 是接入层的传输面：客户端按自身支持的传输面从 EdgeEndpoint 列表里取地址。
+// 必须按面下发而不是给单个地址——接入层分面监听（ws=tcp、kcp/udp 各一个 udp 端口），
+// 单地址无法让 SDK 知道该拨哪个端口。
+enum EdgeTransport {
+  EDGE_TRANSPORT_UNSPECIFIED = 0; // 未指定（不得下发；装配期即拒绝）
+  EDGE_TRANSPORT_WS = 1;          // WebSocket（TCP 承载）
+  EDGE_TRANSPORT_KCP = 2;         // KCP（可靠 UDP）
+  EDGE_TRANSPORT_UDP = 3;         // 裸 UDP
+}
+
+// EdgeEndpoint 是接入层某个传输面的对外地址（host:port）。
+// 地址的唯一来源是 battle 配置（edge_endpoints），matcher 只搬运、不重组。
+message EdgeEndpoint {
+  EdgeTransport transport = 1;
+  string address = 2;
+}
+
+// BattleTicketEntry 是单个参战玩家的入场票据（player_id 与票内身份一致）。
+// 票据为 AEAD 密文（contrib/edge/ticket），接入层与 battle 共持同一把 32 字节密钥。
+message BattleTicketEntry {
+  string player_id = 1;
+  bytes ticket = 2;
+}
+
+// IssueEntryTicketReply 出票回执：接入层各传输面地址（唯一来源是 battle 配置
+// edge_endpoints；至少一面、面不重复、地址非空）、按参战名单逐人签发的票据、
+// 以及全部票据统一的过期时刻。
+message IssueEntryTicketReply {
+  repeated EdgeEndpoint endpoints = 1;
+  repeated BattleTicketEntry tickets = 2;
+  int64 expires_at_unix_ms = 3;
+}
+
 // BattleService 是战斗域统一业务契约（客户端 op 与 actor 分发共用一份）。
 service BattleService {
   option (atlas.route.v1.service_route) = {
@@ -59,8 +100,9 @@ service BattleService {
     uid: UID_SOURCE_FIELD
     uid_field: "battle_id"
   };
-  // 客户端可达（battle:{battle_id} 客体寻址）；转发成功后绑定战斗通道会话
-  //（该副作用由 Gateway 透传装配声明，不在协议注解中表达）。
+  // 客户端可达（battle:{battle_id} 客体寻址）；身份取自帧面 hello 携带的 battle_ticket，
+  // 验票后由属主节点**本地投递**给战斗 actor（阶段 3 批次 5 起战斗帧不再经网关，
+  // 网关侧的「转发成功后绑定战斗通道会话」副作用已随之删除）。
   rpc JoinBattle (JoinBattleReq) returns (JoinBattleReply);
   rpc SendFrameInput (FrameInputReq) returns (google.protobuf.Empty);
   rpc SyncFrames (SyncFramesReq) returns (SyncFramesReply);
@@ -69,6 +111,11 @@ service BattleService {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
   }
   rpc GetState (GetStateReq) returns (GetStateReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
+  // IssueEntryTicket 出票（matcher 成局后调用，INTERNAL）：按本局参战名单逐人签票
+  //（票绑 player_id + battle_id），并回填接入层各面地址——接入层地址只有这一个来源。
+  rpc IssueEntryTicket (IssueEntryTicketReq) returns (IssueEntryTicketReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
   }
 }
@@ -85,4 +132,19 @@ message BattleEndNotify {
   option (atlas.route.v1.push) = true;
   string battle_id = 1;
   string winner_player_id = 2;
+}
+
+// PlayerOutReason 是玩家出局原因（枚举优先：原因不散落字面量）。
+enum PlayerOutReason {
+  PLAYER_OUT_REASON_UNSPECIFIED = 0;    // 未指定（不得下发）
+  PLAYER_OUT_REASON_OFFLINE_TIMEOUT = 1; // 掉线超时判负（规格 §9.3）
+}
+
+// PlayerOutNotify 服务端推送：玩家出局通知（掉线判负并移出参战名单；
+// 多人局其余玩家继续，仅剩一人时该玩家判胜并另行下发 BattleEndNotify）。
+message PlayerOutNotify {
+  option (atlas.route.v1.push) = true;
+  string battle_id = 1;
+  string player_id = 2;          // 出局玩家
+  PlayerOutReason reason = 3;    // 出局原因
 }

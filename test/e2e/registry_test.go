@@ -25,6 +25,8 @@ func battleOpts(ns string) battleassemble.Options {
 		MongoURI:      itMongoURI,
 		MongoDB:       itMongoDB,
 		Namespace:     ns,
+		TicketKey:     itTicketKey,
+		EdgeEndpoints: itEdgeEndpoints,
 	}
 }
 

@@ -77,6 +77,8 @@ message MatchFailedNotify { string ticket_id = 1; string reason = 2; }  // 新�
   的权威 playerID 调 actor）+ `ruleset`（仅入队）；
 - **生成范围仅 TCP + WS**（业务通道；KCP/UDP 是战斗通道，不生成死桩）——Makefile
   为 matcher.proto 单列生成行。
+  > 阶段 3（2026-09-29）追加说明：KCP/UDP 现为 battle 的**直连帧面**（客户端凭票据经接入层直连），
+  > 仍不经网关、也不为 matcher 生成死桩——本条「生成范围」的判定不变，仅传输归属措辞更新。
 
 ### 3.4 Makefile
 

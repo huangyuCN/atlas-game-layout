@@ -5,12 +5,44 @@ package battle.conf;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;conf";
 
+import "api/battle/v1/battle_service.proto";
 import "protobuf/configs/runtime.proto";
 import "protobuf/configs/registry.proto";
 import "protobuf/configs/server.proto";
 import "protobuf/configs/data.proto";
 import "protobuf/configs/log.proto";
 import "protobuf/configs/observability.proto";
+
+// BattleConf 是战斗域直连出票配置（阶段 3 批次 2）：
+// 入场票据的 AEAD 密钥与接入层各面地址，两者都由 battle 侧装配期校验。
+message BattleConf {
+  // ticket_key 是入场票据密钥（base64 编码的 32 字节；接入层 edge.ticket_key 必须同值）：
+  // 缺失、base64 非法或长度不符即启动失败——不提供默认值。
+  string ticket_key = 1;
+  // ticket_ttl 是票据有效期（time.ParseDuration 字符串，如 120s；空 = 120s；
+  // 必须为正）。应大于掉线重连窗口，窗口内重连可复用同一张票。
+  string ticket_ttl = 2;
+  // edge_endpoints 是接入层「传输面 → 地址」列表（随成局推送下发给客户端，
+  // 全局唯一来源）：装配期校验**至少一面、面不重复、地址非空**，违反即启动失败。
+  // 复用 battle.v1.EdgeEndpoint（不另定义同形消息）：配置与契约共用同一套面枚举，
+  // 避免两处词表漂移。**不要求三面齐全**——只开 ws 的部署也能启动，缺面只影响用该面的客户端。
+  repeated battle.v1.EdgeEndpoint edge_endpoints = 3;
+  // frame_advertise_host 是**本节点帧端口对外的可达主机**——接入层从哪个主机能拨到本节点的
+  // ws/kcp/udp 帧端口（与 edge_endpoints 的语义不同：后者是**给客户端拨的接入层地址**）。
+  // 帧端口不在这里：端口取帧面服务端已绑定的真实地址。
+  //   - 不配（字段缺失）：回落到 edge_endpoints 的主机——**该回落仅适合同机部署**
+  //     （接入层与 battle 同一主机）；跨机部署必须显式配置，否则注册出去的端点会指向
+  //     接入层主机，接入层会拿自己的地址去拨后端（表现为连不上后端，且极难定位）；
+  //   - 显式配置：必须是非空、**不含端口**的主机部分（如 10.10.9.36 或 battle.internal）；
+  //     配了空串、纯空白或形如 host:port 的值一律装配期报错（不静默截断或回落）。
+  optional string frame_advertise_host = 4;
+  // offline_timeout 是掉线判定窗口（time.ParseDuration 字符串，如 15s；空 = 15s；必须为正；
+  // 0 或负值 = 关闭掉线判定，仅测试/特例使用）。
+  // 数据报面（KCP/UDP）没有关闭握手，掉线只能靠帧面的空闲读超时发现，故其 idle_timeout
+  // 缺省取本值的 1/3（缺省 15s → 5s）；装配期校验「数据报面 idle < offline_timeout」，
+  // 不满足即启动失败（否则掉线事件会迟到缺省的 120s，本策略形同虚设）。
+  string offline_timeout = 5;
+}
 
 message Bootstrap {
   atlas.configs.Runtime runtime = 1;
@@ -20,4 +52,6 @@ message Bootstrap {
   atlas.configs.Log log = 5;
   // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
   atlas.configs.Observability observability = 6;
+  // battle 是直连出票配置（批次 2 起必填：缺段/缺密钥即启动失败）。
+  BattleConf battle = 7;
 }

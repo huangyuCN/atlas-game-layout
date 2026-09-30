@@ -22,6 +22,7 @@
 package gamev1
 
 import (
+	v12 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	v1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	v11 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	_ "github.com/huangyuCN/atlas/api/atlas/v1"
@@ -1254,13 +1255,18 @@ func (x *PartyQueueReply) GetTicketId() string {
 	return ""
 }
 
-// MatchStartedNotify 服务端推送：匹配成功开局通知（含 battle 实例地址）。
+// MatchStartedNotify 服务端推送：匹配成功开局通知（含接入层各面地址与收件玩家本人的票据）。
 type MatchStartedNotify struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MatchId       string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
-	BattleId      string                 `protobuf:"bytes,2,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
-	PlayerIds     []string               `protobuf:"bytes,3,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
-	Endpoint      string                 `protobuf:"bytes,4,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MatchId   string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	BattleId  string                 `protobuf:"bytes,2,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
+	PlayerIds []string               `protobuf:"bytes,3,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
+	// battle_ticket 是**收件玩家本人**那张入场票据（由扇出方按人填；
+	// 名单里没有该玩家时不下发空票——空票连不上接入层，只会误导客户端）。
+	BattleTicket []byte `protobuf:"bytes,5,opt,name=battle_ticket,json=battleTicket,proto3" json:"battle_ticket,omitempty"`
+	// endpoints 是接入层「传输面 → 地址」列表（对所有人相同，由扇出方照抄成局事件）。
+	// SDK 按自身支持的传输面取一个，缺该面即明确报错（不得回退猜端口、不得静默换面）。
+	Endpoints     []*v12.EdgeEndpoint `protobuf:"bytes,6,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1316,11 +1322,18 @@ func (x *MatchStartedNotify) GetPlayerIds() []string {
 	return nil
 }
 
-func (x *MatchStartedNotify) GetEndpoint() string {
+func (x *MatchStartedNotify) GetBattleTicket() []byte {
 	if x != nil {
-		return x.Endpoint
+		return x.BattleTicket
 	}
-	return ""
+	return nil
+}
+
+func (x *MatchStartedNotify) GetEndpoints() []*v12.EdgeEndpoint {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
 }
 
 // MatchFailedNotify 服务端推送：匹配失败/超时/取消通知。
@@ -1449,7 +1462,7 @@ var File_api_game_v1_player_service_proto protoreflect.FileDescriptor
 
 const file_api_game_v1_player_service_proto_rawDesc = "" +
 	"\n" +
-	" api/game/v1/player_service.proto\x12\agame.v1\x1a\x18api/atlas/v1/route.proto\x1a\x1aapi/common/v1/common.proto\x1a!api/matcher/v1/match_events.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x18api/game/v1/player.proto\x1a\x1capi/matcher/v1/matcher.proto\"_\n" +
+	" api/game/v1/player_service.proto\x12\agame.v1\x1a\x18api/atlas/v1/route.proto\x1a\"api/battle/v1/battle_service.proto\x1a\x1aapi/common/v1/common.proto\x1a!api/matcher/v1/match_events.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x18api/game/v1/player.proto\x1a\x1capi/matcher/v1/matcher.proto\"_\n" +
 	"\vRegisterReq\x12\x18\n" +
 	"\aaccount\x18\x01 \x01(\tR\aaccount\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1a\n" +
@@ -1506,13 +1519,14 @@ const file_api_game_v1_player_service_proto_rawDesc = "" +
 	"\rQueuePartyReq\x12\x18\n" +
 	"\aruleset\x18\x01 \x01(\tR\aruleset\".\n" +
 	"\x0fPartyQueueReply\x12\x1b\n" +
-	"\tticket_id\x18\x01 \x01(\tR\bticketId\"\x8d\x01\n" +
+	"\tticket_id\x18\x01 \x01(\tR\bticketId\"\xd3\x01\n" +
 	"\x12MatchStartedNotify\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1b\n" +
 	"\tbattle_id\x18\x02 \x01(\tR\bbattleId\x12\x1d\n" +
 	"\n" +
-	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12\x1a\n" +
-	"\bendpoint\x18\x04 \x01(\tR\bendpoint:\x04\xd8\xd5\"\x01\"k\n" +
+	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12#\n" +
+	"\rbattle_ticket\x18\x05 \x01(\fR\fbattleTicket\x125\n" +
+	"\tendpoints\x18\x06 \x03(\v2\x17.battle.v1.EdgeEndpointR\tendpoints:\x04\xd8\xd5\"\x01J\x04\b\x04\x10\x05\"k\n" +
 	"\x11MatchFailedNotify\x12\x1b\n" +
 	"\tticket_id\x18\x01 \x01(\tR\bticketId\x123\n" +
 	"\x06reason\x18\x02 \x01(\x0e2\x1b.matcher.v1.MatchFailReasonR\x06reason:\x04\xd8\xd5\"\x01\"\xa7\x01\n" +
@@ -1594,10 +1608,11 @@ var file_api_game_v1_player_service_proto_goTypes = []any{
 	(*v1.PlayerSummary)(nil),     // 29: common.v1.PlayerSummary
 	(*BackpackItem)(nil),         // 30: game.v1.BackpackItem
 	(v11.MatchState)(0),          // 31: matcher.v1.MatchState
-	(v11.MatchFailReason)(0),     // 32: matcher.v1.MatchFailReason
-	(v11.PartyRosterReason)(0),   // 33: matcher.v1.PartyRosterReason
-	(*emptypb.Empty)(nil),        // 34: google.protobuf.Empty
-	(*GrantItemReply)(nil),       // 35: game.v1.GrantItemReply
+	(*v12.EdgeEndpoint)(nil),     // 32: battle.v1.EdgeEndpoint
+	(v11.MatchFailReason)(0),     // 33: matcher.v1.MatchFailReason
+	(v11.PartyRosterReason)(0),   // 34: matcher.v1.PartyRosterReason
+	(*emptypb.Empty)(nil),        // 35: google.protobuf.Empty
+	(*GrantItemReply)(nil),       // 36: game.v1.GrantItemReply
 }
 var file_api_game_v1_player_service_proto_depIdxs = []int32{
 	29, // 0: game.v1.RegisterReply.player:type_name -> common.v1.PlayerSummary
@@ -1609,43 +1624,44 @@ var file_api_game_v1_player_service_proto_depIdxs = []int32{
 	29, // 6: game.v1.PlayerReply.player:type_name -> common.v1.PlayerSummary
 	31, // 7: game.v1.MatchStatusReply.state:type_name -> matcher.v1.MatchState
 	29, // 8: game.v1.PartyReply.members:type_name -> common.v1.PlayerSummary
-	32, // 9: game.v1.MatchFailedNotify.reason:type_name -> matcher.v1.MatchFailReason
-	33, // 10: game.v1.PartyRosterNotify.reason:type_name -> matcher.v1.PartyRosterReason
-	6,  // 11: game.v1.PlayerService.GetPlayerData:input_type -> game.v1.GetPlayerDataReq
-	7,  // 12: game.v1.PlayerService.GetBackpack:input_type -> game.v1.GetBackpackReq
-	13, // 13: game.v1.PlayerService.EnterMatchQueue:input_type -> game.v1.EnterMatchQueueReq
-	15, // 14: game.v1.PlayerService.CancelMatch:input_type -> game.v1.CancelMatchReq
-	17, // 15: game.v1.PlayerService.GetMatchStatus:input_type -> game.v1.GetMatchStatusReq
-	19, // 16: game.v1.PlayerService.CreateParty:input_type -> game.v1.CreatePartyReq
-	20, // 17: game.v1.PlayerService.JoinParty:input_type -> game.v1.JoinPartyReq
-	21, // 18: game.v1.PlayerService.LeaveParty:input_type -> game.v1.LeavePartyReq
-	22, // 19: game.v1.PlayerService.GetParty:input_type -> game.v1.GetPartyReq
-	24, // 20: game.v1.PlayerService.QueueParty:input_type -> game.v1.QueuePartyReq
-	1,  // 21: game.v1.PlayerService.Register:input_type -> game.v1.RegisterReq
-	3,  // 22: game.v1.PlayerService.Login:input_type -> game.v1.LoginReq
-	5,  // 23: game.v1.PlayerService.Logout:input_type -> game.v1.LogoutMsg
-	10, // 24: game.v1.PlayerService.GrantItem:input_type -> game.v1.GrantItemReq
-	11, // 25: game.v1.PlayerService.GetPlayer:input_type -> game.v1.GetPlayerReq
-	8,  // 26: game.v1.PlayerService.GetPlayerData:output_type -> game.v1.PlayerDataReply
-	9,  // 27: game.v1.PlayerService.GetBackpack:output_type -> game.v1.BackpackReply
-	14, // 28: game.v1.PlayerService.EnterMatchQueue:output_type -> game.v1.EnterMatchQueueReply
-	16, // 29: game.v1.PlayerService.CancelMatch:output_type -> game.v1.CancelMatchReply
-	18, // 30: game.v1.PlayerService.GetMatchStatus:output_type -> game.v1.MatchStatusReply
-	23, // 31: game.v1.PlayerService.CreateParty:output_type -> game.v1.PartyReply
-	23, // 32: game.v1.PlayerService.JoinParty:output_type -> game.v1.PartyReply
-	23, // 33: game.v1.PlayerService.LeaveParty:output_type -> game.v1.PartyReply
-	23, // 34: game.v1.PlayerService.GetParty:output_type -> game.v1.PartyReply
-	25, // 35: game.v1.PlayerService.QueueParty:output_type -> game.v1.PartyQueueReply
-	2,  // 36: game.v1.PlayerService.Register:output_type -> game.v1.RegisterReply
-	4,  // 37: game.v1.PlayerService.Login:output_type -> game.v1.LoginReply
-	34, // 38: game.v1.PlayerService.Logout:output_type -> google.protobuf.Empty
-	35, // 39: game.v1.PlayerService.GrantItem:output_type -> game.v1.GrantItemReply
-	12, // 40: game.v1.PlayerService.GetPlayer:output_type -> game.v1.PlayerReply
-	26, // [26:41] is the sub-list for method output_type
-	11, // [11:26] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	32, // 9: game.v1.MatchStartedNotify.endpoints:type_name -> battle.v1.EdgeEndpoint
+	33, // 10: game.v1.MatchFailedNotify.reason:type_name -> matcher.v1.MatchFailReason
+	34, // 11: game.v1.PartyRosterNotify.reason:type_name -> matcher.v1.PartyRosterReason
+	6,  // 12: game.v1.PlayerService.GetPlayerData:input_type -> game.v1.GetPlayerDataReq
+	7,  // 13: game.v1.PlayerService.GetBackpack:input_type -> game.v1.GetBackpackReq
+	13, // 14: game.v1.PlayerService.EnterMatchQueue:input_type -> game.v1.EnterMatchQueueReq
+	15, // 15: game.v1.PlayerService.CancelMatch:input_type -> game.v1.CancelMatchReq
+	17, // 16: game.v1.PlayerService.GetMatchStatus:input_type -> game.v1.GetMatchStatusReq
+	19, // 17: game.v1.PlayerService.CreateParty:input_type -> game.v1.CreatePartyReq
+	20, // 18: game.v1.PlayerService.JoinParty:input_type -> game.v1.JoinPartyReq
+	21, // 19: game.v1.PlayerService.LeaveParty:input_type -> game.v1.LeavePartyReq
+	22, // 20: game.v1.PlayerService.GetParty:input_type -> game.v1.GetPartyReq
+	24, // 21: game.v1.PlayerService.QueueParty:input_type -> game.v1.QueuePartyReq
+	1,  // 22: game.v1.PlayerService.Register:input_type -> game.v1.RegisterReq
+	3,  // 23: game.v1.PlayerService.Login:input_type -> game.v1.LoginReq
+	5,  // 24: game.v1.PlayerService.Logout:input_type -> game.v1.LogoutMsg
+	10, // 25: game.v1.PlayerService.GrantItem:input_type -> game.v1.GrantItemReq
+	11, // 26: game.v1.PlayerService.GetPlayer:input_type -> game.v1.GetPlayerReq
+	8,  // 27: game.v1.PlayerService.GetPlayerData:output_type -> game.v1.PlayerDataReply
+	9,  // 28: game.v1.PlayerService.GetBackpack:output_type -> game.v1.BackpackReply
+	14, // 29: game.v1.PlayerService.EnterMatchQueue:output_type -> game.v1.EnterMatchQueueReply
+	16, // 30: game.v1.PlayerService.CancelMatch:output_type -> game.v1.CancelMatchReply
+	18, // 31: game.v1.PlayerService.GetMatchStatus:output_type -> game.v1.MatchStatusReply
+	23, // 32: game.v1.PlayerService.CreateParty:output_type -> game.v1.PartyReply
+	23, // 33: game.v1.PlayerService.JoinParty:output_type -> game.v1.PartyReply
+	23, // 34: game.v1.PlayerService.LeaveParty:output_type -> game.v1.PartyReply
+	23, // 35: game.v1.PlayerService.GetParty:output_type -> game.v1.PartyReply
+	25, // 36: game.v1.PlayerService.QueueParty:output_type -> game.v1.PartyQueueReply
+	2,  // 37: game.v1.PlayerService.Register:output_type -> game.v1.RegisterReply
+	4,  // 38: game.v1.PlayerService.Login:output_type -> game.v1.LoginReply
+	35, // 39: game.v1.PlayerService.Logout:output_type -> google.protobuf.Empty
+	36, // 40: game.v1.PlayerService.GrantItem:output_type -> game.v1.GrantItemReply
+	12, // 41: game.v1.PlayerService.GetPlayer:output_type -> game.v1.PlayerReply
+	27, // [27:42] is the sub-list for method output_type
+	12, // [12:27] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_api_game_v1_player_service_proto_init() }

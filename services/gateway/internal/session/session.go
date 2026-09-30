@@ -1,6 +1,9 @@
 // Package session 提供 gateway 分布式会话管理（D13）：
-// 本地连接表（connID → Session，多通道聚合）与 redis 路由表
+// 本地连接表（玩家 → 会话，单一业务通道）与 redis 路由表
 // （playerID → Route，TTL + 心跳续租），支撑挤下线与下行推送的跨实例寻址。
+//
+// 阶段 3 批次 5 起战斗帧不再经网关（客户端直连接入层 → battle 帧面），
+// 故会话模型由「业务/战斗双通道聚合」收敛为**单一业务通道**：一个玩家至多一条连接。
 package session
 
 import (
@@ -13,55 +16,42 @@ import (
 	"github.com/huangyuCN/atlas/metrics"
 )
 
-// 会话层指标名（Prometheus 抓取；gauge 事件驱动 Set，counter 按 channel 有界）。
+// 会话层指标名（Prometheus 抓取；gauge 事件驱动 Set，counter 单调递增）。
 const (
 	MetricSessions      = "gateway_sessions"             // 当前本地会话数（gauge）
-	MetricSessionBinds  = "gateway_session_binds_total"  // 会话绑定计数（labels: channel）
+	MetricSessionBinds  = "gateway_session_binds_total"  // 会话绑定计数
 	MetricSessionSweeps = "gateway_session_sweeps_total" // 心跳过期清扫计数
 )
 
 // ErrSessionNotFound 表示玩家会话不存在（本地无连接且路由已过期）。
 var ErrSessionNotFound = errors.New("session: not found")
 
-// Channel 是通道类别（规格 §5 双通道模型）。
-type Channel string
-
-const (
-	// ChannelBiz 是业务通道（tcp/ws）。
-	ChannelBiz Channel = "biz"
-	// ChannelBattle 是战斗通道（kcp/udp/ws）。
-	ChannelBattle Channel = "battle"
-)
-
-// Route 是玩家连接的路由信息（redis 分布式路由表条目）。
-// 双通道聚合：biz 与 battle 各自独立连接 ID，推送时 battle 优先、缺省回退 biz。
+// Route 是玩家连接的路由信息（redis 分布式路由表条目）：
+// 单一业务通道，一个玩家至多一条连接（战斗帧直连后网关不再持有战斗通道）。
 type Route struct {
-	InstanceID   string `json:"instance_id"`    // 持有连接的 gateway 实例 ID
-	Token        string `json:"token"`          // 会话令牌（单点登录裁决依据）
-	BizConnID    uint64 `json:"biz_conn_id"`    // 业务通道连接 ID（0=未绑定）
-	BizKind      string `json:"biz_kind"`       // 业务通道传输种类（tcp/ws）
-	BattleConnID uint64 `json:"battle_conn_id"` // 战斗通道连接 ID（0=未绑定）
-	BattleKind   string `json:"battle_kind"`    // 战斗通道传输种类（kcp/udp/ws）
-	UpdatedAt    int64  `json:"updated_at"`     // 最近心跳时间（unix 毫秒）
+	InstanceID string `json:"instance_id"` // 持有连接的 gateway 实例 ID
+	Token      string `json:"token"`       // 会话令牌（单点登录裁决依据）
+	ConnID     uint64 `json:"conn_id"`     // 业务通道连接 ID（0=未绑定）
+	Kind       string `json:"kind"`        // 业务通道传输种类（tcp/ws）
+	UpdatedAt  int64  `json:"updated_at"`  // 最近心跳时间（unix 毫秒）
 }
 
 // Conn 是会话视角的单条连接：寻址 ID、传输种类与回写函数。
 type Conn struct {
 	ID   uint64
 	Kind string
-	// Ref 是连接身份键（如 "ws:123"、"udp:1.2.3.4:5"），供会话反向索引
-	// （帧输入/补帧按连接反查玩家身份）。同一种类的连接 Ref 唯一。
+	// Ref 是连接身份键（如 "ws:conn:123"、"udp:1.2.3.4:5"），供会话反向索引
+	// （业务 op 按连接反查玩家身份）。同一种类的连接 Ref 唯一。
 	Ref string
 	// Send 回写该连接（服务端推送）；由 server 层装配为 transport Server 的 PushRaw。
 	Send func(operation string, payload []byte) error
 }
 
-// Session 是玩家会话的本地视图（多通道聚合）。
+// Session 是玩家会话的本地视图（单一业务通道）。
 type Session struct {
 	PlayerID      string
 	Token         string
-	Biz           *Conn
-	Battle        *Conn
+	Conn          *Conn
 	LastHeartbeat time.Time
 }
 
@@ -98,10 +88,10 @@ func NewManager(store Store, instanceID string, opts Options) *Manager {
 // SetMeter 注入指标采集器（装配期一次；nil = 不打点）。
 func (m *Manager) SetMeter(c metrics.Collector) { m.meter = c }
 
-// Bind 将连接绑定到玩家会话的指定通道，并向 redis 路由表登记。
+// Bind 将连接绑定到玩家会话（单一业务通道），并向 redis 路由表登记。
 // 返回绑定前的旧路由（nil 表示首次登录），供挤下线判断；
 // 新登录会使旧路由（含旧 token）失效。
-func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Channel, token string) (*Route, error) {
+func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, token string) (*Route, error) {
 	if playerID == "" || c == nil {
 		return nil, fmt.Errorf("session: playerID/conn 不能为空")
 	}
@@ -112,44 +102,31 @@ func (m *Manager) Bind(ctx context.Context, playerID string, c *Conn, channel Ch
 
 	// 本地表更新（内部加锁）与路由表同步分开：
 	// 前者只改内存态，后者是单命令原子远端写（SET ... GET，见 RedisStore）。
-	next, err := m.bindLocal(playerID, c, channel, token, now)
+	next, err := m.bindLocal(playerID, c, token, now)
 	if err != nil {
 		return nil, err
 	}
-	m.countBind(channel)
+	m.countBind()
 	return m.persistRoute(ctx, playerID, next, now)
 }
 
 // countBind 打点一次会话绑定并刷新会话数 gauge（meter 为 nil/noop 时短路）。
-func (m *Manager) countBind(channel Channel) {
+func (m *Manager) countBind() {
 	if m.meter == nil || metrics.IsNoop(m.meter) {
 		return
 	}
-	m.meter.Counter(MetricSessionBinds, "channel", string(channel)).Add(1)
+	m.meter.Counter(MetricSessionBinds).Add(1)
 	m.meter.Gauge(MetricSessions).Set(float64(m.Count()))
 }
 
 // bindLocal 更新本地会话表与反向索引（内部加锁），返回本次会话快照。
 // 每次绑定生成新的会话快照（旧快照保持不可变，供挤下线等外部引用安全使用）；
 // 新连接登记 refs，被替换/移除的旧连接注销（防旧连接残留身份）。
-func (m *Manager) bindLocal(playerID string, c *Conn, channel Channel, token string, now time.Time) (*Session, error) {
+func (m *Manager) bindLocal(playerID string, c *Conn, token string, now time.Time) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	prev := m.local[playerID]
-	next := &Session{PlayerID: playerID, LastHeartbeat: now}
-	if prev != nil {
-		next.Biz = prev.Biz
-		next.Battle = prev.Battle
-	}
-	next.Token = token
-	switch channel {
-	case ChannelBiz:
-		next.Biz = c
-	case ChannelBattle:
-		next.Battle = c
-	default:
-		return nil, fmt.Errorf("session: 未知通道类别 %q", channel)
-	}
+	next := &Session{PlayerID: playerID, Token: token, Conn: c, LastHeartbeat: now}
 	m.local[playerID] = next
 	m.dropStaleRefs(prev, next)
 	if c.Ref != "" {
@@ -171,11 +148,8 @@ func (m *Manager) persistRoute(ctx context.Context, playerID string, next *Sessi
 		Token:      next.Token,
 		UpdatedAt:  now.UnixMilli(),
 	}
-	if next.Biz != nil {
-		r.BizConnID, r.BizKind = next.Biz.ID, next.Biz.Kind
-	}
-	if next.Battle != nil {
-		r.BattleConnID, r.BattleKind = next.Battle.ID, next.Battle.Kind
+	if next.Conn != nil {
+		r.ConnID, r.Kind = next.Conn.ID, next.Conn.Kind
 	}
 	return m.store.GetSet(ctx, playerID, &r, m.ttl)
 }
@@ -190,7 +164,7 @@ func (m *Manager) Unbind(ctx context.Context, playerID string, connID uint64) {
 		m.mu.Unlock()
 		return
 	}
-	if owned := (sess.Biz != nil && sess.Biz.ID == connID) || (sess.Battle != nil && sess.Battle.ID == connID); !owned {
+	if sess.Conn == nil || sess.Conn.ID != connID {
 		m.mu.Unlock()
 		return
 	}
@@ -212,22 +186,16 @@ func (m *Manager) countRemove() {
 
 // dropStaleRefs 注销旧会话中已不在新会话的连接反向索引（调用方持写锁）。
 func (m *Manager) dropStaleRefs(prev, next *Session) {
-	if prev == nil {
+	if prev == nil || prev.Conn == nil || prev.Conn.Ref == "" {
 		return
 	}
-	for _, old := range []*Conn{prev.Biz, prev.Battle} {
-		if old == nil || old.Ref == "" {
-			continue
-		}
-		keep := (next.Biz != nil && next.Biz.Ref == old.Ref) ||
-			(next.Battle != nil && next.Battle.Ref == old.Ref)
-		if !keep {
-			delete(m.refs, old.Ref)
-		}
+	if next != nil && next.Conn != nil && next.Conn.Ref == prev.Conn.Ref {
+		return
 	}
+	delete(m.refs, prev.Conn.Ref)
 }
 
-// tokenIndex 把本地会话凭据登记进 token 反向索引（bindLocal/unbind 共用）。
+// tokenIndexSet 把本地会话凭据登记进 token 反向索引（bindLocal/unbind 共用）。
 func (m *Manager) tokenIndexSet(sess *Session) {
 	if sess == nil || sess.Token == "" {
 		return
@@ -243,16 +211,14 @@ func (m *Manager) tokenIndexRemove(token string) {
 	delete(m.toks, token)
 }
 
-// dropConnRefs 注销会话全部连接的反向索引（调用方持写锁）。
+// dropConnRefs 注销会话连接的反向索引（调用方持写锁）。
 func (m *Manager) dropConnRefs(sess *Session) {
-	for _, c := range []*Conn{sess.Biz, sess.Battle} {
-		if c != nil && c.Ref != "" {
-			delete(m.refs, c.Ref)
-		}
+	if sess != nil && sess.Conn != nil && sess.Conn.Ref != "" {
+		delete(m.refs, sess.Conn.Ref)
 	}
 }
 
-// PlayerByRef 按连接身份反查玩家（帧输入/补帧的身份来源）；未绑定返回 false。
+// PlayerByRef 按连接身份反查玩家（业务 op 的身份来源）；未绑定返回 false。
 func (m *Manager) PlayerByRef(ref string) (string, bool) {
 	if ref == "" {
 		return "", false
@@ -263,7 +229,7 @@ func (m *Manager) PlayerByRef(ref string) (string, bool) {
 	return pid, ok
 }
 
-// PlayerByToken 按帧会话槽携带的凭据反查玩家身份（UDP/KCP 每帧验证用）。
+// PlayerByToken 按帧会话槽携带的凭据反查玩家身份（网关自留会话接口的备用身份来源）。
 // 凭据索引与连接绑定同生命周期：接管/清理时随本地会话移除。
 func (m *Manager) PlayerByToken(token string) (string, bool) {
 	if token == "" {
@@ -285,22 +251,16 @@ func (m *Manager) routeTakenOver(ctx context.Context, playerID string, connID ui
 	if r.InstanceID != m.instanceID {
 		return true
 	}
-	if r.BizConnID != connID && r.BattleConnID != connID {
-		return true
-	}
-	return false
+	return r.ConnID != connID
 }
 
-// deleteRouteOwned 仅当路由仍归属本实例的该连接时删除（挤下线清理用）。
+// deleteRouteIfOwned 仅当路由仍归属本实例的该连接时删除（挤下线清理用）。
 func (m *Manager) deleteRouteIfOwned(ctx context.Context, playerID string, connID uint64) {
 	r, err := m.store.Get(ctx, playerID)
 	if err != nil || r == nil {
 		return
 	}
-	if r.InstanceID != m.instanceID {
-		return
-	}
-	if r.BizConnID != connID && r.BattleConnID != connID {
+	if r.InstanceID != m.instanceID || r.ConnID != connID {
 		return
 	}
 	_ = m.store.Delete(ctx, playerID)
@@ -344,24 +304,16 @@ func (m *Manager) LocalSession(playerID string) (*Session, bool) {
 	return sess, ok
 }
 
-// PushRaw 向玩家下发推送：battle 通道优先，缺省回退 biz 通道。
+// PushRaw 向玩家下发推送：走其唯一业务通道。
 // 玩家不在本实例时返回 ErrSessionNotFound。
 func (m *Manager) PushRaw(playerID string, operation string, payload []byte) error {
 	m.mu.RLock()
 	sess, ok := m.local[playerID]
-	if !ok {
+	if !ok || sess.Conn == nil {
 		m.mu.RUnlock()
 		return ErrSessionNotFound
 	}
-	var target *Conn
-	if sess.Battle != nil {
-		target = sess.Battle
-	} else if sess.Biz != nil {
-		target = sess.Biz
-	} else {
-		m.mu.RUnlock()
-		return ErrSessionNotFound
-	}
+	target := sess.Conn
 	m.mu.RUnlock()
 	return target.Send(operation, payload)
 }
@@ -402,8 +354,8 @@ func (m *Manager) SweepOnce(ctx context.Context) int {
 		// 属主校验：路由被其他会话接管时保留新路由且跳过联动（新会话接管）；
 		// 路由自然过期（TTL 先于清扫）视为无接管，同样联动。
 		connID := uint64(0)
-		if sess != nil && sess.Biz != nil {
-			connID = sess.Biz.ID
+		if sess != nil && sess.Conn != nil {
+			connID = sess.Conn.ID
 		}
 		if !m.routeTakenOver(ctx, id, connID) {
 			m.deleteRouteIfOwned(ctx, id, connID) // 属主路由删除

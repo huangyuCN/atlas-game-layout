@@ -59,6 +59,10 @@ const (
 	ErrorReason_BattleNotFound ErrorReason = 3001 // 战斗不存在
 	ErrorReason_BattleFull     ErrorReason = 3002 // 战斗已满
 	ErrorReason_BattleEnded    ErrorReason = 3003 // 战斗已结束
+	// 直连入场票据（阶段 3 批次 2）：battle 帧槽验票失败的两个 reason——帧有回执，故回结构化错误；
+	// 接入层拒绝走 L4 断开 + 指标标签（不进 proto，见规格 §4 错误语义分层）。
+	ErrorReason_BattleTicketInvalid ErrorReason = 3004 // 直连票据无效（会话槽缺失/密文非法/被篡改）
+	ErrorReason_BattleTicketExpired ErrorReason = 3005 // 直连票据已过期
 	// 通用
 	ErrorReason_Internal ErrorReason = 9001 // 服务内部错误
 )
@@ -93,6 +97,8 @@ var (
 		3001: "BattleNotFound",
 		3002: "BattleFull",
 		3003: "BattleEnded",
+		3004: "BattleTicketInvalid",
+		3005: "BattleTicketExpired",
 		9001: "Internal",
 	}
 	ErrorReason_value = map[string]int32{
@@ -123,6 +129,8 @@ var (
 		"BattleNotFound":             3001,
 		"BattleFull":                 3002,
 		"BattleEnded":                3003,
+		"BattleTicketInvalid":        3004,
+		"BattleTicketExpired":        3005,
 		"Internal":                   9001,
 	}
 )
@@ -158,7 +166,7 @@ var File_api_error_v1_errors_proto protoreflect.FileDescriptor
 
 const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\x8f\x06\n" +
+	"\x19api/error/v1/errors.proto\x12\berror.v1\x1a\x13errors/errors.proto*\xcf\x06\n" +
 	"\vErrorReason\x12\b\n" +
 	"\x04None\x10\x00\x12\x19\n" +
 	"\x0ePlayerNotFound\x10\xe9\a\x1a\x04\xa8E\x94\x03\x12\x1e\n" +
@@ -188,7 +196,9 @@ const file_api_error_v1_errors_proto_rawDesc = "" +
 	"\x0eBattleNotFound\x10\xb9\x17\x1a\x04\xa8E\x94\x03\x12\x15\n" +
 	"\n" +
 	"BattleFull\x10\xba\x17\x1a\x04\xa8E\x99\x03\x12\x16\n" +
-	"\vBattleEnded\x10\xbb\x17\x1a\x04\xa8E\x99\x03\x12\x13\n" +
+	"\vBattleEnded\x10\xbb\x17\x1a\x04\xa8E\x99\x03\x12\x1e\n" +
+	"\x13BattleTicketInvalid\x10\xbc\x17\x1a\x04\xa8E\x91\x03\x12\x1e\n" +
+	"\x13BattleTicketExpired\x10\xbd\x17\x1a\x04\xa8E\x91\x03\x12\x13\n" +
 	"\bInternal\x10\xa9F\x1a\x04\xa8E\xf4\x03\x1a\x04\xa0E\x90\x03B=Z;github.com/huangyuCN/atlas-game-layout/api/error/v1;errorv1b\x06proto3"
 
 var (

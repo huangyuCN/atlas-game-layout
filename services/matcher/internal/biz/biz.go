@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 )
 
@@ -22,23 +23,34 @@ type MatcherService interface {
 // BattleStarter 是对局开局接口：成局后懒激活战斗 actor（battle:<battleID>）。
 // matcher 只发起调用与可观测（M7 battle 服务接入后由真实 actor 承接）。
 type BattleStarter interface {
-	// Start 开局：向战斗 actor 发起开局请求（失败不阻断成局事件发布）。
+	// Start 开局：向战斗 actor 发起开局请求（失败不阻断出票尝试——
+	// 未开局时按空名单出票会失败，成局事件随之不下发）。
 	Start(ctx context.Context, battleID, matchID string, playerIDs []string) error
+}
+
+// BattleTicketIssuer 是入场票据签发接口：开局后按对局取票（battle 侧逐人签票）。
+// 票据是直连的身份凭据，只能随成局推送先于连接到达客户端（规格 §5）。
+type BattleTicketIssuer interface {
+	// IssueEntryTicket 取票：回执含接入层地址与 {player_id → ticket} 名单；
+	// 失败时不发成局事件（避免下发一张连不上的局）。
+	IssueEntryTicket(ctx context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error)
 }
 
 // MatchEventPublisher 是成局/失败事件发布接口（nats 总线）。
 type MatchEventPublisher interface {
-	// PublishStarted 发布成局事件（battle 已创建/开局已发起）。
-	PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string) error
+	// PublishStarted 发布成局事件（battle 已创建且票据已签发）。
+	// tickets 是 battle 的出票回执（接入层地址 + 逐人票据），原样进事件。
+	PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string, tickets *battlev1.IssueEntryTicketReply) error
 	// PublishFailed 发布失败事件（超时/取消/处置失败）。
 	// ticketID 是失败的票据 ID（未成局故无对局 ID，事件 match_id 为空）。
 	PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason matcherv1.MatchFailReason) error
 }
 
-// MatchEventSink 是成局观察方接口（事件发布与开局调用的组合，runtime 监听用）。
+// MatchEventSink 是成局观察方接口（事件发布、开局调用与取票的组合，runtime 监听用）。
 type MatchEventSink interface {
 	MatchEventPublisher
 	BattleStarter
+	BattleTicketIssuer
 }
 
 // MatchSettleDeduper 是成局结算去重接口：

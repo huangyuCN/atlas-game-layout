@@ -21,12 +21,12 @@ registry:
       - 127.0.0.1:12379
 server:
   # gRPC 是**两个互相独立的面**（缺省约定见 docs/config.md：地址为空 = 该面不启用）：
-  #   edge_addr（不可信区）：客户端 op 经网关转发到域 rpc/ 平面的 Edge 接口（access=CLIENT）；
-  #   internal_addr（可信区）：服务间 gRPC 调用 + P7 管理面 AdminService。
-  # 两面各自独立监听、独立生命周期，地址不得相同（相同即装配期报错）；
-  # 两面都挂 opgrpc 一元拦截器（入站 metadata→ctx 身份、出站错误→gRPC status）。
+  #   edge_addr（不可信区）：**本项目不启用**——阶段 3 批次 5 起客户端战斗 op 不经网关，
+  #     而是凭 battle_ticket 直连接入层 → 本服务的 KCP/UDP/WS 帧面（见下方 server.kcp/udp/websocket）；
+  #     故 Edge gRPC 面不再监听（配了就白开一个没人调的可信边界缺口）。
+  #   internal_addr（可信区）：服务间 gRPC 调用（matcher 开局/取票、game 结算联动）+ P7 管理面 AdminService。
+  # 地址为空 = 该面不启用；两面都挂 opgrpc 一元拦截器（入站 metadata→ctx 身份、出站错误→gRPC status）。
   grpc:
-    edge_addr: 0.0.0.0:9300
     internal_addr: 0.0.0.0:9301
     timeout: 30s                  # 单次 RPC 超时；Atlas 默认 1s，本模板显式放宽到 30s
     reflection: true              # 调试/测试开启；生产应关闭（会暴露服务清单，两面同享该开关）
@@ -54,6 +54,49 @@ server:
     #   key_file: configs/tls/server.key
     #   ca_file: configs/tls/ca.crt   # 配了即校验客户端证书（client_auth=true 时强制要求）
     #   client_auth: false
+  # 直连帧面（阶段 3 批次 2）：battle 的 KCP/UDP/WS 三个客户端直连监听——成局后客户端凭
+  # battle_ticket 直连进来，战斗帧不再经过网关（规格 §1.2 裁定 5）。节点缺失或 addr 为空
+  # = 该帧面不启用（不监听端口、不注册帧 op）；接入层按服务名 battle-frame 的实例元数据
+  # 发现这些端口（批次 3），故端口不写死、不进票据。
+  # 除 addr 外的参数均为注释示例（空 = 不覆盖底层默认；缺省约定见 docs/config.md）。
+  kcp:
+    addr: 0.0.0.0:9401
+    # fast_profile: true          # 低延迟预设（nodelay/interval/resend/nc）；显式参数优先
+    # lan_profile: true           # 局域网预设；显式参数优先
+    # block_crypt: 0123456789abcdef0123456789abcdef   # 加密口令（长度不足会启动失败）
+    # fec_data_shards: 10         # FEC 数据分片（与 fec_parity_shards 必须成对）
+    # fec_parity_shards: 3
+    # window_snd: 128             # 发送窗口（与 window_rcv 必须成对）
+    # window_rcv: 128
+    # mtu: 1400                   # 最大传输单元（字节）
+    # max_body_size: 1048576      # 单帧最大字节数
+    # idle_timeout: 120s          # 连接空闲超时（本服务**不配即取 battle.offline_timeout/3**，
+                                  # 见下方 offline_timeout；显式配置必须小于它，否则启动失败）
+    # write_timeout: 10s          # 单次写超时（不配 = 不限）
+    # max_conns: 10000            # 最大并发连接数（不配 = 不限）
+  udp:
+    addr: 0.0.0.0:9402
+    # pool_size: 4096             # 读写缓冲池大小
+    # read_buffer: 4096           # 单包读缓冲字节数
+    # max_body_size: 1048576      # 单包最大字节数
+    # idle_timeout: 120s          # 对端空闲超时（本服务**不配即取 battle.offline_timeout/3**，
+                                  # 见下方 offline_timeout；显式配置必须小于它，否则启动失败）
+    # max_peers: 10000            # 最大对端数（不配 = 不限）
+  websocket:
+    addr: 0.0.0.0:9403
+    # path: /ws                   # 挂载路径（不配 = "/"）
+    # pool_size: 4096             # 读写缓冲池大小
+    # read_buffer: 4096           # 读缓冲字节数（与 write_buffer 各自独立生效）
+    # write_buffer: 4096
+    # idle_timeout: 120s          # 连接空闲超时（不配 = 底层默认 120s；**本服务不改写**：
+                                  # WS/TCP 有可靠 EOF，对端断开即时可见，不靠空闲超时发现掉线）
+    # write_timeout: 10s          # 单次写超时（不配 = 不限）
+    # read_limit: 1048576         # 单条消息读上限（字节）
+    # max_conns: 10000            # 最大并发连接数（不配 = 不限）
+    # max_body_size: 1048576      # 单帧最大字节数
+    # subprotocols: [atlas]       # 协商的子协议列表（不配 = 不限定）
+    # tls:                        # TLS 字段同 http.tls（Server.TLS 共用）
+
 data:
   nats:
     url: nats://127.0.0.1:14222
@@ -64,6 +107,47 @@ log:
   level: info
   format: text
   file: logs/battle.log
+
+# 直连出票配置（阶段 3 批次 2）：battle 与接入层共持同一把票据密钥。
+battle:
+  # ticket_key 是入场票据的 AEAD 密钥（base64 的 32 字节）；**缺失/长度不符即启动失败**
+  #（不提供默认值）。生产经配置中心注入，且必须与 services/edge 的 edge.ticket_key 同值；
+  # 下面这串仅供本地开发（字节 0x01..0x20）。
+  ticket_key: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+  # ticket_ttl 是票据有效期（time.ParseDuration 字符串；空 = 120s，必须为正）。
+  # 应大于掉线重连窗口（offline_timeout，默认 15s）：窗口内重连可复用同一张票。
+  ticket_ttl: 120s
+  # offline_timeout 是掉线判定窗口（阶段 3 批次 6，规格 §9.2；time.ParseDuration 字符串，
+  # 空 = 15s；必须为正，显式 0 表示关闭掉线判定）。**数据报面没有关闭握手**：KCP/UDP 的掉线
+  # 只能靠帧面空闲读超时发现，故 server.kcp/server.udp 的 idle_timeout 缺省取它的 1/3
+  #（15s → 5s）；显式配置的 idle_timeout 必须严格小于本值，否则装配期直接启动失败。
+  # 客户端需在窗口内回座（同票重连），否则判负并移出参战名单（只剩一人即判胜结算）。
+  offline_timeout: 15s
+  # edge_endpoints 是接入层「传输面 → 地址」列表（随成局推送下发给客户端，全局唯一来源）：
+  # 客户端凭这些地址连**接入层**（不是 battle 自己的帧端口 9401/9402/9403——那是接入层拨的后端，
+  # 由 battle 注册的 battle-frame 实例元数据给出）。必须按面下发：接入层分面监听
+  # （ws=tcp:7100、kcp=udp:7101、udp=udp:7102），单地址无法让 SDK 知道该拨哪个端口。
+  # 装配期校验**至少一面、面不重复、地址非空**，违反即启动失败；**不要求三面齐全**——
+  # 只开 ws 的部署也能启动，缺面只影响用该面的客户端（SDK 缺面即报错）。
+  # 实例主机由下面的 frame_advertise_host 决定（未配时才回落到本列表的主机）。
+  edge_endpoints:
+    - transport: EDGE_TRANSPORT_WS  # WebSocket 面（TCP 承载）
+      address: "10.10.9.36:7100"
+    - transport: EDGE_TRANSPORT_KCP # KCP 面（可靠 UDP）
+      address: "10.10.9.36:7101"
+    - transport: EDGE_TRANSPORT_UDP # 裸 UDP 面
+      address: "10.10.9.36:7102"
+  # frame_advertise_host 是**本节点帧端口对外的可达主机**——接入层从哪个主机能拨到本节点的
+  # ws/kcp/udp 帧端口。**注意与 edge_endpoints 语义不同**：后者是给**客户端**拨的接入层地址，
+  # 本项是给**接入层**拨的 battle 主机。三条语义：
+  #   1) 显式配置：只填主机部分（不含端口，如 10.10.9.36 或 battle-1.internal）；帧端口仍取
+  #      帧面服务端**已绑定**的真实端口。配了空白串、host:port（带端口）或带方括号的 IPv6
+  #      一律启动失败——不静默截断、不静默回落（「配了没生效」比启动失败更贵）。
+  #   2) 不配（整项缺失）：回落到 edge_endpoints 的主机——**该回落仅适合同机部署**
+  #      （接入层与 battle 跑在同一主机）。
+  #   3) 跨机部署**必须显式配置**：否则注册出去的端点会指向接入层主机，接入层会拿自己的地址
+  #      去拨后端（表现为连不上后端，且极难定位）。
+  frame_advertise_host: "10.10.9.36"
 
 # 可观测性：OTLP 链路导出端点（必须带 scheme：grpc/grpcs/http/https；空或不配 = noop 不导出）
 # 与 Prometheus 抓取端点（prometheus 服务经 host.docker.internal 抓取；空或不配 = noop）。

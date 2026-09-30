@@ -3,6 +3,7 @@ package matcherv1
 import (
 	"testing"
 
+	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -26,10 +27,13 @@ func TestQueryMatchRoundtrip(t *testing.T) {
 // TestMatchStartedEventRoundtrip 校验成局事件（nats 总线）的编解码往返。
 func TestMatchStartedEventRoundtrip(t *testing.T) {
 	in := &MatchStartedEvent{
-		MatchId:        "m-0001",
-		BattleId:       "b-0001",
-		PlayerIds:      []string{"p-0001", "p-0002"},
-		BattleEndpoint: "10.10.9.36:19090",
+		MatchId:   "m-0001",
+		BattleId:  "b-0001",
+		PlayerIds: []string{"p-0001", "p-0002"},
+		BattleEndpoints: []*battlev1.EdgeEndpoint{
+			{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_WS, Address: "10.10.9.36:17100"},
+			{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_KCP, Address: "10.10.9.36:17101"},
+		},
 	}
 	b, err := protojson.Marshal(in)
 	if err != nil {

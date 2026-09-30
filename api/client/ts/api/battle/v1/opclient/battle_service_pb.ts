@@ -35,6 +35,26 @@ export interface SyncFramesReply {
   missed?: FrameInputs[]; // battle.v1.SyncFramesReply.missed
 }
 
+export interface IssueEntryTicketReq {
+  battleId?: string; // battle.v1.IssueEntryTicketReq.battle_id
+}
+
+export interface EdgeEndpoint {
+  transport?: EdgeTransport; // battle.v1.EdgeEndpoint.transport
+  address?: string; // battle.v1.EdgeEndpoint.address
+}
+
+export interface BattleTicketEntry {
+  playerId?: string; // battle.v1.BattleTicketEntry.player_id
+  ticket?: string // base64; // battle.v1.BattleTicketEntry.ticket
+}
+
+export interface IssueEntryTicketReply {
+  endpoints?: EdgeEndpoint[]; // battle.v1.IssueEntryTicketReply.endpoints
+  tickets?: BattleTicketEntry[]; // battle.v1.IssueEntryTicketReply.tickets
+  expiresAtUnixMs?: string // int64; // battle.v1.IssueEntryTicketReply.expires_at_unix_ms
+}
+
 export interface FrameBroadcast {
   battleId?: string; // battle.v1.FrameBroadcast.battle_id
   frame?: LockstepFrame; // battle.v1.FrameBroadcast.frame
@@ -44,6 +64,16 @@ export interface BattleEndNotify {
   battleId?: string; // battle.v1.BattleEndNotify.battle_id
   winnerPlayerId?: string; // battle.v1.BattleEndNotify.winner_player_id
 }
+
+export interface PlayerOutNotify {
+  battleId?: string; // battle.v1.PlayerOutNotify.battle_id
+  playerId?: string; // battle.v1.PlayerOutNotify.player_id
+  reason?: PlayerOutReason; // battle.v1.PlayerOutNotify.reason
+}
+
+export type EdgeTransport = "EDGE_TRANSPORT_UNSPECIFIED" | "EDGE_TRANSPORT_WS" | "EDGE_TRANSPORT_KCP" | "EDGE_TRANSPORT_UDP";
+
+export type PlayerOutReason = "PLAYER_OUT_REASON_UNSPECIFIED" | "PLAYER_OUT_REASON_OFFLINE_TIMEOUT";
 
 export class BattleService {
   constructor(private readonly inv: Invoker) {}
@@ -93,5 +123,6 @@ export function battleServiceExpiresAt(msg: unknown): number {
 export const battleServicePushOps = {
   frameBroadcast: '/battle.v1.FrameBroadcast',
   battleEndNotify: '/battle.v1.BattleEndNotify',
+  playerOutNotify: '/battle.v1.PlayerOutNotify',
 } as const;
 

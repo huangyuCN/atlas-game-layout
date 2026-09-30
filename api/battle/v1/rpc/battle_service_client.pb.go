@@ -16,6 +16,7 @@ import (
 type BattleServiceClient interface {
 	Create(ctx context.Context, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
 	GetState(ctx context.Context, req *v1.GetStateReq) (*v1.GetStateReply, error)
+	IssueEntryTicket(ctx context.Context, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error)
 }
 
 // battleServiceClient 是客户端实现。
@@ -41,6 +42,15 @@ func (c *battleServiceClient) Create(ctx context.Context, req *v1.CreateBattleRe
 func (c *battleServiceClient) GetState(ctx context.Context, req *v1.GetStateReq) (*v1.GetStateReply, error) {
 	out := new(v1.GetStateReply)
 	if err := c.cc.Invoke(ctx, "/battle.v1.BattleService/GetState", req, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IssueEntryTicket 发起一次一元调用。
+func (c *battleServiceClient) IssueEntryTicket(ctx context.Context, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error) {
+	out := new(v1.IssueEntryTicketReply)
+	if err := c.cc.Invoke(ctx, "/battle.v1.BattleService/IssueEntryTicket", req, out); err != nil {
 		return nil, err
 	}
 	return out, nil

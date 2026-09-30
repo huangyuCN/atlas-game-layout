@@ -1,0 +1,87 @@
+// edge 服务配置：引用公共配置消息（接入层是裸 L4 转发器，无 data 段）。
+syntax = "proto3";
+
+package edge.conf;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/services/edge/internal/conf;conf";
+
+import "protobuf/configs/runtime.proto";
+import "protobuf/configs/registry.proto";
+import "protobuf/configs/server.proto";
+import "protobuf/configs/log.proto";
+import "protobuf/configs/observability.proto";
+
+// Edge 是接入层（L4 转发器）配置：监听面、票据密钥、帧面发现与资源保护（规格 §2.1、§3.4）。
+message Edge {
+  // Network 是接入面的监听网络。
+  enum Network {
+    // NETWORK_UNSPECIFIED 是未配置（启动期报错，不猜）。
+    NETWORK_UNSPECIFIED = 0;
+    // NETWORK_TCP 承载 WS 升级请求或会话前 hello 段。
+    NETWORK_TCP = 1;
+    // NETWORK_UDP 承载数据报 hello 与 flow-id。
+    NETWORK_UDP = 2;
+  }
+
+  // Carrier 是接入面的 hello 载体形态（规格 §3.2「按传输的 hello 载体」）。
+  enum Carrier {
+    // CARRIER_UNSPECIFIED 是未配置（启动期报错，不猜）。
+    CARRIER_UNSPECIFIED = 0;
+    // CARRIER_WS_UPGRADE 是 WS 升级请求载体（票据走 query `?ticket=` 或头 `X-Atlas-Ticket`）。
+    CARRIER_WS_UPGRADE = 1;
+    // CARRIER_STREAM_HELLO 是会话前 hello 段载体（消费并剥离，其余字节原样转发）。
+    CARRIER_STREAM_HELLO = 2;
+    // CARRIER_DATAGRAM 是数据报首包 hello 载体（首包换 flow-id，后续包带 flow-id）。
+    CARRIER_DATAGRAM = 3;
+  }
+
+  // Listener 描述一个接入面：name 必须与 battle 帧面实例元数据里的端口键一致
+  //（ws/kcp/udp），Resolver 据此按客户端传输面选帧端口。
+  message Listener {
+    // name 是面名（ws/kcp/udp）。
+    string name = 1;
+    // network 是监听网络（tcp/udp）。
+    Network network = 2;
+    // addr 是监听地址（host:port）。
+    string addr = 3;
+    // carrier 是该面的 hello 载体形态。
+    Carrier carrier = 4;
+  }
+
+  // listeners 是接入面列表（每面一个监听器；空即启动失败）。
+  repeated Listener listeners = 1;
+  // ticket_key 是入场票据 AEAD 密钥（base64 编码的 32 字节，必须与 battle.ticket_key 同值）：
+  // 缺失、base64 非法或长度不符即启动失败——不提供默认值（规格 §2）。
+  string ticket_key = 2;
+  // frame_service 是 battle 帧面实例的注册中心服务名（空 = battle-frame）。
+  string frame_service = 3;
+  // actor_namespace 是 actor 目录的命名空间（空 = 取 runtime.namespace；
+  // 目录前缀由框架 namespace.Derive 派生为 /atlas/actors/<ns>）。
+  string actor_namespace = 4;
+  // max_streams 是并发流上限（0 = 框架缺省 1024）。
+  int32 max_streams = 5;
+  // idle_timeout 是空闲回收时长（time.ParseDuration 字符串，如 60s；空 = 框架缺省）。
+  string idle_timeout = 6;
+  // new_conn_rate 是新连接速率限制（每秒；0 = 不限制）。
+  int32 new_conn_rate = 7;
+  // max_per_ip 是每 IP 连接数上限（0 = 不限制）。
+  int32 max_per_ip = 8;
+  // dial_timeout 是后端拨号与握手读取超时（time.ParseDuration 字符串；空 = 框架缺省 5s）。
+  string dial_timeout = 9;
+  // probe_after 是数据报面静默多久后开始探活（空 = 取 idle_timeout）。
+  string probe_after = 10;
+  // probe_timeout 是单次探测等待回应的时长（空 = 按 probe_after 推导）。
+  string probe_timeout = 11;
+}
+
+// Bootstrap 是 edge 服务的启动配置。
+message Bootstrap {
+  atlas.configs.Runtime runtime = 1;
+  atlas.configs.Registry registry = 2;
+  atlas.configs.Server server = 3;
+  atlas.configs.Log log = 4;
+  // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
+  atlas.configs.Observability observability = 5;
+  // edge 是接入层配置（缺段/缺密钥/缺监听面即启动失败）。
+  Edge edge = 6;
+}

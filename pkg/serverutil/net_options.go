@@ -272,25 +272,40 @@ func TCPServer(c *configspb.Server_TCP) (*tcpt.Server, error) {
 }
 
 // WSServer 按 server.websocket 配置构造 WebSocket 服务端（handler 注册由调用方完成）；
+// extra 为配置映射之后追加的服务端选项（如连接生命周期回调）；
 // 节点缺失或 addr 为空表示该协议未启用，返回 nil。
-func WSServer(c *configspb.Server_WebSocket) (*wst.Server, error) {
+func WSServer(c *configspb.Server_WebSocket, extra ...wst.ServerOption) (*wst.Server, error) {
 	return netServer("WebSocket 服务端", c.GetAddr() != "", func() ([]wst.ServerOption, error) {
-		return WSOptions(c)
+		opts, err := WSOptions(c)
+		if err != nil {
+			return nil, err
+		}
+		return append(opts, extra...), nil
 	}, wst.NewServer)
 }
 
 // KCPServer 按 server.kcp 配置构造 KCP 服务端（handler 注册由调用方完成）；
+// extra 为配置映射之后追加的服务端选项（如空闲读超时、连接生命周期回调）；
 // 节点缺失或 addr 为空表示该协议未启用，返回 nil。
-func KCPServer(c *configspb.Server_KCP) (*kcpt.Server, error) {
+func KCPServer(c *configspb.Server_KCP, extra ...kcpt.ServerOption) (*kcpt.Server, error) {
 	return netServer("KCP 服务端", c.GetAddr() != "", func() ([]kcpt.ServerOption, error) {
-		return KCPOptions(c)
+		opts, err := KCPOptions(c)
+		if err != nil {
+			return nil, err
+		}
+		return append(opts, extra...), nil
 	}, kcpt.NewServer)
 }
 
 // UDPServer 按 server.udp 配置构造 UDP 服务端（handler 注册由调用方完成）；
+// extra 为配置映射之后追加的服务端选项（如空闲读超时、对端生命周期回调）；
 // 节点缺失或 addr 为空表示该协议未启用，返回 nil。
-func UDPServer(c *configspb.Server_UDP) (*udpt.Server, error) {
+func UDPServer(c *configspb.Server_UDP, extra ...udpt.ServerOption) (*udpt.Server, error) {
 	return netServer("UDP 服务端", c.GetAddr() != "", func() ([]udpt.ServerOption, error) {
-		return UDPOptions(c)
+		opts, err := UDPOptions(c)
+		if err != nil {
+			return nil, err
+		}
+		return append(opts, extra...), nil
 	}, udpt.NewServer)
 }

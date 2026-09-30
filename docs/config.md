@@ -66,7 +66,8 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `runtime.id` | 无 | — | 空 ⇒ 回填 `<服务名>-<主机名>`（注册实例 ID / actor NodeID / 指标实例标签三处同源） |
 | `runtime.version` | 无 | — | 空 ⇒ 构建注入版本（`lib/version`，`-ldflags` 写入） |
 | `runtime.env` | 无 | — | 空 ⇒ `default`（**仅标签**） |
-| `runtime.min_client_version(_mode)` | 无 | — | 门槛为空 + `OFF` ⇒ 不校验（校验逻辑属 P3，网关登录入口） |
+| `runtime.min_client_version` | 无 | — | 空 ⇒ **仅记录**（记录客户端上报版本，不拒绝）；非空 ⇒ **登录期强制**（低于门槛/未上报/版本串非法一律拒绝，reason 常量 `CLIENT_VERSION_TOO_LOW`）。比较规则、非法串处置与取值见 §8 |
+| `runtime.min_client_version_mode` | 无 | — | 只有 `NEGOTIATE` 有意义（只记录不拒绝的灰度逃生门）；缺省（含 `OFF`）与 `ENFORCE` 在网关侧同义 = 强制（见 §8） |
 | `registry.etcd.endpoints` | 非空 | etcd 客户端构造失败（装配期报错，注册/发现均不可用） | — |
 | `registry.ttl` | 无 | — | `""` ⇒ 底层默认 15s（`registry.NewEtcd` 只在 `>0` 时追加 `RegisterTTL`） |
 | `server.grpc.edge_addr` | 非空 | **不启用 edge 面**（不监听、不注册 Edge 接口） | 见下「共享可选参数」 |
@@ -87,6 +88,18 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `observability.otlp` | 非空（端点即必需参数） | **exporter noop**（不导出，零开销） | — |
 | `observability.metrics.prometheus` | 非空 | **不暴露抓取端点**（采集器退化为 noop） | — |
 | `observability.sampler` | 无 | — | 未设置/`0` ⇒ `PARENT_BASED_RATIO`；`sample_ratio` 未设置 ⇒ `1.0` |
+| `server.kcp.idle_timeout` / `server.udp.idle_timeout`（battle） | 无（本服务按掉线窗口推导） | 空/`0s` ⇒ 取 `battle.offline_timeout / 3`（缺省 15s → 5s） | 显式值必须**严格小于** `battle.offline_timeout`，否则装配期启动失败（数据报面无关闭握手，掉线只能靠空闲读超时发现，见 §7） |
+| `battle.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `edge.ticket_key` 同值，否则帧面全面拒票 |
+| `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
+| `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法即失败 |
+| `battle.edge_endpoints` | 列表非空 + `transport` 非 `UNSPECIFIED` + 地址非空 + 面不重复 | **启动失败**（客户端拿到的接入层地址只有这一个来源） | 面枚举 `EDGE_TRANSPORT_{WS,KCP,UDP}`；**按面下发**、不要求三面齐全（只开 ws 也能启动） |
+| `battle.frame_advertise_host` | 无（整项缺失 = 回落） | 整项缺失 ⇒ 回落 `edge_endpoints` 的主机（**仅适合同机部署**） | 只填主机（不含端口、IPv6 不带方括号）；空白串/带端口/带方括号即启动失败；跨机部署**必须**显式配置（语义见 §7） |
+| `edge.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `battle.ticket_key` 同值 |
+| `edge.frame_service` | 无 | — | 空 ⇒ `battle-frame`（battle 注册的帧面实例服务名） |
+| `edge.actor_namespace` | 无 | — | 空 ⇒ 取 `runtime.namespace`（**不是**注册键前缀路径）；必须与 battle 同值，否则查不到属主 |
+| `edge.listeners` | 至少一面，且 `name`/`network`/`addr`/`carrier` 齐备 | **启动失败**（`edge.listeners 不能为空`） | `name` 必须与 battle 帧面实例元数据里的端口键（`ws`/`kcp`/`udp`）一致；KCP/UDP 面只能配 `CARRIER_DATAGRAM`（框架不允许数据报面配 `stream_hello`），WS 面配 `CARRIER_WS_UPGRADE` |
+| `edge.max_streams` / `edge.idle_timeout` / `edge.new_conn_rate` / `edge.max_per_ip` | 无 | — | 空/非正 ⇒ 框架缺省（并发流 `1024` / 空闲回收 `60s` / 不限新连接速率 / 不限每 IP 连接数） |
+| `edge.dial_timeout` / `edge.probe_after` / `edge.probe_timeout` | 无 | — | 空 ⇒ 框架缺省（拨号与握手读取 `5s`；探活触发取 `idle_timeout`、等待回应取触发时长的一半、下限 `50ms`） |
 
 **共享可选参数**（`server.grpc` / `server.tcp` / `server.websocket` / `server.kcp` / `server.udp` 共用同一套语义）：
 `network` 未设置 ⇒ 底层默认 `tcp`（非法枚举值启动报错，不静默回落）；数值项 `0` ⇒ 底层默认（负数报错）；
@@ -124,3 +137,106 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
   由 `pkg/serverutil.GRPCServers` 统一挂载，服务侧无法漏挂。
 - 端点 scheme：internal 面用 `grpc`（框架发现解析器按 scheme `grpc` 寻址 ⇒ 服务间调用落到可信面），
   edge 面用 `grpc-edge`（与 internal 区分；同一实例注册两个面时不会互相覆盖）。常量见 `pkg/serverutil`。
+- **阶段 3（2026-09-29）起 battle 不启用 edge 面**：客户端战斗 op 不再经网关转 Edge gRPC 面，改为凭
+  `battle_ticket` 直连接入层 → battle 的 KCP/UDP/WS 直连帧面（§7）；battle 的 `server.grpc.edge_addr`
+  留空即「该面不启用」，只剩 internal 面（matcher 开局/取票、game 结算联动）。game 的 edge 面照旧启用。
+
+## 7. 战斗直连：地址、票据与掉线推导（battle / edge 专属语义）
+
+### 7.1 接入层地址按「传输面 → 地址」下发
+
+- 接入层分面监听（模板：ws=tcp:7100、kcp=udp:7101、udp=udp:7102），**一个地址不够**——单地址无法让
+  SDK 知道该拨哪个端口。故契约下发 `repeated EdgeEndpoint{transport, address}`（`battle.v1`），
+  SDK 按自身支持的传输面取一项（TS 只有 ws）；**缺该面即明确报错**，不猜端口、不回落换面。
+- 地址的**唯一来源**是 `battle.edge_endpoints`：`IssueEntryTicket` 出票时一并回执，matcher 只搬运、
+  不重组，网关逐人扇出。装配期校验「至少一面、面不重复、地址非空」，违反即启动失败；
+  **不要求三面齐全**——只开 ws 的部署也能启动，缺面只影响用该面的客户端。
+
+### 7.2 `edge_endpoints` vs `frame_advertise_host`（两个方向，别混）
+
+| 项 | 给谁用 | 填什么 | 缺失时 |
+|---|---|---|---|
+| `battle.edge_endpoints` | **客户端**（随成局通知下发） | 接入层各面的对外地址（host:port） | **启动失败**（客户端无面可连） |
+| `battle.frame_advertise_host` | **接入层**（battle 注册 `battle-frame` 帧面实例时报的主机） | 只填本节点对外可达的**主机**（不含端口） | 回落 `edge_endpoints` 的主机——**仅适合同机部署**；跨机部署不配会让接入层拿自己的地址去拨后端（现象是连不上后端且极难定位） |
+
+端口既不写死也不进票据：接入层从 `battle-frame` 实例元数据里读各面**已绑定**的真实端口
+（`server.kcp/udp/websocket.addr` 的端口填 0 时，注册的是内核分配后的真实端口）。
+
+### 7.3 `battle.offline_timeout` 与数据报面 `idle_timeout` 的推导
+
+- `battle.offline_timeout` 是掉线判定窗口（空 ⇒ 15s；显式 `0s` = **关闭**掉线判定，此时既不推导也不校验）。
+- **KCP/UDP 没有关闭握手**：掉线只能靠帧面空闲读超时发现，故 `server.kcp.idle_timeout` /
+  `server.udp.idle_timeout` 未配置（或配 `0s`）时取 `offline_timeout / 3`（15s → 5s）；显式配置必须
+  **严格小于** `offline_timeout`，否则装配期启动失败。WS/TCP 面有可靠 EOF，**继承底层缺省、不做推导**。
+- 违反这条推导的后果不是「慢一点」：掉线事件会推迟到缺省的 120s 读超时，掉线策略形同虚设。
+
+### 7.4 票据密钥两处同值
+
+`edge.ticket_key` 与 `battle.ticket_key` 是同一把 32 字节 AEAD（AES-256-GCM）密钥，**缺失/长度不符即
+启动失败**，生产经配置中心注入。两处不一致表现为「接入层能验票、battle 一律拒票」（或反之），
+排查成本高，故 e2e 与发布检查必须校验两值相同；票据内含 `kid` 预留轮换，轮换编排归 M11。
+
+### 7.5 容量与告警阈值（阶段 3 压测实测口径）
+
+**怎么复现**（服务器 `10.10.9.36`；进程内起五服务 + 客户端同机，故数字是**单机口径**）：
+
+```bash
+cd ~/atlas-game-layout
+go build -o /tmp/loadtest ./scripts/loadtest
+/tmp/loadtest -players 256 -transport ws  -via edge -duration 20s -pps 10   # 连接数阶梯
+/tmp/loadtest -players 64  -transport ws  -via edge -duration 20s -pps 400  # 包速率阶梯
+/tmp/loadtest -players 128 -transport ws  -via direct -duration 20s -pps 10 # 直连基线对照
+```
+
+实测结论（2026-09-30，12 核 x86_64，客户端与服务端同机；完整表见变更手册 §6.5）：
+
+| 维度 | 实测 | 说明 |
+|---|---|---|
+| 直连帧连接数 | **512 条稳定**（0 失败，帧面 RTT p99 23.8ms，5125 pkt/s 下行） | 未触顶；再往上受限的是注册/匹配链路耗时，而非接入层 |
+| 上行包速率 | **≥25.6k pkt/s**（64 连接 × 400 pps，0 失败，RTT p99 5.6ms） | 未触顶 |
+| 数据报面（UDP） | 128 连接 / 1.28k pkt/s 干净；**256 连接出现退化** | 数据报面无重传：单包丢失即让该连接挂起到判掉线（`offline_timeout` 15s）→ 结算拆流；生产需客户端补帧/重传兜底 |
+| 新流准入 | **15–22ms/流**（hello → 验票 → 查目录 + 选帧面实例 → 回 flow-id） | 数据报面准入在单读取循环内串行 ⇒ 约 45–65 新流/秒/实例；WS 面握手与首帧分离，未见同等排队 |
+| 转发开销（微基准） | 经接入层 ≈ 直连后端的 **1.9–2.1 倍** 单包往返（同机回环） | 增量就是那一跳；稳态吞吐不受影响（见上两行） |
+
+**告警阈值建议**（阈值按本机口径给保守值；换机器先按同口径重测再定）：
+
+| 指标 | 建议阈值 | 含义 |
+|---|---|---|
+| `edge_streams_active` | ≥ `edge.max_streams` 的 80% 持续 1 分钟 | 接近并发流上限，需扩容或调高上限 |
+| `edge_ticket_rejected_total{reason}` | 5 分钟增量 > 新流总数的 1% | 票/密钥/时钟漂移（`ticket_invalid`/`ticket_expired`）或后端解析失败（`backend_unavailable`） |
+| `edge_streams_teared_down_total{reason=owner_changed}` | 突增（同比 > 5 倍） | 属主迁移/目录异常；同时看 battle 侧是否在重连 |
+| `edge_probe_failures_total` | 5 分钟增量 > 活跃流数的 1% | 后端不可达或链路异常 |
+| 单实例新流准入速率 | > 50 流/秒 持续 1 分钟 | 准入路径串行，需水平扩接入层实例 |
+| `battle_offline_timeouts_total` | > 对局数的 5%/分钟 | 客户端保活缺失（含 **UDP/WS 的 SDK 周期心跳**这一已知待办） |
+
+## 8. 客户端版本门槛（gateway 登录入口专属）
+
+阶段 3 起战斗帧由客户端凭 `battle_ticket` **直连**接入层（需新 SDK），老客户端会「匹配成功但连不上」，
+故门槛必须在**匹配入口之前**生效：网关 `Login`/`Resume` 在**建立会话之前**校验，被拒请求不建立会话、
+不触达域、不进入匹配（后续业务 op 因无会话身份被拒 `INVALID_TOKEN`）。
+
+### 8.1 语义（`runtime.min_client_version`）
+
+| 配置 | 行为 |
+|---|---|
+| 空 | **仅记录**：把客户端上报版本与门槛值写进日志，一律放行（未设门槛的部署行为不变） |
+| 非空 | **登录期强制**：低于门槛 / 未上报 / 版本串非法一律拒绝（reason 常量 `CLIENT_VERSION_TOO_LOW`） |
+| 非空 + `min_client_version_mode: NEGOTIATE` | 仅记录不拒绝（灰度期逃生门） |
+
+- **「设置门槛即强制」是刻意的**：门槛与 mode 分开配时，漏配 mode 会静默退化成只记录，正是
+  「匹配成功但连不上」的成因。`OFF` 与 `ENFORCE` 在网关侧同义（proto3 标量区分不出「未配置」与
+  「显式 OFF」，缺省值按强制处理）；要只记录请显式写 `NEGOTIATE`。
+- 拒绝回执的 message 统一为「客户端版本<成因>：当前 `<上报值>`，最低要求 `<门槛>`，请升级客户端」，
+  成因区分「未上报 / 无法识别（需形如 1.2.3） / 过低」；客户端按 reason 分支即可，不必比对字面量。
+- **取值**：首个支持「战斗帧直连」的 SDK 版本。模板示例 `0.1.0` 只拒绝不报版本与 `0.0.x` 的旧客户端
+  （不误伤在用 SDK：Go `0.5.0` / TS `0.6.0` / C# `0.1.0` 均通过）；三 SDK 直连版本发布并确认覆盖后上调
+  （如 `0.7.0`）。**必须先发 SDK 再上调**，否则在用客户端会被一并拒绝。
+
+### 8.2 版本比较与非法串处置
+
+- 逐段**数字**比较（`0.10.0 > 0.9.0`，不是字符串比较）；段数不足按 0 补齐（`1.2` == `1.2.0`）；
+  构建元数据忽略（`1.2.0+build.5` == `1.2.0`）；两侧空白容忍；预发布低于同号正式版
+  （`1.2.0-rc.1 < 1.2.0`；预发布之间按字符串比较）。
+- **版本串非法按「低于门槛」处理**（复用同一 reason `CLIENT_VERSION_TOO_LOW`）：新增独立 reason 要改
+  `api/error/v1` 协议，且客户端与客服的分支只需「升级客户端」一条；用 message 的成因措辞区分即可。
+  未上报（空串）同样拒绝——旧客户端恰恰多数不报版本，放行等于把「匹配成功但连不上」放回来。

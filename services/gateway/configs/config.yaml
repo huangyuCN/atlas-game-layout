@@ -11,10 +11,18 @@ runtime:
   # 五面全由它派生（框架 namespace.Derive）。**必须显式配置，缺失即启动失败**（严格模式 R9）；
   # 取值限 [A-Za-z0-9_-]，非法字符同样启动失败。缺省约定与五面派生表见 docs/config.md。
   namespace: test
-  # 客户端版本门槛（M1 协议演进）：登录入口在网关，故该字段只在网关生效——
-  # OFF=不校验（缺省）；NEGOTIATE=只记录并暴露客户端版本、不拒绝（灰度期）；ENFORCE=低于 min_client_version 的登录被拒（带明确 reason）。
+  # 客户端版本门槛（M1 协议演进 + 阶段 3 战斗帧直连）：登录入口在网关，故该字段只在网关生效。
+  #   空   = 仅记录（记录客户端上报版本，不拒绝）——未设门槛的部署行为不变；
+  #   非空 = **登录期强制**：低于该版本 / 未上报 / 版本串非法一律拒绝（reason
+  #          CLIENT_VERSION_TOO_LOW，message 提示需要升级到的最低版本），在**会话建立之前**判定：
+  #          不建立会话、不进入匹配（被拒客户端后续业务 op 因无会话身份被拒）。
+  # 需要灰度只记录时显式配 min_client_version_mode: MIN_CLIENT_VERSION_MODE_NEGOTIATE（逃生门）；
+  # 缺省（含 OFF）与 ENFORCE 同义——「设置门槛即强制」，漏配 mode 不会静默退化成只记录。
+  # 取值 = 首个支持「战斗帧直连」的 SDK 版本（阶段 3 起战斗帧不再经网关，老客户端会
+  # 「匹配成功但连不上」）。模板示例 0.1.0 只拒绝不报版本与 0.0.x 的旧客户端，不误伤在用 SDK；
+  # 三 SDK 直连版本发布并确认覆盖后上调（如 0.7.0），且必须先发 SDK 再上调，
+  # 否则在用客户端会被一并拒绝（发布顺序见变更手册）。
   min_client_version: 0.1.0
-  min_client_version_mode: MIN_CLIENT_VERSION_MODE_NEGOTIATE
 registry:
   etcd:
     endpoints:
@@ -46,9 +54,9 @@ server:
     #   key_file: configs/tls/server.key
     #   ca_file: configs/tls/ca.crt   # 配了即校验客户端证书（client_auth=true 时强制要求）
     #   client_auth: false
-  # 四协议接入通道：节点缺失或 addr 为空 = 该协议不启用（不监听端口、不注册 handler），
-  # 模板按部署形态只暴露需要的通道。除 addr 外的参数均为注释示例
-  # （空 = 不覆盖底层默认；缺省约定唯一规则见 docs/config.md）。
+  # 业务协议接入通道（tcp/websocket）：节点缺失或 addr 为空 = 该协议不启用
+  # （不监听端口、不注册 handler），模板按部署形态只暴露需要的通道。
+  # 除 addr 外的参数均为注释示例（空 = 不覆盖底层默认；缺省约定唯一规则见 docs/config.md）。
   tcp:
     addr: 0.0.0.0:9001
     # no_delay: true              # 关闭 Nagle 算法（TCP_NODELAY）
@@ -74,27 +82,10 @@ server:
     # max_body_size: 1048576      # 单帧最大字节数
     # subprotocols: [atlas]       # 协商的子协议列表（不配 = 不限定）
     # tls:                        # TLS 字段同 http.tls（Server.TLS 共用）
-  kcp:
-    addr: 0.0.0.0:9003
-    # fast_profile: true          # 低延迟预设（nodelay/interval/resend/nc）；显式参数优先
-    # lan_profile: true           # 局域网预设；显式参数优先
-    # block_crypt: 0123456789abcdef0123456789abcdef   # 加密口令（长度不足会启动失败）
-    # fec_data_shards: 10         # FEC 数据分片（与 fec_parity_shards 必须成对）
-    # fec_parity_shards: 3
-    # window_snd: 128             # 发送窗口（与 window_rcv 必须成对）
-    # window_rcv: 128
-    # mtu: 1400                   # 最大传输单元（字节）
-    # max_body_size: 1048576      # 单帧最大字节数
-    # idle_timeout: 60s           # 连接空闲超时（不配 = 不限）
-    # write_timeout: 10s          # 单次写超时（不配 = 不限）
-    # max_conns: 10000            # 最大并发连接数（不配 = 不限）
-  udp:
-    addr: 0.0.0.0:9004
-    # pool_size: 4096             # 读写缓冲池大小
-    # read_buffer: 4096           # 单包读缓冲字节数
-    # max_body_size: 1048576      # 单包最大字节数
-    # idle_timeout: 60s           # 对端空闲超时（不配 = 不限）
-    # max_peers: 10000            # 最大对端数（不配 = 不限）
+  # 战斗帧面（kcp/udp）不在此服务：阶段 3 批次 5 起客户端凭 battle_ticket 直连
+  # **接入层**（services/edge，端口 7100/7101/7102）→ battle 帧面（9401/9402/9403）。
+  # 网关不再监听 KCP/UDP，也不再承载任何战斗 op（经网关发战斗 op 明确失败：
+  # 帧引擎层 TRANSPORT_NOT_FOUND，不是静默丢弃）。
 # 会话租期：redis 路由 TTL + 心跳续租周期，同时决定心跳超时判定阈值
 # （下调 = 断线发现更快，代价是 redis 心跳写更频繁）。
 # 取值应 ≥ 客户端会话心跳周期的 3 倍（允许连丢两次仍不掉线）：模板集成客户端心跳 10s，

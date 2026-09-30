@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Atlas.Client;
 using Atlas.Serialization;
+using Atlas.Battle.V1;
 using Atlas.Common.V1;
 using Atlas.Google.Protobuf;
 using Atlas.Matcher.V1;
@@ -254,8 +255,11 @@ public sealed class MatchStartedNotify
     [JsonPropertyName("playerIds")]
     public List<string>? PlayerIds { get; set; }
 
-    [JsonPropertyName("endpoint")]
-    public string? Endpoint { get; set; }
+    [JsonPropertyName("battleTicket")]
+    public byte[]? BattleTicket { get; set; }
+
+    [JsonPropertyName("endpoints")]
+    public List<EdgeEndpoint>? Endpoints { get; set; }
 
 }
 

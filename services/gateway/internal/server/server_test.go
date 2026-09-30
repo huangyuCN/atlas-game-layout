@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
@@ -19,9 +18,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/transport"
-	kcpt "github.com/huangyuCN/atlas/transport/kcp"
 	tcpt "github.com/huangyuCN/atlas/transport/tcp"
-	udpt "github.com/huangyuCN/atlas/transport/udp"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natss "github.com/nats-io/nats.go"
@@ -29,18 +26,16 @@ import (
 )
 
 // 测试引用的透传 op（注解生成路由表的寻址键，纯协议寻址字符串）。
+// 只列**网关承载**的域（game）：battle op 自阶段 3 批次 5 起不经网关（见 relay_test.go）。
 const (
-	opJoinBattle     = "/battle.v1.BattleService/JoinBattle"
-	opSendFrameInput = "/battle.v1.BattleService/SendFrameInput"
-	opSyncFrames     = "/battle.v1.BattleService/SyncFrames"
-	opEnterMatch     = "/game.v1.PlayerService/EnterMatchQueue"
-	opCancelMatch    = "/game.v1.PlayerService/CancelMatch"
-	opMatchStatus    = "/game.v1.PlayerService/GetMatchStatus"
-	opCreateParty    = "/game.v1.PlayerService/CreateParty"
-	opJoinParty      = "/game.v1.PlayerService/JoinParty"
-	opLeaveParty     = "/game.v1.PlayerService/LeaveParty"
-	opGetParty       = "/game.v1.PlayerService/GetParty"
-	opQueueParty     = "/game.v1.PlayerService/QueueParty"
+	opEnterMatch  = "/game.v1.PlayerService/EnterMatchQueue"
+	opCancelMatch = "/game.v1.PlayerService/CancelMatch"
+	opMatchStatus = "/game.v1.PlayerService/GetMatchStatus"
+	opCreateParty = "/game.v1.PlayerService/CreateParty"
+	opJoinParty   = "/game.v1.PlayerService/JoinParty"
+	opLeaveParty  = "/game.v1.PlayerService/LeaveParty"
+	opGetParty    = "/game.v1.PlayerService/GetParty"
+	opQueueParty  = "/game.v1.PlayerService/QueueParty"
 )
 
 // newSharedBackends 起共享中间件：miniredis 与内嵌 nats，返回发布用连接。
@@ -71,7 +66,6 @@ type gwEnv struct {
 	g      *Gateway
 	mock   *mockDomain // 域服务桩（断言投递与调用身份用）
 	push   *fakePusher // TCP 业务通道推送记录（会话回写断言用）
-	kcp    *fakePusher // KCP 战斗通道推送记录（通道绑定优先级断言用）
 	tcpSrv *tcpt.Server
 	tcpURL string
 }
@@ -82,7 +76,7 @@ func newGWEnv(t *testing.T, id string, mr *miniredis.Miniredis, natsURL string) 
 }
 
 // newGWEnvWithRedis 以真实/内存 redis 地址构造 gateway 实例（单测与集成共用装置）。
-// 四协议 Server 全量构造并完成会话 + 透传注册（验证装配路径），仅 TCP 启动
+// 业务协议 Server 全量构造并完成会话 + 透传注册（验证装配路径），仅 TCP 启动
 // （帧链路端到端用）；会话回写注入推送记录桩，断言不依赖真实客户端连接。
 func newGWEnvWithRedis(t *testing.T, id, redisAddr, natsURL string) *gwEnv {
 	return newGWEnvMeter(t, id, redisAddr, natsURL, metrics.Noop())
@@ -102,24 +96,20 @@ func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Co
 	}
 	t.Cleanup(nc.Close)
 
-	tcpSrv, wsSrv, kcpSrv, udpSrv := newTransportServers(t)
-	push, kcpPush := new(fakePusher), new(fakePusher)
+	tcpSrv, wsSrv := newTransportServers(t)
+	push := new(fakePusher)
 
 	sess := session.NewManager(session.NewRedisStore(cli), id, session.Options{TTL: 30 * time.Second})
 	mock := newMockDomain()
 	g := NewGateway(id, newRouteTable(t), sess, mock, mock, meter, nc, testPublisher(nc),
-		push, new(fakePusher), kcpPush, udpSrv, VersionGate{})
-	// 通道绑定副作用按生产装配声明（与 graph.go 一致）。
-	g.Relay().WithChannelBinding(opJoinBattle, relay.Slot(session.ChannelBattle))
+		push, new(fakePusher), VersionGate{})
 	cfg := &conf.Bootstrap{
 		Server: &configspb.Server{
 			Tcp:       &configspb.Server_TCP{Addr: "127.0.0.1:0"},
 			Websocket: &configspb.Server_WebSocket{Addr: "127.0.0.1:0"},
-			Kcp:       &configspb.Server_KCP{Addr: "127.0.0.1:0"},
-			Udp:       &configspb.Server_UDP{Addr: "127.0.0.1:0"},
 		},
 	}
-	if err := RegisterGatewayHandlers(cfg, tcpSrv, wsSrv, kcpSrv, udpSrv, g); err != nil {
+	if err := RegisterGatewayHandlers(cfg, tcpSrv, wsSrv, g); err != nil {
 		t.Fatalf("registerHandlers: %v", err)
 	}
 
@@ -137,14 +127,14 @@ func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Co
 		g:      g,
 		mock:   mock,
 		push:   push,
-		kcp:    kcpPush,
 		tcpSrv: tcpSrv,
 		tcpURL: tcpAddr(t, tcpSrv),
 	}
 }
 
-// newTransportServers 构造四协议传输服务端（仅构造不启动；注册在构造期即可完成）。
-func newTransportServers(t *testing.T) (*tcpt.Server, *wst.Server, *kcpt.Server, *udpt.Server) {
+// newTransportServers 构造业务协议传输服务端（仅构造不启动；注册在构造期即可完成）。
+// 战斗帧面（KCP/UDP）不在网关，故无对应服务端。
+func newTransportServers(t *testing.T) (*tcpt.Server, *wst.Server) {
 	t.Helper()
 	tcpSrv, err := tcpt.NewServer(tcpt.WithAddress("127.0.0.1:0"))
 	if err != nil {
@@ -154,26 +144,17 @@ func newTransportServers(t *testing.T) (*tcpt.Server, *wst.Server, *kcpt.Server,
 	if err != nil {
 		t.Fatalf("ws server: %v", err)
 	}
-	kcpSrv, err := kcpt.NewServer(kcpt.WithAddress("127.0.0.1:0"))
-	if err != nil {
-		t.Fatalf("kcp server: %v", err)
-	}
-	udpSrv, err := udpt.NewServer(udpt.WithAddress("127.0.0.1:0"))
-	if err != nil {
-		t.Fatalf("udp server: %v", err)
-	}
-	return tcpSrv, wsSrv, kcpSrv, udpSrv
+	return tcpSrv, wsSrv
 }
 
-// newRouteTable 合并注解生成的两张域路由表（与生产 graph.go 装配一致）。
+// newRouteTable 合并注解生成的域路由表（与生产 graph.go 装配一致）：
+// **只合并 game**——battle 的 CLIENT op 不经网关（阶段 3 批次 5 白名单收紧）。
 func newRouteTable(t *testing.T) relay.Table {
 	t.Helper()
-	table, err := relay.Merge(gamev1.PlayerServiceRouteTable, battlev1.BattleServiceRouteTable)
+	table, err := relay.Merge(gamev1.PlayerServiceRouteTable)
 	if err != nil {
 		t.Fatalf("relay.Merge: %v", err)
 	}
-	// 通道绑定副作用按生产装配声明（WithChannelBinding，与 graph.go 一致）：
-	// JoinBattle 转发成功后把当前连接绑定到玩家战斗通道。
 	return table
 }
 
@@ -243,18 +224,6 @@ func (e *gwEnv) forward(t *testing.T, ctx context.Context, operation string, req
 	return rep
 }
 
-// forwardTell 是单向 Tell 型透传的断言包装（不应有回执）。
-func (e *gwEnv) forwardTell(t *testing.T, ctx context.Context, operation string, req proto.Message) {
-	t.Helper()
-	rep, err := e.g.Relay().Forward(ctx, e.relayEntry(t, operation), req)
-	if err != nil {
-		t.Fatalf("Forward %s: %v", operation, err)
-	}
-	if rep != nil {
-		t.Fatalf("Tell 型透传不应有回执: %T", rep)
-	}
-}
-
 // waitFor 轮询等待异步链路条件成立（nats 订阅/清扫回调），超时返回 false。
 func waitFor(timeout time.Duration, cond func() bool) bool {
 	deadline := time.Now().Add(timeout)
@@ -287,7 +256,7 @@ func TestLoginLogoutClosesSession(t *testing.T) {
 		t.Fatalf("登录回执不符: %+v", login)
 	}
 	// 登录即建立会话（业务通道绑定连接 1）。
-	if sess, ok := env.sess.LocalSession("p-1"); !ok || sess.Biz == nil || sess.Biz.ID != 1 {
+	if sess, ok := env.sess.LocalSession("p-1"); !ok || sess.Conn == nil || sess.Conn.ID != 1 {
 		t.Fatalf("登录会话绑定不符: sess=%+v ok=%v", sess, ok)
 	}
 	// 心跳续租（身份由连接承载，以会话自身凭据续租）。
@@ -340,7 +309,7 @@ func TestResumeRestoresSession(t *testing.T) {
 		t.Fatalf("恢复回执不符: %+v", rep)
 	}
 	// 恢复后业务通道重绑新连接，旧连接反向索引注销。
-	if sess, ok := env.sess.LocalSession("p-1"); !ok || sess.Biz == nil || sess.Biz.ID != 2 {
+	if sess, ok := env.sess.LocalSession("p-1"); !ok || sess.Conn == nil || sess.Conn.ID != 2 {
 		t.Fatalf("恢复后业务通道应绑定新连接: sess=%+v", sess)
 	}
 	// 凭据不匹配拒绝恢复（旧令牌/被接管）。

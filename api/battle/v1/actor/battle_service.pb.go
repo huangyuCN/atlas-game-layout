@@ -27,6 +27,7 @@ type BattleService interface {
 	SyncFrames(ctx core.ActorContext, req *v1.SyncFramesReq) (*v1.SyncFramesReply, error)
 	Create(ctx core.ActorContext, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
 	GetState(ctx core.ActorContext, req *v1.GetStateReq) (*v1.GetStateReply, error)
+	IssueEntryTicket(ctx core.ActorContext, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error)
 }
 
 // UnimplementedBattleService 是兜底基类；业务 actor embed 它获得接口演进安全。
@@ -46,6 +47,9 @@ func (UnimplementedBattleService) Create(core.ActorContext, *v1.CreateBattleRequ
 }
 func (UnimplementedBattleService) GetState(core.ActorContext, *v1.GetStateReq) (*v1.GetStateReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.GetState")
+}
+func (UnimplementedBattleService) IssueEntryTicket(core.ActorContext, *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.IssueEntryTicket")
 }
 
 // battleServiceDecodeTable 是消息全名 → 类型化 Unmarshal 闭包的解码表（生成期静态绑定）。
@@ -68,6 +72,10 @@ var battleServiceDecodeTable = map[string]func([]byte) (proto.Message, error){
 	},
 	"battle.v1.GetStateReq": func(b []byte) (proto.Message, error) {
 		m := new(v1.GetStateReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"battle.v1.IssueEntryTicketReq": func(b []byte) (proto.Message, error) {
+		m := new(v1.IssueEntryTicketReq)
 		return m, proto.Unmarshal(b, m)
 	},
 }
@@ -105,6 +113,8 @@ func (d *battleServiceDispatch) OnAsk(ctx core.ActorContext, req any) (any, erro
 		return d.impl.Create(ctx, r)
 	case *v1.GetStateReq:
 		return d.impl.GetState(ctx, r)
+	case *v1.IssueEntryTicketReq:
+		return d.impl.IssueEntryTicket(ctx, r)
 	default:
 		return d.FallbackAsk(ctx, req)
 	}
@@ -222,6 +232,27 @@ func (c *BattleServiceClusterClient) GetState(ctx context.Context, pid types.PID
 		return v, nil
 	case []byte:
 		out := new(v1.GetStateReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// IssueEntryTicket 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *BattleServiceClusterClient) IssueEntryTicket(ctx context.Context, pid types.PID, req *v1.IssueEntryTicketReq, opts ...core.SendOption) (*v1.IssueEntryTicketReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *v1.IssueEntryTicketReply:
+		return v, nil
+	case []byte:
+		out := new(v1.IssueEntryTicketReply)
 		if err := proto.Unmarshal(v, out); err != nil {
 			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
 		}

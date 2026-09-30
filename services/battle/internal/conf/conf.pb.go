@@ -9,6 +9,7 @@
 package conf
 
 import (
+	v1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	configs "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -24,6 +25,105 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// BattleConf 是战斗域直连出票配置（阶段 3 批次 2）：
+// 入场票据的 AEAD 密钥与接入层各面地址，两者都由 battle 侧装配期校验。
+type BattleConf struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ticket_key 是入场票据密钥（base64 编码的 32 字节；接入层 edge.ticket_key 必须同值）：
+	// 缺失、base64 非法或长度不符即启动失败——不提供默认值。
+	TicketKey string `protobuf:"bytes,1,opt,name=ticket_key,json=ticketKey,proto3" json:"ticket_key,omitempty"`
+	// ticket_ttl 是票据有效期（time.ParseDuration 字符串，如 120s；空 = 120s；
+	// 必须为正）。应大于掉线重连窗口，窗口内重连可复用同一张票。
+	TicketTtl string `protobuf:"bytes,2,opt,name=ticket_ttl,json=ticketTtl,proto3" json:"ticket_ttl,omitempty"`
+	// edge_endpoints 是接入层「传输面 → 地址」列表（随成局推送下发给客户端，
+	// 全局唯一来源）：装配期校验**至少一面、面不重复、地址非空**，违反即启动失败。
+	// 复用 battle.v1.EdgeEndpoint（不另定义同形消息）：配置与契约共用同一套面枚举，
+	// 避免两处词表漂移。**不要求三面齐全**——只开 ws 的部署也能启动，缺面只影响用该面的客户端。
+	EdgeEndpoints []*v1.EdgeEndpoint `protobuf:"bytes,3,rep,name=edge_endpoints,json=edgeEndpoints,proto3" json:"edge_endpoints,omitempty"`
+	// frame_advertise_host 是**本节点帧端口对外的可达主机**——接入层从哪个主机能拨到本节点的
+	// ws/kcp/udp 帧端口（与 edge_endpoints 的语义不同：后者是**给客户端拨的接入层地址**）。
+	// 帧端口不在这里：端口取帧面服务端已绑定的真实地址。
+	//   - 不配（字段缺失）：回落到 edge_endpoints 的主机——**该回落仅适合同机部署**
+	//     （接入层与 battle 同一主机）；跨机部署必须显式配置，否则注册出去的端点会指向
+	//     接入层主机，接入层会拿自己的地址去拨后端（表现为连不上后端，且极难定位）；
+	//   - 显式配置：必须是非空、**不含端口**的主机部分（如 10.10.9.36 或 battle.internal）；
+	//     配了空串、纯空白或形如 host:port 的值一律装配期报错（不静默截断或回落）。
+	FrameAdvertiseHost *string `protobuf:"bytes,4,opt,name=frame_advertise_host,json=frameAdvertiseHost,proto3,oneof" json:"frame_advertise_host,omitempty"`
+	// offline_timeout 是掉线判定窗口（time.ParseDuration 字符串，如 15s；空 = 15s；必须为正；
+	// 0 或负值 = 关闭掉线判定，仅测试/特例使用）。
+	// 数据报面（KCP/UDP）没有关闭握手，掉线只能靠帧面的空闲读超时发现，故其 idle_timeout
+	// 缺省取本值的 1/3（缺省 15s → 5s）；装配期校验「数据报面 idle < offline_timeout」，
+	// 不满足即启动失败（否则掉线事件会迟到缺省的 120s，本策略形同虚设）。
+	OfflineTimeout string `protobuf:"bytes,5,opt,name=offline_timeout,json=offlineTimeout,proto3" json:"offline_timeout,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *BattleConf) Reset() {
+	*x = BattleConf{}
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BattleConf) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BattleConf) ProtoMessage() {}
+
+func (x *BattleConf) ProtoReflect() protoreflect.Message {
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BattleConf.ProtoReflect.Descriptor instead.
+func (*BattleConf) Descriptor() ([]byte, []int) {
+	return file_services_battle_internal_conf_conf_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *BattleConf) GetTicketKey() string {
+	if x != nil {
+		return x.TicketKey
+	}
+	return ""
+}
+
+func (x *BattleConf) GetTicketTtl() string {
+	if x != nil {
+		return x.TicketTtl
+	}
+	return ""
+}
+
+func (x *BattleConf) GetEdgeEndpoints() []*v1.EdgeEndpoint {
+	if x != nil {
+		return x.EdgeEndpoints
+	}
+	return nil
+}
+
+func (x *BattleConf) GetFrameAdvertiseHost() string {
+	if x != nil && x.FrameAdvertiseHost != nil {
+		return *x.FrameAdvertiseHost
+	}
+	return ""
+}
+
+func (x *BattleConf) GetOfflineTimeout() string {
+	if x != nil {
+		return x.OfflineTimeout
+	}
+	return ""
+}
+
 type Bootstrap struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Runtime  *configs.Runtime       `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
@@ -33,13 +133,15 @@ type Bootstrap struct {
 	Log      *configs.Log           `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
 	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
 	Observability *configs.Observability `protobuf:"bytes,6,opt,name=observability,proto3" json:"observability,omitempty"`
+	// battle 是直连出票配置（批次 2 起必填：缺段/缺密钥即启动失败）。
+	Battle        *BattleConf `protobuf:"bytes,7,opt,name=battle,proto3" json:"battle,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Bootstrap) Reset() {
 	*x = Bootstrap{}
-	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[0]
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -51,7 +153,7 @@ func (x *Bootstrap) String() string {
 func (*Bootstrap) ProtoMessage() {}
 
 func (x *Bootstrap) ProtoReflect() protoreflect.Message {
-	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[0]
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -64,7 +166,7 @@ func (x *Bootstrap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Bootstrap.ProtoReflect.Descriptor instead.
 func (*Bootstrap) Descriptor() ([]byte, []int) {
-	return file_services_battle_internal_conf_conf_proto_rawDescGZIP(), []int{0}
+	return file_services_battle_internal_conf_conf_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Bootstrap) GetRuntime() *configs.Runtime {
@@ -109,18 +211,36 @@ func (x *Bootstrap) GetObservability() *configs.Observability {
 	return nil
 }
 
+func (x *Bootstrap) GetBattle() *BattleConf {
+	if x != nil {
+		return x.Battle
+	}
+	return nil
+}
+
 var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xb4\x02\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\x83\x02\n" +
+	"\n" +
+	"BattleConf\x12\x1d\n" +
+	"\n" +
+	"ticket_key\x18\x01 \x01(\tR\tticketKey\x12\x1d\n" +
+	"\n" +
+	"ticket_ttl\x18\x02 \x01(\tR\tticketTtl\x12>\n" +
+	"\x0eedge_endpoints\x18\x03 \x03(\v2\x17.battle.v1.EdgeEndpointR\redgeEndpoints\x125\n" +
+	"\x14frame_advertise_host\x18\x04 \x01(\tH\x00R\x12frameAdvertiseHost\x88\x01\x01\x12'\n" +
+	"\x0foffline_timeout\x18\x05 \x01(\tR\x0eofflineTimeoutB\x17\n" +
+	"\x15_frame_advertise_host\"\xe5\x02\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
 	"\x06server\x18\x03 \x01(\v2\x15.atlas.configs.ServerR\x06server\x12'\n" +
 	"\x04data\x18\x04 \x01(\v2\x13.atlas.configs.DataR\x04data\x12$\n" +
 	"\x03log\x18\x05 \x01(\v2\x12.atlas.configs.LogR\x03log\x12B\n" +
-	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservabilityBKZIgithub.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;confb\x06proto3"
+	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x12/\n" +
+	"\x06battle\x18\a \x01(\v2\x17.battle.conf.BattleConfR\x06battleBKZIgithub.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;confb\x06proto3"
 
 var (
 	file_services_battle_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -134,28 +254,32 @@ func file_services_battle_internal_conf_conf_proto_rawDescGZIP() []byte {
 	return file_services_battle_internal_conf_conf_proto_rawDescData
 }
 
-var file_services_battle_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_services_battle_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_services_battle_internal_conf_conf_proto_goTypes = []any{
-	(*Bootstrap)(nil),             // 0: battle.conf.Bootstrap
-	(*configs.Runtime)(nil),       // 1: atlas.configs.Runtime
-	(*configs.Registry)(nil),      // 2: atlas.configs.Registry
-	(*configs.Server)(nil),        // 3: atlas.configs.Server
-	(*configs.Data)(nil),          // 4: atlas.configs.Data
-	(*configs.Log)(nil),           // 5: atlas.configs.Log
-	(*configs.Observability)(nil), // 6: atlas.configs.Observability
+	(*BattleConf)(nil),            // 0: battle.conf.BattleConf
+	(*Bootstrap)(nil),             // 1: battle.conf.Bootstrap
+	(*v1.EdgeEndpoint)(nil),       // 2: battle.v1.EdgeEndpoint
+	(*configs.Runtime)(nil),       // 3: atlas.configs.Runtime
+	(*configs.Registry)(nil),      // 4: atlas.configs.Registry
+	(*configs.Server)(nil),        // 5: atlas.configs.Server
+	(*configs.Data)(nil),          // 6: atlas.configs.Data
+	(*configs.Log)(nil),           // 7: atlas.configs.Log
+	(*configs.Observability)(nil), // 8: atlas.configs.Observability
 }
 var file_services_battle_internal_conf_conf_proto_depIdxs = []int32{
-	1, // 0: battle.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
-	2, // 1: battle.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
-	3, // 2: battle.conf.Bootstrap.server:type_name -> atlas.configs.Server
-	4, // 3: battle.conf.Bootstrap.data:type_name -> atlas.configs.Data
-	5, // 4: battle.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	6, // 5: battle.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	2, // 0: battle.conf.BattleConf.edge_endpoints:type_name -> battle.v1.EdgeEndpoint
+	3, // 1: battle.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
+	4, // 2: battle.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
+	5, // 3: battle.conf.Bootstrap.server:type_name -> atlas.configs.Server
+	6, // 4: battle.conf.Bootstrap.data:type_name -> atlas.configs.Data
+	7, // 5: battle.conf.Bootstrap.log:type_name -> atlas.configs.Log
+	8, // 6: battle.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	0, // 7: battle.conf.Bootstrap.battle:type_name -> battle.conf.BattleConf
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_services_battle_internal_conf_conf_proto_init() }
@@ -163,13 +287,14 @@ func file_services_battle_internal_conf_conf_proto_init() {
 	if File_services_battle_internal_conf_conf_proto != nil {
 		return
 	}
+	file_services_battle_internal_conf_conf_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_services_battle_internal_conf_conf_proto_rawDesc), len(file_services_battle_internal_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

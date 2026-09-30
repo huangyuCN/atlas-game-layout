@@ -17,6 +17,22 @@ using Atlas.Google.Protobuf;
 
 namespace Atlas.Battle.V1;
 
+/// <summary>EdgeTransport 的枚举名常量（protojson 以枚举名下发；未知值前向兼容）。</summary>
+public static class EdgeTransportConst
+{
+    public const string EDGETRANSPORTUNSPECIFIED = "EDGE_TRANSPORT_UNSPECIFIED";
+    public const string EDGETRANSPORTWS = "EDGE_TRANSPORT_WS";
+    public const string EDGETRANSPORTKCP = "EDGE_TRANSPORT_KCP";
+    public const string EDGETRANSPORTUDP = "EDGE_TRANSPORT_UDP";
+}
+
+/// <summary>PlayerOutReason 的枚举名常量（protojson 以枚举名下发；未知值前向兼容）。</summary>
+public static class PlayerOutReasonConst
+{
+    public const string PLAYEROUTREASONUNSPECIFIED = "PLAYER_OUT_REASON_UNSPECIFIED";
+    public const string PLAYEROUTREASONOFFLINETIMEOUT = "PLAYER_OUT_REASON_OFFLINE_TIMEOUT";
+}
+
 /// <summary>JoinBattleReq DTO（protojson JSON 语义）。</summary>
 public sealed class JoinBattleReq
 {
@@ -80,6 +96,50 @@ public sealed class SyncFramesReply
 
 }
 
+/// <summary>IssueEntryTicketReq DTO（protojson JSON 语义）。</summary>
+public sealed class IssueEntryTicketReq
+{
+    [JsonPropertyName("battleId")]
+    public string? BattleId { get; set; }
+
+}
+
+/// <summary>EdgeEndpoint DTO（protojson JSON 语义）。</summary>
+public sealed class EdgeEndpoint
+{
+    [JsonPropertyName("transport")]
+    public string? Transport { get; set; }
+
+    [JsonPropertyName("address")]
+    public string? Address { get; set; }
+
+}
+
+/// <summary>BattleTicketEntry DTO（protojson JSON 语义）。</summary>
+public sealed class BattleTicketEntry
+{
+    [JsonPropertyName("playerId")]
+    public string? PlayerId { get; set; }
+
+    [JsonPropertyName("ticket")]
+    public byte[]? Ticket { get; set; }
+
+}
+
+/// <summary>IssueEntryTicketReply DTO（protojson JSON 语义）。</summary>
+public sealed class IssueEntryTicketReply
+{
+    [JsonPropertyName("endpoints")]
+    public List<EdgeEndpoint>? Endpoints { get; set; }
+
+    [JsonPropertyName("tickets")]
+    public List<BattleTicketEntry>? Tickets { get; set; }
+
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("expiresAtUnixMs")]
+    public long? ExpiresAtUnixMs { get; set; }
+
+}
+
 /// <summary>FrameBroadcast DTO（protojson JSON 语义）。</summary>
 public sealed class FrameBroadcast
 {
@@ -99,6 +159,20 @@ public sealed class BattleEndNotify
 
     [JsonPropertyName("winnerPlayerId")]
     public string? WinnerPlayerId { get; set; }
+
+}
+
+/// <summary>PlayerOutNotify DTO（protojson JSON 语义）。</summary>
+public sealed class PlayerOutNotify
+{
+    [JsonPropertyName("battleId")]
+    public string? BattleId { get; set; }
+
+    [JsonPropertyName("playerId")]
+    public string? PlayerId { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 
 }
 
@@ -170,5 +244,6 @@ public static class BattleServicePushOps
 {
     public const string FrameBroadcast = "/battle.v1.FrameBroadcast";
     public const string BattleEndNotify = "/battle.v1.BattleEndNotify";
+    public const string PlayerOutNotify = "/battle.v1.PlayerOutNotify";
 }
 

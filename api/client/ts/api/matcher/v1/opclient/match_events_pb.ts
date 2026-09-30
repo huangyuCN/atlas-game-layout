@@ -3,12 +3,14 @@
 // 序列化语义（protojson）：字段名 lowerCamelCase、int64/uint64 与 bytes 为 string、
 // 零值省略 → 全部字段可缺省；枚举以枚举名（字符串）下发。
 
+import type { BattleTicketEntry, EdgeEndpoint } from "../../../battle/v1/opclient/battle_service_pb.js";
 
 export interface MatchStartedEvent {
   matchId?: string; // matcher.v1.MatchStartedEvent.match_id
   battleId?: string; // matcher.v1.MatchStartedEvent.battle_id
   playerIds?: string[]; // matcher.v1.MatchStartedEvent.player_ids
-  battleEndpoint?: string; // matcher.v1.MatchStartedEvent.battle_endpoint
+  battleTickets?: BattleTicketEntry[]; // matcher.v1.MatchStartedEvent.battle_tickets
+  battleEndpoints?: EdgeEndpoint[]; // matcher.v1.MatchStartedEvent.battle_endpoints
 }
 
 export interface MatchFailedEvent {

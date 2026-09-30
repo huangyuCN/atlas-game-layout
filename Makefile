@@ -1,10 +1,10 @@
 # Atlas Game Layout Makefile
-# 游戏单仓模板构建入口：四服务构建/运行、proto 生成、中间件环境。
+# 游戏单仓模板构建入口：五服务（gateway/game/matcher/battle/edge）构建/运行、proto 生成、中间件环境。
 
 .DEFAULT_GOAL := help
 
 BIN_DIR := bin
-SERVICES := gateway game matcher battle
+SERVICES := gateway game matcher battle edge
 GO ?= go
 PROTOC ?= protoc
 
@@ -18,7 +18,10 @@ LDFLAGS := -X $(MODULE)/lib/version.Version=$(VERSION) \
            -X $(MODULE)/lib/version.Commit=$(COMMIT) \
            -X $(MODULE)/lib/version.BuildTime=$(BUILD_TIME)
 
-.PHONY: help build build-gmctl lint comment-lint check-dup check-deps run-all compose proto proto-tools clean $(addprefix run-,$(SERVICES)) $(addprefix build-,$(SERVICES))
+# 注意：这里**不能**把 `$(addprefix build-,$(SERVICES))` 也列为 .PHONY——GNU make 对 .PHONY
+# 目标会跳过隐式规则搜索，声明后 `make build-<服务>` 会命中「无配方伪目标」而空转成
+# "Nothing to be done"，真正的 `build-%:` 配方永不执行。改由 FORCE 前置拿到等价的「永远重建」语义。
+.PHONY: help build build-gmctl lint comment-lint check-dup check-deps run-all compose proto proto-tools clean FORCE
 
 help: ## 列出所有目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -29,9 +32,13 @@ build: ## 构建全部服务到 ./bin
 		$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$$s ./services/$$s/cmd || exit 1; \
 	done
 
-build-%: ## 构建单个服务（make build-gateway）
+build-%: FORCE ## 构建单个服务（make build-gateway）
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$* ./services/$*/cmd
+
+# FORCE 是空配方伪目标：作 `build-%` 的前置，使每个 `make build-<服务>` 都必然重建
+#（等价于「该目标是 phony」，但不触发 .PHONY 跳过隐式规则搜索的行为）。
+FORCE:
 
 build-gmctl: ## 构建 GM 命令行到 ./bin/gmctl（管理面 internal listener 的运维工具，无版本注入）
 	@mkdir -p $(BIN_DIR)
@@ -52,17 +59,18 @@ check-deps: ## 依赖边界检查：网关/matcher 不得依赖 actor 集群运�
 comment-lint: ## Go doc 注释规范检查（首词=声明名等，详见 docs/go-comments.md；违规退出码 1）
 	$(GO) run ./scripts/go-comment-lint .
 
-run-%: ## 运行单个服务（make run-gateway）
+run-%: FORCE ## 运行单个服务（make run-gateway）
 	$(GO) run ./services/$*/cmd
 
-run-all: ## 一键起四服务（前台交错输出，Ctrl-C 全部退出并等待子进程结束）
+run-all: ## 一键起全部服务（前台交错输出，Ctrl-C 全部退出并等待子进程结束）
 	@trap 'kill 0; wait' INT TERM; \
 	for s in $(SERVICES); do $(GO) run ./services/$$s/cmd & done; wait
 
-# e2e 客户端形态：dual（TCP+KCP 双通道）/ single（WS 单通道）/ party / fault / kick。
+# e2e 客户端形态：dual（TCP 业务通道 + KCP 直连帧面）/ single（WS 业务通道 + WS 直连帧面）
+# / party / fault / kick / freeze / direct（战斗帧一律直连 battle 帧面，阶段 3 批次 5 起不经网关）。
 E2E_MODE ?= dual
 
-e2e: ## 运行 e2e 闭环脚本（脚本自起四服务，仅需先 make compose；-e E2E_MODE=single 切 WS 单通道）
+e2e: ## 运行 e2e 闭环脚本（脚本自起所需服务，仅需先 make compose；-e E2E_MODE=single 切 WS 形态）
 	$(GO) run ./scripts/e2e -mode $(E2E_MODE)
 
 
@@ -99,7 +107,10 @@ API_DOMAIN_PROTOS := api/game/v1/player_service.proto api/battle/v1/battle_servi
 API_SESSION_PROTOS := api/gateway/v1/session.proto
 # 管理面：只进 go/go-grpc/openapi（理由见上），绝不进 atlas-http/atlas-actor/atlas-client 与四传输插件。
 API_ADMIN_PROTOS := api/admin/game/v1/admin.proto
-API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_DOMAIN_PROTOS) $(API_SESSION_PROTOS)
+# migration.proto 是战斗迁移控制面的消息-only 契约（阶段 3 批次 7）：不进 route 注解，
+# 只产出 --go_out 的 Go 消息（不产生 actor/rpc/opclient/传输插件产物）。
+API_MIGRATION_PROTOS := api/battle/v1/migration.proto
+API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_DOMAIN_PROTOS) $(API_SESSION_PROTOS) $(API_MIGRATION_PROTOS)
 
 .PHONY: proto proto-tools
 

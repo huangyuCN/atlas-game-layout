@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
-	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
+	"github.com/huangyuCN/atlas/contrib/actor/relay"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame"
@@ -28,136 +27,30 @@ func forwardParty(t *testing.T, env *gwEnv, ctx context.Context, op string, req 
 	return rep
 }
 
-// battleToken 登录玩家并返回其会话凭据（战斗透传用例共用装置）。
-func battleToken(t *testing.T, env *gwEnv, playerID string) string {
-	t.Helper()
-	return env.login(t, 1, playerID).GetToken()
-}
-
-// TestJoinBattleBindsBattleChannel 验证 JoinBattle 透传成功后绑定战斗通道：
-// 帧会话槽承载身份（KCP 形态），推送经战斗通道优先下发。
-func TestJoinBattleBindsBattleChannel(t *testing.T) {
-	mr, natsURL, pub := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-
-	token := battleToken(t, env, "p-1")
-	ctx := connCtx(transport.KindKCP, opJoinBattle, 77, token)
-	rep := env.forward(t, ctx, opJoinBattle, &battlev1.JoinBattleReq{BattleId: "b-1"})
-	join, ok := rep.(*battlev1.JoinBattleReply)
-	if !ok {
-		t.Fatalf("回执类型异常: %T", rep)
-	}
-	if join.GetMeta().GetSessionId() != "b-1" || join.GetCurrentFrame() != 3 || join.GetSnapshot() == nil {
-		t.Fatalf("JoinBattle 元信息回执不符: %+v", join)
-	}
-	// 战斗通道已绑定 KCP 连接，业务通道不受影响。
-	sess, ok := env.sess.LocalSession("p-1")
-	if !ok || sess.Biz == nil || sess.Biz.ID != 1 {
-		t.Fatalf("业务通道绑定不符: sess=%+v ok=%v", sess, ok)
-	}
-	if sess.Battle == nil || sess.Battle.ID != 77 {
-		t.Fatalf("战斗通道未绑定 KCP 连接: %+v", sess.Battle)
-	}
-	// 绑定后推送经战斗通道下发（业务通道不重复下发）。
-	pctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := PublishPush(pctx, testPublisher(pub), "p-1", gamev1opclient.PlayerServicePushOps.MatchStartedNotify, []byte(`{"match_id":"m-1"}`)); err != nil {
-		t.Fatalf("PublishPush: %v", err)
-	}
-	if !waitFor(2*time.Second, func() bool {
-		return hasPush(env.kcp.snapshot(), 77, gamev1opclient.PlayerServicePushOps.MatchStartedNotify)
-	}) {
-		t.Fatalf("战斗通道未收到推送: %+v", env.kcp.snapshot())
-	}
-	time.Sleep(200 * time.Millisecond)
-	if hasPush(env.push.snapshot(), 1, gamev1opclient.PlayerServicePushOps.MatchStartedNotify) {
-		t.Fatal("推送应仅经战斗通道下发")
-	}
-}
-
-// TestJoinBattleRejectsNonMember 验证 battle actor 拒绝非参战玩家且不绑定战斗通道。
-func TestJoinBattleRejectsNonMember(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-	env.mock.joinOK = false
-
-	token := battleToken(t, env, "p-1")
-	ctx := connCtx(transport.KindKCP, opJoinBattle, 77, token)
-	entry := env.relayEntry(t, opJoinBattle)
-	if _, err := env.g.Relay().Forward(ctx, entry, &battlev1.JoinBattleReq{BattleId: "b-1"}); err == nil {
-		t.Fatal("非参战玩家加入战斗应报错")
-	}
-	// 业务通道会话保留；战斗通道未绑定。
-	sess, ok := env.sess.LocalSession("p-1")
-	if !ok || sess.Biz == nil {
-		t.Fatalf("业务通道会话应存在: sess=%+v ok=%v", sess, ok)
-	}
-	if sess.Battle != nil {
-		t.Fatalf("被拒加入后不应绑定战斗通道: %+v", sess.Battle)
-	}
-}
-
-// TestSendFrameInputForwardsToBattle 验证帧输入 Tell 透传 battle actor（载荷原样，
-// 身份经 sender 注入；伪造载荷字段不再由 gateway 改写）。
-func TestSendFrameInputForwardsToBattle(t *testing.T) {
+// TestBattleOpsNotRoutedByGateway 是阶段 3 批次 5 的破坏性断言（单测层）：
+// 网关的路由表只合并 **game** 域（装配白名单收紧），battle 的 CLIENT op 一个都不在表里。
+// 经网关发战斗 op 因此在帧引擎层**明确失败**（TRANSPORT_NOT_FOUND，不是静默丢弃），
+// 客户端只能凭 battle_ticket 直连接入层 → battle 帧面。
+func TestBattleOpsNotRoutedByGateway(t *testing.T) {
 	mr, natsURL, _ := newSharedBackends(t)
 	env := newGWEnv(t, "gw-a", mr, natsURL)
 
-	token := battleToken(t, env, "p-1")
-	joinCtx := connCtx(transport.KindKCP, opJoinBattle, 77, token)
-	env.forward(t, joinCtx, opJoinBattle, &battlev1.JoinBattleReq{BattleId: "b-1"})
-
-	// 帧输入上行（含伪造的载荷身份 p-9：透传引擎不改写业务载荷）。
-	inCtx := connCtx(transport.KindKCP, opSendFrameInput, 77, token)
-	env.forwardTell(t, inCtx, opSendFrameInput, &battlev1.FrameInputReq{
-		BattleId: "b-1",
-		Input:    &locksteppb.LockstepInput{FrameId: 1, PlayerId: "p-9", Payload: []byte("up")},
-	})
-	ins := env.mock.frameInputs["b-1"]
-	if len(ins) != 1 || ins[0].GetBattleId() != "b-1" ||
-		string(ins[0].GetInput().GetPayload()) != "up" || ins[0].GetInput().GetPlayerId() != "p-9" {
-		t.Fatalf("帧输入投递不符（载荷应原样透传）: %+v", ins)
+	clientOps := 0
+	for op, entry := range battlev1.BattleServiceRouteTable {
+		if entry.Access != relay.AccessClient {
+			continue
+		}
+		clientOps++
+		if _, ok := env.g.Relay().Lookup(op); ok {
+			t.Errorf("battle CLIENT op %s 不应出现在网关路由表（白名单只收 game）", op)
+		}
 	}
-}
-
-// TestSendFrameInputRequiresBinding 验证未绑定身份的连接发帧输入被拒。
-func TestSendFrameInputRequiresBinding(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-
-	ctx := connCtx(transport.KindKCP, opSendFrameInput, 5, "")
-	entry := env.relayEntry(t, opSendFrameInput)
-	_, err := env.g.Relay().Forward(ctx, entry, &battlev1.FrameInputReq{
-		BattleId: "b-1",
-		Input:    &locksteppb.LockstepInput{FrameId: 1, PlayerId: "p-1", Payload: []byte("up")},
-	})
-	if !errorv1.IsInvalidToken(err) {
-		t.Fatalf("未绑定身份应 INVALID_TOKEN, got %v", err)
+	if clientOps == 0 {
+		t.Fatal("battle 路由表没有 CLIENT op：本断言失去意义（表形态变了？）")
 	}
-}
-
-// TestSyncFramesForwardsToBattle 验证补帧请求透传 battle actor 并回执缺失帧。
-func TestSyncFramesForwardsToBattle(t *testing.T) {
-	mr, natsURL, _ := newSharedBackends(t)
-	env := newGWEnv(t, "gw-a", mr, natsURL)
-
-	token := battleToken(t, env, "p-1")
-	joinCtx := connCtx(transport.KindKCP, opJoinBattle, 77, token)
-	env.forward(t, joinCtx, opJoinBattle, &battlev1.JoinBattleReq{BattleId: "b-1"})
-
-	syncCtx := connCtx(transport.KindKCP, opSyncFrames, 77, token)
-	rep := env.forward(t, syncCtx, opSyncFrames, &battlev1.SyncFramesReq{BattleId: "b-1", LastSeenFrame: 3})
-	sr, ok := rep.(*battlev1.SyncFramesReply)
-	if !ok {
-		t.Fatalf("回执类型异常: %T", rep)
-	}
-	if sr.GetCurrentFrame() != 5 || len(sr.GetMissed()) != 1 || sr.GetMissed()[0].GetFrameId() != 4 {
-		t.Fatalf("补帧回执不符: %+v", sr)
-	}
-	// 补帧请求已按战斗 ID 路由投递（携带断点帧号）。
-	recs := env.mock.reconnects["b-1"]
-	if len(recs) != 1 || recs[0].GetLastSeenFrame() != 3 {
-		t.Fatalf("补帧投递不符: %+v", recs)
+	// 正对照：game 域 op 仍在表里——白名单只收紧了 battle，不是把透传整个关掉。
+	if _, ok := env.g.Relay().Lookup(opEnterMatch); !ok {
+		t.Fatal("game 域 op 应在网关路由表中（透传引擎仍服务业务 op）")
 	}
 }
 
@@ -243,7 +136,7 @@ func TestPartyProjectionForwardsToPlayerActor(t *testing.T) {
 }
 
 // TestRelayTCPWireForward 验证透传 handler 在真实 TCP 帧链路上的端到端行为：
-// 会话登录（生成桩）后业务 op 帧 → relayHandler 解码 → Relay.Forward → 编码回执；
+// 会话登录（生成桩）后业务 op 帧 → frameops handler 解码 → 身份解析 → 远端投递 → 编码回执；
 // 未登录连接被拒（INVALID_TOKEN）。
 func TestRelayTCPWireForward(t *testing.T) {
 	mr, natsURL, _ := newSharedBackends(t)
