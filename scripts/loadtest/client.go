@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -259,10 +260,17 @@ type pumpCfg struct {
 	pps      int           // 每连接每秒帧输入数（上行包速率）
 	probe    time.Duration // SyncFrames 探针间隔（RTT 样本来源）
 	duration time.Duration // 稳定负载时长
+	jitter   bool          // 探针相位抖动开关（诊断：错开各连接的探针相位）
 }
 
 // pump 在 duration 内按目标包速率发帧输入（Tell 无回执），并按 probe 间隔打 RTT 探针。
+//
+// -probe-jitter 时先随机睡一个间隔再开探针 ticker：512 条连接的探针相位一旦对齐，
+// 每秒会出现「512 个 SyncFrames 同刻齐发」的自造排队，p99 会被这一现象主导（诊断口径）。
 func (p *loadPlayer) pump(ctx context.Context, cfg pumpCfg) {
+	if cfg.jitter && cfg.probe > 0 {
+		time.Sleep(rand.N(cfg.probe))
+	}
 	interval := time.Second / time.Duration(max(cfg.pps, 1))
 	inputTick := time.NewTicker(max(interval, time.Millisecond))
 	defer inputTick.Stop()

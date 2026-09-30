@@ -52,6 +52,23 @@ type report struct {
 	Handshake latency `json:"handshake_rtt_ms"`
 	Probe     latency `json:"frame_rtt_ms"`
 	Downlink  latency `json:"broadcast_downlink_ms"`
+
+	// 分段口径（p99 归因用）：建流窗口 = 建连/准入/入局全程；稳态窗口 = 负载末段。
+	// DialProbe/SteadyProbe 是同一批 SyncFrames 探针按打点时刻切开的两段。
+	DialS       float64 `json:"dial_phase_s"`
+	SteadyS     float64 `json:"steady_window_s"`
+	DialProbe   latency `json:"dial_rtt_ms"`
+	SteadyProbe latency `json:"steady_rtt_ms"`
+	DialDown    latency `json:"dial_broadcast_downlink_ms"`
+	SteadyDown  latency `json:"steady_broadcast_downlink_ms"`
+}
+
+// windows 是一轮压测的分段边界（建流窗口 = [dialStart, dialEnd]；稳态 = 负载末 steady 秒）。
+type windows struct {
+	dialStart time.Time
+	dialEnd   time.Time
+	pumpEnd   time.Time
+	steady    time.Duration
 }
 
 // loadRun 是一次压测的装配与负载参数。
@@ -62,6 +79,7 @@ type loadRun struct {
 	totalTimeout   time.Duration
 	via            string
 	transport      string
+	steady         time.Duration
 	edgeWS         string
 	edgeUDP        string
 	battleWS       string
@@ -108,6 +126,9 @@ func parseFlags() loadRun {
 	pps := flag.Int("pps", 20, "每连接每秒帧输入数（上行包速率）")
 	probe := flag.Duration("probe", time.Second, "每连接 SyncFrames 探针间隔（往返延迟样本来源）")
 	duration := flag.Duration("duration", 20*time.Second, "稳定负载时长")
+	steady := flag.Duration("steady-window", 5*time.Second, "稳态窗口长度（取负载末段该时长单独给分位数）")
+	probeJitter := flag.Bool("probe-jitter", false,
+		"探针相位抖动：每连接的探针随机错开一个间隔（诊断用：512 条连接同刻齐发会自造排队，抬高 p99）")
 	connectTimeout := flag.Duration("connect-timeout", 60*time.Second, "建连与入局阶段的总超时")
 	conc := flag.Int("dial-concurrency", 32, "建连/注册的并发度（压太高会打爆注册链路）")
 	edgeWS := flag.String("edge-ws", "127.0.0.1:7400", "接入层 WS 面监听地址")
@@ -124,9 +145,9 @@ func parseFlags() loadRun {
 	}
 	return loadRun{
 		players: *players, dialConc: *conc, connectTimeout: *connectTimeout, totalTimeout: *total,
-		via: *via, transport: *transport, edgeWS: *edgeWS, edgeUDP: *edgeUDP,
+		via: *via, transport: *transport, steady: *steady, edgeWS: *edgeWS, edgeUDP: *edgeUDP,
 		limits: battleLimits{maxFrames: *maxFrames, snapshotEvery: *snapEvery},
-		pump:   pumpCfg{pps: *pps, probe: *probe, duration: *duration},
+		pump:   pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
 	}
 }
 
@@ -146,8 +167,11 @@ func runLoad(ctx context.Context, st *stack, cfg loadRun) (*report, error) {
 	fmt.Printf("[匹配] 成局 %d 局（收到成局通知的玩家 %d/%d）\n", battles, matched, len(ps))
 
 	active := matchedPlayers(ps)
+	dialStart := time.Now()
 	connected, failed := dialAndJoin(ctx, active, cfg)
-	fmt.Printf("[直连] via=%s transport=%s 建连成功 %d / 失败 %d\n", cfg.via, cfg.transport, connected, failed)
+	dialEnd := time.Now()
+	fmt.Printf("[直连] via=%s transport=%s 建连成功 %d / 失败 %d（建流窗口 %.1fs）\n",
+		cfg.via, cfg.transport, connected, failed, dialEnd.Sub(dialStart).Seconds())
 	if connected == 0 {
 		return nil, fmt.Errorf("没有任何帧连接建立成功（via=%s transport=%s）", cfg.via, cfg.transport)
 	}
@@ -155,7 +179,8 @@ func runLoad(ctx context.Context, st *stack, cfg loadRun) (*report, error) {
 	start := time.Now()
 	pumpAll(ctx, active, cfg.pump)
 	elapsed := time.Since(start)
-	rep := collect(active, cfg, battles, failed, elapsed)
+	win := windows{dialStart: dialStart, dialEnd: dialEnd, pumpEnd: time.Now(), steady: cfg.steady}
+	rep := collect(active, cfg, battles, failed, elapsed, win)
 	rep.EdgeStreams = st.proxy().ActiveStreams()
 	return rep, nil
 }
@@ -274,8 +299,8 @@ func pumpAll(ctx context.Context, ps []*loadPlayer, cfg pumpCfg) {
 	wg.Wait()
 }
 
-// collect 汇总全部连接的样本与计数。
-func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Duration) *report {
+// collect 汇总全部连接的样本与计数，并把探针/下行样本切成「建流窗口 vs 稳态窗口」两段。
+func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Duration, win windows) *report {
 	rep := &report{
 		Via: cfg.via, Transport: cfg.transport, PlayersWant: cfg.players,
 		Battles: battles, ConnectFailed: failed,
@@ -303,6 +328,13 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 	rep.Handshake = summarize(hs.sorted())
 	rep.Probe = summarize(pr.sorted())
 	rep.Downlink = summarize(dl.sorted())
+	rep.DialS = win.dialEnd.Sub(win.dialStart).Seconds()
+	rep.SteadyS = win.steady.Seconds()
+	rep.DialProbe = summarize(pr.window(win.dialStart, win.dialEnd))
+	rep.DialDown = summarize(dl.window(win.dialStart, win.dialEnd))
+	steadyFrom := win.pumpEnd.Add(-win.steady)
+	rep.SteadyProbe = summarize(pr.window(steadyFrom, win.pumpEnd))
+	rep.SteadyDown = summarize(dl.window(steadyFrom, win.pumpEnd))
 	return rep
 }
 
@@ -319,6 +351,12 @@ func printReport(r *report) {
 		r.Probe.P50, r.Probe.P95, r.Probe.P99, r.Probe.Count)
 	fmt.Printf("      帧广播下行 p50=%.2fms p95=%.2fms p99=%.2fms（n=%d）\n",
 		r.Downlink.P50, r.Downlink.P95, r.Downlink.P99, r.Downlink.Count)
+	fmt.Printf("分段 建流窗口 %.1fs：探针 p50=%.2f p95=%.2f p99=%.2f（n=%d）；下行 p99=%.2f（n=%d）\n",
+		r.DialS, r.DialProbe.P50, r.DialProbe.P95, r.DialProbe.P99, r.DialProbe.Count,
+		r.DialDown.P99, r.DialDown.Count)
+	fmt.Printf("     稳态窗口 末 %.1fs：探针 p50=%.2f p95=%.2f p99=%.2f（n=%d）；下行 p99=%.2f（n=%d）\n",
+		r.SteadyS, r.SteadyProbe.P50, r.SteadyProbe.P95, r.SteadyProbe.P99, r.SteadyProbe.Count,
+		r.SteadyDown.P99, r.SteadyDown.Count)
 	if r.Via == "edge" {
 		fmt.Printf("接入层：负载结束时活跃流 %d\n", r.EdgeStreams)
 	}
