@@ -9,6 +9,8 @@
 //   - battle.go         装配/配置/生命周期（本文件）
 //   - battle_session.go 会话域（Create/JoinBattle/SyncFrames/GetState）
 //   - battle_frame.go   帧同步/结算域（SendFrameInput/onFrameResult/checkSettle）
+//   - battle_ping.go    直连保活探针（Ping：只刷新帧面活跃，不动对局状态）
+//   - battle_offline.go 掉线/重连域（打点计时、判负出局、回座取消）
 package actor
 
 import (

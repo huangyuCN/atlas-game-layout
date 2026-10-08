@@ -96,6 +96,14 @@ public sealed class SyncFramesReply
 
 }
 
+/// <summary>PingReq DTO（protojson JSON 语义）。</summary>
+public sealed class PingReq
+{
+    [JsonPropertyName("battleId")]
+    public string? BattleId { get; set; }
+
+}
+
 /// <summary>IssueEntryTicketReq DTO（protojson JSON 语义）。</summary>
 public sealed class IssueEntryTicketReq
 {
@@ -206,6 +214,12 @@ public sealed class BattleService
         var data = await _inv.InvokeRawAsync("/battle.v1.BattleService/SyncFrames", payload, options, cancellationToken);
         return data.Length == 0 ? null : (SyncFramesReply)_ser.Deserialize(data, typeof(SyncFramesReply));
     }
+    /// <summary>/battle.v1.BattleService/Ping：单向调用（returns Empty，无回执）。</summary>
+    public async Task PingAsync(PingReq? req, InvokeOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var payload = _ser.Serialize(req ?? new PingReq());
+        await _inv.InvokeRawAsync("/battle.v1.BattleService/Ping", payload, options, cancellationToken);
+    }
 }
 
 /// <summary>BattleServiceProtocolOps 是 BattleService 的会话 op 名（按 rpc 名索引）。</summary>
@@ -214,6 +228,7 @@ public static class BattleServiceProtocolOps
     public const string JoinBattle = "/battle.v1.BattleService/JoinBattle";
     public const string SendFrameInput = "/battle.v1.BattleService/SendFrameInput";
     public const string SyncFrames = "/battle.v1.BattleService/SyncFrames";
+    public const string Ping = "/battle.v1.BattleService/Ping";
 }
 /// <summary>BattleServiceProtocolDescriptor 是 BattleService 的会话描述符提取器
 /// （op 名见 BattleServiceProtocolOps；C# 不允许命名空间级方法，故收进静态类）。</summary>

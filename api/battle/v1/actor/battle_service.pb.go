@@ -25,6 +25,7 @@ type BattleService interface {
 	JoinBattle(ctx core.ActorContext, req *v1.JoinBattleReq) (*v1.JoinBattleReply, error)
 	SendFrameInput(ctx core.ActorContext, msg *v1.FrameInputReq) error
 	SyncFrames(ctx core.ActorContext, req *v1.SyncFramesReq) (*v1.SyncFramesReply, error)
+	Ping(ctx core.ActorContext, msg *v1.PingReq) error
 	Create(ctx core.ActorContext, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
 	GetState(ctx core.ActorContext, req *v1.GetStateReq) (*v1.GetStateReply, error)
 	IssueEntryTicket(ctx core.ActorContext, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error)
@@ -41,6 +42,9 @@ func (UnimplementedBattleService) SendFrameInput(core.ActorContext, *v1.FrameInp
 }
 func (UnimplementedBattleService) SyncFrames(core.ActorContext, *v1.SyncFramesReq) (*v1.SyncFramesReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.SyncFrames")
+}
+func (UnimplementedBattleService) Ping(core.ActorContext, *v1.PingReq) error {
+	return errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.Ping")
 }
 func (UnimplementedBattleService) Create(core.ActorContext, *v1.CreateBattleRequest) (*v1.CreateBattleReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.Create")
@@ -64,6 +68,10 @@ var battleServiceDecodeTable = map[string]func([]byte) (proto.Message, error){
 	},
 	"battle.v1.SyncFramesReq": func(b []byte) (proto.Message, error) {
 		m := new(v1.SyncFramesReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"battle.v1.PingReq": func(b []byte) (proto.Message, error) {
+		m := new(v1.PingReq)
 		return m, proto.Unmarshal(b, m)
 	},
 	"battle.v1.CreateBattleRequest": func(b []byte) (proto.Message, error) {
@@ -128,6 +136,8 @@ func (d *battleServiceDispatch) OnTell(ctx core.ActorContext, msg any) error {
 	switch m := msg.(type) {
 	case *v1.FrameInputReq:
 		return d.impl.SendFrameInput(ctx, m)
+	case *v1.PingReq:
+		return d.impl.Ping(ctx, m)
 	default:
 		return d.FallbackTell(ctx, msg)
 	}
@@ -197,6 +207,11 @@ func (c *BattleServiceClusterClient) SyncFrames(ctx context.Context, pid types.P
 	default:
 		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
 	}
+}
+
+// Ping 单向投递 Tell 消息（无回执；变参透传投递选项——sender/观测头等）。
+func (c *BattleServiceClusterClient) Ping(ctx context.Context, pid types.PID, msg *v1.PingReq, opts ...core.SendOption) error {
+	return c.inv.Tell(ctx, pid, msg, opts...)
 }
 
 // Create 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；

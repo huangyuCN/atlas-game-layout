@@ -35,6 +35,10 @@ export interface SyncFramesReply {
   missed?: FrameInputs[]; // battle.v1.SyncFramesReply.missed
 }
 
+export interface PingReq {
+  battleId?: string; // battle.v1.PingReq.battle_id
+}
+
 export interface IssueEntryTicketReq {
   battleId?: string; // battle.v1.IssueEntryTicketReq.battle_id
 }
@@ -92,6 +96,10 @@ export class BattleService {
     const out = await this.inv.invoke('/battle.v1.BattleService/SyncFrames', req ?? {}, ...opts);
     return out as SyncFramesReply;
   }
+  /** /battle.v1.BattleService/Ping：单向调用（returns Empty，无回执）。 */
+  async ping(req: PingReq | null, ...opts: InvokeOption[]): Promise<void> {
+    await this.inv.invoke('/battle.v1.BattleService/Ping', req ?? {}, ...opts);
+  }
 }
 
 /** BattleServiceProtocolOps 是 BattleService 的会话 op 名（按 rpc 名索引）。 */
@@ -99,6 +107,7 @@ export const BattleServiceProtocolOps = {
   joinbattle: "/battle.v1.BattleService/JoinBattle",
   sendframeinput: "/battle.v1.BattleService/SendFrameInput",
   syncframes: "/battle.v1.BattleService/SyncFrames",
+  ping: "/battle.v1.BattleService/Ping",
 } as const;
 
 /** BattleServiceToken 从会话消息里取 Token（无该字段返回零值）。 */

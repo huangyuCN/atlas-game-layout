@@ -20,6 +20,7 @@ type BattleServiceEdge interface {
 	JoinBattle(ctx context.Context, req *v1.JoinBattleReq) (*v1.JoinBattleReply, error)
 	SendFrameInput(ctx context.Context, req *v1.FrameInputReq) (*emptypb.Empty, error)
 	SyncFrames(ctx context.Context, req *v1.SyncFramesReq) (*v1.SyncFramesReply, error)
+	Ping(ctx context.Context, req *v1.PingReq) (*emptypb.Empty, error)
 }
 
 // RegisterBattleServiceEdge 把客户端面（access=CLIENT，经网关/帧通道调用）注册到 gRPC server。
@@ -36,6 +37,7 @@ var battleServiceEdgeDesc = grpc.ServiceDesc{
 		{MethodName: "JoinBattle", Handler: handleBattleServiceEdgeJoinBattle},
 		{MethodName: "SendFrameInput", Handler: handleBattleServiceEdgeSendFrameInput},
 		{MethodName: "SyncFrames", Handler: handleBattleServiceEdgeSyncFrames},
+		{MethodName: "Ping", Handler: handleBattleServiceEdgePing},
 	},
 	Metadata: "api/battle/v1/battle_service.proto",
 }
@@ -85,6 +87,21 @@ func handleBattleServiceEdgeSyncFrames(srv any, ctx context.Context, dec func(an
 	})
 }
 
+// handleBattleServiceEdgePing 解包请求并经拦截器调用本面实现。
+func handleBattleServiceEdgePing(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(v1.PingReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BattleServiceEdge).Ping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/battle.v1.BattleService/Ping"}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(BattleServiceEdge).Ping(ctx, req.(*v1.PingReq))
+	})
+}
+
 // NewBattleServiceEdge 返回 actor 支撑的客户端面（access=CLIENT，经网关/帧通道调用）默认实现：
 // 按路由条目解析目标 PID（会话寻址取 ctx 身份、字段寻址取请求字段）并投递。
 // opts 是装配期注入的投递选项（观测头、追踪注入等），每次调用随消息附加。
@@ -125,4 +142,13 @@ func (a *battleServiceEdge) SyncFrames(ctx context.Context, req *v1.SyncFramesRe
 		return nil, err
 	}
 	return opcall.Reply[*v1.SyncFramesReply](entry, rep)
+}
+
+// Ping 单向投递 Tell 消息到目标 actor（无回执，跳过回执归一）。
+func (a *battleServiceEdge) Ping(ctx context.Context, req *v1.PingReq) (*emptypb.Empty, error) {
+	entry := v1.BattleServiceRouteTable["/battle.v1.BattleService/Ping"]
+	if _, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...); err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
 }

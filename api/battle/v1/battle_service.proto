@@ -53,6 +53,12 @@ message SyncFramesReply {
   repeated atlas.game.lockstep.FrameInputs missed = 3;
 }
 
+// PingReq 保活探针请求：只带客体寻址字段（target PID = battle:{battle_id}），
+// 不承载任何对局参数——探针语义就是「我还在」，加参数即越界。
+message PingReq {
+  string battle_id = 1;
+}
+
 // IssueEntryTicketReq 出票请求：battle_id 是客体寻址字段
 //（目标 PID = battle:{battle_id}，rpc 面按 uid_field 解析并懒激活该战斗 actor）。
 message IssueEntryTicketReq {
@@ -106,6 +112,10 @@ service BattleService {
   rpc JoinBattle (JoinBattleReq) returns (JoinBattleReply);
   rpc SendFrameInput (FrameInputReq) returns (google.protobuf.Empty);
   rpc SyncFrames (SyncFramesReq) returns (SyncFramesReply);
+  // Ping 是直连保活探针（Tell，无回执）：客户端在无输入期间周期发送，维持帧面活跃
+  //（数据报面 idle 判掉线、NAT 映射保活）。不参与对局逻辑、不改对局状态。
+  // 发送周期上限 = battle.offline_timeout 的数据报面空闲读超时（缺省 offline_timeout/3 = 5s）。
+  rpc Ping (PingReq) returns (google.protobuf.Empty);
   // 服务端内部（matcher 开局、管理面 grpc 转发；客户端 op 不存在）。
   rpc Create (CreateBattleRequest) returns (CreateBattleReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };

@@ -169,6 +169,11 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
   `server.udp.idle_timeout` 未配置（或配 `0s`）时取 `offline_timeout / 3`（15s → 5s）；显式配置必须
   **严格小于** `offline_timeout`，否则装配期启动失败。WS/TCP 面有可靠 EOF，**继承底层缺省、不做推导**。
 - 违反这条推导的后果不是「慢一点」：掉线事件会推迟到缺省的 120s 读超时，掉线策略形同虚设。
+- **客户端保活约定**：帧面活跃由**收包**刷新（流式面重设空闲读超时、数据报面刷新 peer 活跃时间，
+  与 op 是什么无关），故客户端须以 **≤ `offline_timeout / 3`** 的周期（缺省 15s → **5s**）发送帧或
+  `Ping`（`battle.v1.BattleService/Ping`：Tell 无回执、不参与对局逻辑、不改对局状态；无输入期间用它）；
+  超过该周期不只会在数据报面被判掉线判负，长时间静默还会让 NAT 映射失效——此后**下行**帧收不到，
+  现象是「连接还在但没数据」。`SendFrameInput` 不能兼职保活（会往 lockstep 输入流里塞垃圾）。
 
 ### 7.4 票据密钥两处同值
 

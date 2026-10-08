@@ -79,6 +79,28 @@ var BattleServiceRouteTable = relay.Table{
 			return r.BattleId, r.BattleId != ""
 		},
 	},
+	"/battle.v1.BattleService/Ping": {
+		Operation:   "/battle.v1.BattleService/Ping",
+		Service:     "battle.v1.BattleService",
+		Method:      "Ping",
+		Actor:       "battle",
+		Access:      relay.AccessClient,
+		UidSource:   relay.UidField,
+		IsTell:      true,
+		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+		NewRequest:  func() proto.Message { return new(PingReq) },
+		NewReply:    nil, // returns Empty 即 Tell，无回执
+		UidOf: func(req any) (string, bool) {
+			r, ok := req.(*PingReq)
+			if !ok {
+				return "", false
+			}
+			return r.BattleId, r.BattleId != ""
+		},
+	},
 	"/battle.v1.BattleService/Create": {
 		Operation:   "/battle.v1.BattleService/Create",
 		Service:     "battle.v1.BattleService",
@@ -171,6 +193,15 @@ var BattleServiceLifecycleTable = relay.LifecycleTable{
 		Operation:   "/battle.v1.BattleService/SyncFrames",
 		Service:     "battle.v1.BattleService",
 		Method:      "SyncFrames",
+		Access:      relay.AccessClient,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/battle.v1.BattleService/Ping": {
+		Operation:   "/battle.v1.BattleService/Ping",
+		Service:     "battle.v1.BattleService",
+		Method:      "Ping",
 		Access:      relay.AccessClient,
 		Since:       "",
 		Deprecated:  "",
