@@ -54,15 +54,16 @@ type FrameServers struct {
 }
 
 // NewFrameOps 组装 battle 帧面的帧 op 服务端：battle 的注解路由表（access=CLIENT 的 op 全体）
-// + 帧槽验票身份（验票通过即登记直连并上报上线）+ 本地 actor 投递（LocalDeliverer，按 PID 寻址）。
+// + 帧槽验票身份（验票通过即登记直连并上报上线；对局已结束则补投结果 + 稳定 reason 拒绝）
+// + 本地 actor 投递（LocalDeliverer，按 PID 寻址）。
 // invoker 是本地投递端口：生产为 pkg/actor.Runtime（集群运行时），单测为 core.LocalRuntime。
-func NewFrameOps(invoker core.ActorInvoker, rec Recorder, ticketKey []byte) (*frameops.Handler, error) {
+func NewFrameOps(invoker core.ActorInvoker, conn FrameConn, ticketKey []byte) (*frameops.Handler, error) {
 	table, err := relay.Merge(battlev1.BattleServiceRouteTable)
 	if err != nil {
 		return nil, fmt.Errorf("server: battle 帧面路由表合并失败: %w", err)
 	}
 	return frameops.NewHandler(table,
-		NewTicketIdentity(ticketKey, rec),
+		NewTicketIdentity(ticketKey, conn),
 		frameops.LocalDeliverer{Invoker: invoker},
 		// 发起者身份前缀与网关同约定：玩家发起（sender = player:<playerID>），
 		// battle actor 的参战名单校验读的就是它。

@@ -15,6 +15,7 @@ import (
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 )
 
@@ -195,10 +196,14 @@ func startPlayerRelays(upstream string, cfg migrateOpts, n int) ([]*damageRelay,
 // 必须有界超时才能重试——否则首次握手包一丢，调用会一直挂到用例总超时（实测 90s 假死）。
 const damageCallTimeout = 3 * time.Second
 
+// joinAttempts 是损伤形态下入局的重试次数：JoinBattle 一次往返跨两跳（请求 + 回执），
+// 20% 丢包下单次成功率约 0.64，10 次重试之下「入不了局」的概率可忽略。
+const joinAttempts = 10
+
 // retryJoin 在不可靠传输下重试入局（UDP 无重传：丢一个包就是一次超时）。
 func retryJoin(ctx context.Context, dc *directClient, battleID string) error {
 	var lastErr error
-	for attempt := 0; attempt < 6; attempt++ {
+	for attempt := 0; attempt < joinAttempts; attempt++ {
 		callCtx, cancel := context.WithTimeout(ctx, damageCallTimeout)
 		joinErr := joinOnce(callCtx, dc, battleID)
 		cancel()
@@ -209,10 +214,12 @@ func retryJoin(ctx context.Context, dc *directClient, battleID string) error {
 		lastErr = joinErr
 		time.Sleep(300 * time.Millisecond)
 	}
-	return fmt.Errorf("%s 损伤下入局失败（重试 6 次）: %w", dc.tag, lastErr)
+	return fmt.Errorf("%s 损伤下入局失败（重试 %d 次）: %w", dc.tag, joinAttempts, lastErr)
 }
 
-// joinOnce 尝试一次入局（JoinBattle + 补帧）。
+// joinOnce 尝试一次入局：**JoinBattle 成功即算入局**（它登记本次直连并回执会话元信息）；
+// 补帧查询（SyncFrames）只是随后的取缺口动作，失败不判负——否则一次丢包会把「已入局」
+// 误报成「入局失败」（损伤形态下这两件事必须分开，否则高丢包下必现假失败）。
 func joinOnce(ctx context.Context, dc *directClient, battleID string) error {
 	var join battlev1.JoinBattleReply
 	if err := dc.invoke(ctx, battlev1opclient.BattleServiceProtocolOps.JoinBattle,
@@ -220,12 +227,16 @@ func joinOnce(ctx context.Context, dc *directClient, battleID string) error {
 		return err
 	}
 	var sync battlev1.SyncFramesReply
-	return dc.invoke(ctx, battlev1opclient.BattleServiceProtocolOps.SyncFrames,
-		&battlev1.SyncFramesReq{BattleId: battleID, LastSeenFrame: 0}, &sync)
+	if err := dc.invoke(ctx, battlev1opclient.BattleServiceProtocolOps.SyncFrames,
+		&battlev1.SyncFramesReq{BattleId: battleID, LastSeenFrame: 0}, &sync); err != nil {
+		fmt.Printf("[损伤] %s 补帧查询失败（不判负，帧照常推进）: %v\n", dc.tag, err)
+	}
+	return nil
 }
 
 // sendInputsTolerant 逐帧发送输入并容忍单帧失败：不可靠传输下丢包是常态，
 // 本形态断言的是「战斗可继续并最终一致」，不是「每一帧都必达」。
+// 收到 BATTLE_ENDED 即停：对局已结束，后续帧 op 会被稳定拒绝——这正是 SDK 停止发送的依据。
 func sendInputsTolerant(ctx context.Context, dc *directClient, battleID string,
 	from, n uint64, step byte) int {
 	failed := 0
@@ -235,56 +246,129 @@ func sendInputsTolerant(ctx context.Context, dc *directClient, battleID string,
 		callCtx, cancel := context.WithTimeout(ctx, damageCallTimeout)
 		err := dc.invoke(callCtx, battlev1opclient.BattleServiceProtocolOps.SendFrameInput, req, nil)
 		cancel()
-		if err != nil {
-			failed++
+		if err == nil {
+			continue
 		}
+		if errorv1.IsBattleEnded(err) {
+			fmt.Printf("[损伤] %s 结算后停止发送（第 %d 帧，reason=%s）\n", dc.tag, from+i, errorv1.ReasonBattleEnded())
+			return failed
+		}
+		failed++
 	}
 	return failed
 }
 
-// waitDirectEndEither 等待结算推送：UDP 无重传，高丢包下单个客户端可能丢掉这一次推送
-// （规格 §9.2 的 SDK 侧心跳/重试是批次 8 的待办）。故本形态要求「至少一方收到且胜者一致」，
-// 未收到的一方明确记录为「推送丢失」而不判失败——战斗本身已收敛（帧广播与结算在服务端一致）。
-func waitDirectEndEither(clients [2]*directClient, want string) error {
-	deadline := time.Now().Add(20 * time.Second)
-	seen := 0
-	var missed []string
-	for time.Now().Before(deadline) {
-		for _, dc := range clients {
-			if dc.watcher.endSeen.Load() {
-				continue
-			}
-			select {
-			case n := <-dc.watcher.end:
-				if n.GetWinnerPlayerId() != want {
-					return fmt.Errorf("%s 结束通知胜者 = %q, want %q", dc.tag, n.GetWinnerPlayerId(), want)
+// 损伤形态的保活与结算等待策略（A2 主验收）：
+//   - 保活：SDK 契约要求客户端以 ≤ offline_timeout/3 的周期发包（缺省 15s → 5s），否则数据报面
+//     的空闲驱逐会把「还在等结果」判成掉线，15s 后判负结算——胜者随之变成另一方（断言失真）；
+//   - 结算后：每条迟到 op（Ping）都会触发一次留档结果的**补投**（幂等、每玩家有界）。
+const (
+	endWaitWindow    = 45 * time.Second       // 结算通知等待窗口
+	keepAlivePeriod  = time.Second            // 保活周期（远快于 offline_timeout/3 的驱逐窗口）
+	keepAliveTimeout = 300 * time.Millisecond // 保活调用上限（Ping 是 Tell，正常不回帧）
+)
+
+// startKeepAlive 为每个客户端起一个保活协程（周期发 Ping，直到 stop 被调用）：
+// 全程保活既避免误判掉线，又让「结算后继续发帧」在损伤形态下自然发生（触发结果补投）。
+func startKeepAlive(ctx context.Context, clients [2]*directClient, battleID string) func() {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, dc := range clients {
+		wg.Add(1)
+		go func(dc *directClient) {
+			defer wg.Done()
+			t := time.NewTicker(keepAlivePeriod)
+			defer t.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-t.C:
+					pingLate(ctx, dc, battleID)
 				}
-				dc.watcher.endSeen.Store(true)
-				seen++
-				fmt.Printf("[损伤] %s 收到结算通知（胜者 %s）\n", dc.tag, want)
-			default:
 			}
+		}(dc)
+	}
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
+
+// waitDamagedEnd 等待双方结算通知（保活协程在跑）：最终要求**双方都拿到结果**——
+// 高丢包下「双方都没收到」正是本形态要盯住的收敛缺陷（补投兜底后仍收不到才算失败）。
+func waitDamagedEnd(clients [2]*directClient, want string) error {
+	deadline := time.Now().Add(endWaitWindow)
+	for time.Now().Before(deadline) {
+		if err := collectEnds(clients, want); err != nil {
+			return err
 		}
-		if seen == len(clients) {
+		if allEndSeen(clients) {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	return fmt.Errorf("窗口 %s 内未收到结算通知: %v（结果已留档，补投未达）",
+		endWaitWindow, missedTags(clients))
+}
+
+// pingLate 发一次迟到 op（保活 Ping）：未结算即保活刷新数据报面的空闲计时，
+// 已结算即触发一次结果补投。Ping 是 Tell，正常路径不回帧，故用短超时且忽略错误——
+// 是否到达由调用方（等待循环）判定。
+func pingLate(ctx context.Context, dc *directClient, battleID string) {
+	callCtx, cancel := context.WithTimeout(ctx, keepAliveTimeout)
+	defer cancel()
+	_ = dc.invoke(callCtx, battlev1opclient.BattleServiceProtocolOps.Ping,
+		&battlev1.PingReq{BattleId: battleID}, nil)
+}
+
+// collectEnds 把已到达的结算通知收进 endSeen 并核对胜者一致。
+func collectEnds(clients [2]*directClient, want string) error {
 	for _, dc := range clients {
-		if !dc.watcher.endSeen.Load() {
-			missed = append(missed, dc.tag)
+		if dc.watcher.endSeen.Load() {
+			continue
+		}
+		select {
+		case n := <-dc.watcher.end:
+			if n.GetWinnerPlayerId() != want {
+				return fmt.Errorf("%s 结束通知胜者 = %q, want %q", dc.tag, n.GetWinnerPlayerId(), want)
+			}
+			dc.watcher.endSeen.Store(true)
+			fmt.Printf("[损伤] %s 收到结算通知（胜者 %s）\n", dc.tag, want)
+		default:
 		}
 	}
-	if seen == 0 {
-		return fmt.Errorf("双方都未收到结算通知（战斗未收敛）")
-	}
-	fmt.Printf("[损伤] 结算推送丢失（UDP 无重传，接受）：%v\n", missed)
 	return nil
 }
 
+// allEndSeen 返回双方是否都已收到结算通知。
+func allEndSeen(clients [2]*directClient) bool {
+	for _, dc := range clients {
+		if !dc.watcher.endSeen.Load() {
+			return false
+		}
+	}
+	return true
+}
+
+// missedTags 返回尚未收到结算通知的客户端标签（失败报文用）。
+func missedTags(clients [2]*directClient) []string {
+	var out []string
+	for _, dc := range clients {
+		if !dc.watcher.endSeen.Load() {
+			out = append(out, dc.tag)
+		}
+	}
+	return out
+}
+
 // driveDamagedBattle 在损伤下推进对局：前半段正常、中段断网、之后恢复，最后核对结算一致。
+// 全程挂保活（SDK 契约：静默会被数据报面驱逐并误判掉线），结算后的迟到 op 由保活自然产生。
 func driveDamagedBattle(ctx context.Context, clients [2]*directClient, relays []*damageRelay,
 	battleID string, frames uint64, dmg migrateOpts, ps [2]*player) error {
+	stopKeepAlive := startKeepAlive(ctx, clients, battleID)
+	defer stopKeepAlive()
+
 	half := frames / 2
 	for i, dc := range clients {
 		if n := sendInputsTolerant(ctx, dc, battleID, 1, half, stepOf(i)); n > 0 {
@@ -306,7 +390,7 @@ func driveDamagedBattle(ctx context.Context, clients [2]*directClient, relays []
 			fmt.Printf("[损伤] %s 后半段丢帧 %d/%d（可容忍）\n", dc.tag, n, frames-half)
 		}
 	}
-	if err := waitDirectEndEither(clients, ps[0].id); err != nil {
+	if err := waitDamagedEnd(clients, ps[0].id); err != nil {
 		return err
 	}
 	for _, dc := range clients {

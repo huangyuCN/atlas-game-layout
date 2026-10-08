@@ -16,6 +16,8 @@
 //   - freeze：会话续租/过期恢复（中断心跳 → 路由 TTL 到期 → 清理联动）
 //   - direct：不经接入层直连 battle 帧端口（-battle-frame 指定端口、-transport 选 kcp|udp|ws），
 //     并跑票的负例（无票/篡改/过期）；用于帧面与验票本身的白盒验证
+//   - damage：应用内网络损伤（丢包/抖动/断网）下的收敛验证（结算结果靠留档补投兜底）
+//   - lateop：结算后继续发帧（迟到 op 必须被稳定拒绝、不重建 actor、直连只关一次、补投到位）
 //
 // 匹配经 gateway 业务通道 op 入队（gateway → game PlayerActor → matcher）；
 // 成局/失败由 gateway 主动推送（/game.v1.MatchStartedNotify / MatchFailedNotify），
@@ -284,8 +286,10 @@ func run(ctx context.Context, st *stack, mode string, a addrs, mw middlewareAddr
 		return runMigrate(ctx, st, a, mo, frames)
 	case "damage":
 		return runDamage(ctx, a, o, mo, frames)
+	case "lateop":
+		return runLateOp(ctx, st, a, o, mw, frames)
 	default:
-		return fmt.Errorf("未知形态 %q（dual|single|party|fault|kick|freeze|direct|migrate|damage）", mode)
+		return fmt.Errorf("未知形态 %q（dual|single|party|fault|kick|freeze|direct|migrate|damage|lateop）", mode)
 	}
 }
 
@@ -380,8 +384,8 @@ func main() {
 		panic(err)
 	}
 	defer initTracing()() // 退出前 flush 未导出的 span
-	mode := flag.String("mode", "dual", "客户端形态：dual（TCP+KCP）/ single（WS）/ party（组队 2v2）/ fault（异常下线联动）/ kick（顶号+断线恢复）/ direct（直连 battle 帧端口）/ migrate（两节点迁移）/ damage（网络损伤）")
-	transportName := flag.String("transport", "kcp", "direct/damage 形态的直连传输：kcp|udp|ws（damage 固定 udp）")
+	mode := flag.String("mode", "dual", "客户端形态：dual（TCP+KCP）/ single（WS）/ party（组队 2v2）/ fault（异常下线联动）/ kick（顶号+断线恢复）/ direct（直连 battle 帧端口）/ migrate（两节点迁移）/ damage（网络损伤）/ lateop（结算后继续发帧）")
+	transportName := flag.String("transport", "kcp", "direct/lateop 形态的直连传输：kcp|udp|ws（damage 固定 udp）")
 	edgeAddr := flag.String("edge-addr", "127.0.0.1:7300", "migrate 形态的接入层 WS 面地址（与 battle 的 edge_endpoints 一致）")
 	migrateTarget := flag.String("migrate-target", "battle-e2e-2", "migrate 形态的迁入节点 ID")
 	preFrames := flag.Uint64("pre-frames", 3, "migrate 形态触发迁移前先发送的帧数")
@@ -410,7 +414,8 @@ func main() {
 	}
 	o := directOpts{mode: *mode, transport: *transportName, frameAddr: *battleFrame}
 	mo := migrateOpts{edgeAddr: *edgeAddr, targetNode: *migrateTarget,
-		lossPercent: *loss, jitter: *jitter, blackout: *blackout, preFrames: *preFrames}
+		lossPercent: *loss, jitter: *jitter, blackout: *blackout, preFrames: *preFrames,
+	}
 	st, err := startForMode(*mode, mw, o, mo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "e2e 失败: %v\n", err)

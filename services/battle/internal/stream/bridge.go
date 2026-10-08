@@ -37,6 +37,14 @@ func (b *Bridge) Record(playerID string, c Conn) {
 	b.notify(c.BattleID, playerID, biz.PlayerOnline{PlayerID: playerID})
 }
 
+// Ended 实现 server.FrameConn：判定该对局是否已结束（委托直连注册表的结束留档）。
+// 为真时身份解析会**在投递之前**拒绝迟到 op，不触发 SpawnAuto 重建。
+func (b *Bridge) Ended(battleID string) bool { return b.reg.Ended(battleID) }
+
+// ReplayEnd 实现 server.FrameConn：向重连后的新连接补投留档的结算结果（委托注册表；
+// 幂等、有界，不关闭连接）。
+func (b *Bridge) ReplayEnd(playerID string, c Conn) bool { return b.reg.ReplayEnd(playerID, c) }
+
 // ForFace 返回指定帧面的生命周期回调（装配期挂到帧传输服务端）：
 // 只处理断开事件——建立事件此刻票还没验（身份未知），上线一律由 Record 上报。
 func (b *Bridge) ForFace(kind transport.Kind) func(engine.ConnEvent) {

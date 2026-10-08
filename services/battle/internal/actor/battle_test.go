@@ -149,10 +149,13 @@ func testBattleConfig() Config {
 	}
 }
 
-// battleDeps 是战斗 actor 测试装配的可选依赖（掉线策略用例注入在场复核端口与指标）。
+// battleDeps 是战斗 actor 测试装配的可选依赖（掉线策略用例注入在场复核端口与指标；
+// 帧面链路用例注入直连推送实现与结算留档端口）。
 type battleDeps struct {
 	Presence biz.ConnPresence  // 掉线事件应用前的在场复核端口（nil = 一律视为不在场）
 	Metrics  metrics.Collector // 指标采集器（nil = noop）
+	Pusher   biz.BattlePusher  // 直连推送端口（nil = 内存记录实现 memPusher）
+	Ledger   biz.SettleLedger  // 结算留档端口（nil = 不留档）
 }
 
 // newBattleEnv 起本地 actor 运行时并拉起战斗 actor（短帧间隔加速测试）。
@@ -183,7 +186,11 @@ func newBattleEnvDeps(t *testing.T, cfg Config, d battleDeps) *battleEnv {
 	if err != nil {
 		t.Fatalf("pubsub: %v", err)
 	}
-	pusher := newMemPusher()
+	pusher := newMemPusher() // 内存记录实现：既有用例按它断言推送内容
+	fanout := biz.BattlePusher(pusher)
+	if d.Pusher != nil {
+		fanout = d.Pusher // 帧面链路用例走真实直连注册表（观测关闭次数与重连补投）
+	}
 	result := &memResultRepo{}
 	publisher := &memPublisher{}
 	err = rt.Register(NewProps(Props{
@@ -191,9 +198,10 @@ func newBattleEnvDeps(t *testing.T, cfg Config, d battleDeps) *battleEnv {
 		Registry:   reg,
 		Storage:    lockstepimpl.NewMemoryStorage(),
 		ResultRepo: result,
-		Pusher:     pusher,
+		Pusher:     fanout,
 		Publisher:  publisher,
 		Presence:   d.Presence,
+		Ledger:     d.Ledger,
 		Metrics:    d.Metrics,
 		Cfg:        cfg,
 	}))

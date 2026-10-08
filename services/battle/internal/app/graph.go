@@ -54,10 +54,10 @@ var Module = fx.Module("battle",
 		infra.NewNatsSettlePublisher,
 		publisherOf,
 		// ── 帧面（直连）：注册表 → 连接生命周期桥 → 帧 op 服务端 → KCP/UDP/WS 三监听 → 帧面实例注册器 ──
-		stream.NewRegistry, // player_id → 连接注册表（帧槽验票登记 + 直连推送端口 + 在场复核）
-		newStreamBridge,    // 连接生命周期桥（引擎断开事件 → 非阻塞投递到战斗 actor）
-		newFramePolicy,     // 帧面掉线策略（数据报面空闲超时按掉线窗口推导/校验）
-		newFrameOps,        // 帧 op 服务端（路由表 + 帧槽验票身份 + 本地 actor 投递）
+		newStreamRegistry, // player_id → 连接注册表（帧槽验票登记 + 直连推送端口 + 在场复核 + 结束留档）
+		newStreamBridge,   // 连接生命周期桥（引擎断开事件 → 非阻塞投递到战斗 actor）
+		newFramePolicy,    // 帧面掉线策略（数据报面空闲超时按掉线窗口推导/校验）
+		newFrameOps,       // 帧 op 服务端（路由表 + 帧槽验票身份 + 本地 actor 投递）
 		server.NewFrameServers,
 		// 帧面实例注册器（服务名 battle-frame）：接入层按 node_id + 元数据端口发现本节点帧面。
 		NewFrameRegistrar,
@@ -103,7 +103,9 @@ func registerActor(
 		Publisher:  publisher,
 		// 在场复核端口就是直连注册表：应用掉线事件前复核玩家是否仍有存活连接（规格 §9.2）。
 		Presence: pusher,
-		Metrics:  meter,
+		// 结算留档端口也是它：帧面据此在懒激活之前拒绝迟到 op，并在重连后补投结果。
+		Ledger:  pusher,
+		Metrics: meter,
 	}, cfg))
 	if err != nil {
 		return err
@@ -123,6 +125,12 @@ func registerActor(
 // 目标恒为本节点属主（帧面监听在本节点，注册表里只有本节点的连接），不涉及跨节点寻址。
 func newStreamBridge(rt *pkgactor.Runtime, reg *stream.Registry) *stream.Bridge {
 	return stream.NewBridge(reg, newLifecyclePort(rt.Raw().Local()).Tell)
+}
+
+// newStreamRegistry 组装帧面直连注册表（含结束留档）：留档 TTL 由既有配置派生，不新增配置项——
+// 票据有效期 + 掉线窗口（见 stream.EndedTTL：票据过期后不再有任何合法帧 op 能指向该局）。
+func newStreamRegistry(cfg actor.Config) *stream.Registry {
+	return stream.NewRegistryWithTTL(stream.EndedTTL(cfg.TicketTTL, cfg.OfflineTimeout))
 }
 
 // newFramePolicy 从战斗参数取帧面策略（掉线窗口）：数据报面空闲超时按它推导并在装配期校验

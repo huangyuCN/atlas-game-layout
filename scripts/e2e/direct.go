@@ -148,15 +148,23 @@ func directJoin(ctx context.Context, dc *directClient, battleID string, frames u
 
 // sendDirectInputs 逐帧发送输入（Tell 无回执）。身份由帧槽票据经投递 sender 注入，
 // 载荷里的 player_id 不参与寻址，故不填。
+// 收到 BATTLE_ENDED 即停并视为正常收尾：结算已发生，后续帧 op 会被稳定拒绝
+// （这正是 SDK 的停止发送依据；继续发只会拿到同一个可判定的 reason）。
 func sendDirectInputs(ctx context.Context, dc *directClient, battleID string, frames uint64, step byte) error {
 	for i := uint64(1); i <= frames; i++ {
 		req := &battlev1.FrameInputReq{
 			BattleId: battleID,
 			Input:    &locksteppb.LockstepInput{FrameId: i, Payload: []byte{step}},
 		}
-		if err := dc.invoke(ctx, battlev1opclient.BattleServiceProtocolOps.SendFrameInput, req, nil); err != nil {
-			return fmt.Errorf("%s 直连帧输入 %d 失败: %w", dc.tag, i, err)
+		err := dc.invoke(ctx, battlev1opclient.BattleServiceProtocolOps.SendFrameInput, req, nil)
+		if err == nil {
+			continue
 		}
+		if errorv1.IsBattleEnded(err) {
+			fmt.Printf("[直连] %s 结算后停止发送（第 %d 帧，reason=%s）\n", dc.tag, i, errorv1.ReasonBattleEnded())
+			return nil
+		}
+		return fmt.Errorf("%s 直连帧输入 %d 失败: %w", dc.tag, i, err)
 	}
 	return nil
 }

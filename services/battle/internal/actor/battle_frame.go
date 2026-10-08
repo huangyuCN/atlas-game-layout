@@ -96,6 +96,11 @@ func (b *BattleActor) settle(ctx core.ActorContext, out settleOutcome) {
 		return
 	}
 	b.settled = true
+	// 先留档再推送：帧面据此判定「已结束」，迟到的帧 op 才会在懒激活之前被拒——
+	// 否则 SpawnAuto 会重建一个空名单实例，它恢复快照后立刻再次结算并反复关闭直连。
+	if b.ledger != nil {
+		b.ledger.RecordEnded(b.battleID, out.Winner, sortedKeys(b.players))
+	}
 	res := &models.BattleResult{
 		BattleID:    b.battleID,
 		MatchID:     b.matchID,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
@@ -15,7 +16,7 @@ import (
 )
 
 // Registry 是 battle 节点的直连连接注册表：player_id → 当前连接（每玩家一条）+ 端点反查表，
-// 并实现 biz.BattlePusher（推送/关闭）与 biz.ConnPresence（在场复核）。
+// 并实现 biz.BattlePusher（推送/关闭）、biz.ConnPresence（在场复核）与 biz.SettleLedger（结算留档）。
 // 登记时机是**帧槽验票通过**（JoinBattle 本身也是带票帧，故其到达即完成登记）；
 // 断开事件由帧引擎连接生命周期钩子经 Bridge 转成 actor 消息（批次 6）。
 type Registry struct {
@@ -23,6 +24,7 @@ type Registry struct {
 	conns     map[string]Conn          // playerID → 当前连接
 	endpoints map[Endpoint]endpointRef // 端点 → 玩家与对局（断开事件反查）
 	ports     map[transport.Kind]Port  // 帧面类型 → 直连端口（装配期挂载）
+	ended     *EndedBook               // 结束留档：懒激活前拒绝迟到 op + 重连补投
 }
 
 // endpointRef 是端点反查项：断开事件据此找到玩家与对局（对局用于把消息投给正确的 actor）。
@@ -31,16 +33,47 @@ type endpointRef struct {
 	battleID string
 }
 
-// 静态保证：注册表即 battle 的直连推送端口。
-var _ biz.BattlePusher = (*Registry)(nil)
+// 静态保证：注册表即 battle 的直连推送端口与结算留档端口。
+var (
+	_ biz.BattlePusher = (*Registry)(nil)
+	_ biz.SettleLedger = (*Registry)(nil)
+)
 
-// NewRegistry 构造空注册表（帧面端口在服务端构造完成后经 BindPort 挂载）。
-func NewRegistry() *Registry {
+// NewRegistry 构造空注册表（帧面端口在服务端构造完成后经 BindPort 挂载；
+// 结束留档 TTL 取 DefaultEndedTTL）。
+func NewRegistry() *Registry { return NewRegistryWithTTL(DefaultEndedTTL) }
+
+// NewRegistryWithTTL 构造空注册表并指定结束留档 TTL（≤0 取 DefaultEndedTTL）。
+func NewRegistryWithTTL(ttl time.Duration) *Registry {
 	return &Registry{
 		conns:     make(map[string]Conn),
 		endpoints: make(map[Endpoint]endpointRef),
 		ports:     make(map[transport.Kind]Port),
+		ended:     NewEndedBook(ttl),
 	}
+}
+
+// RecordEnded 实现 biz.SettleLedger：留档一局战斗的结算结果（墓碑 + 胜负 + 参战名单），
+// 帧面据此在懒激活之前拒绝迟到的帧 op，并在玩家重连后补投结果（幂等）。
+func (r *Registry) RecordEnded(battleID, winner string, players []string) {
+	r.ended.Record(battleID, winner, players)
+}
+
+// Ended 判定该对局是否已结束（结束留档未过期即真）：帧面身份解析在**投递之前**问它，
+// 免得 SpawnAuto 重建一个空名单实例（规格 §9.8：结算后不得再有悬挂连接与重建）。
+func (r *Registry) Ended(battleID string) bool { return r.ended.Ended(battleID) }
+
+// ReplayEnd 向指定连接补投留档的结算结果（重连后补投，规格：结算结果不得因丢包而永久丢失）：
+// 幂等（同一条通知可重复到达）、有界（每玩家最多 MaxEndReplays 次）、名单外不投。
+// **不关闭连接**：关闭只发生在结算那一次，迟到的 op 不得再次触发关连接。
+func (r *Registry) ReplayEnd(playerID string, c Conn) bool {
+	winner, ok := r.ended.Claim(c.BattleID, playerID)
+	if !ok {
+		return false
+	}
+	_ = r.pushTo(c, battlev1opclient.BattleServicePushOps.BattleEndNotify,
+		&battlev1.BattleEndNotify{BattleId: c.BattleID, WinnerPlayerId: winner})
+	return true
 }
 
 // BindPort 挂载一类帧面的直连端口（装配期调用；nil 端口忽略）。
@@ -134,6 +167,10 @@ func (r *Registry) CountBattle(battleID string) int {
 // CloseBattle 关闭并移除本局全部直连（结算后回收，规格 §9.8：禁止结算后悬挂连接）。
 // 结算是对局的终点，故连端点反查项一并清理：帧引擎随后回调的断开事件不再反查到玩家，
 // 不会向已停的 actor 投递无意义的掉线消息。
+//
+// 关闭前对每条仍未确认的连接重投 EndRetries 次结算通知：数据报面（KCP/UDP）没有重传，
+// 单次推送丢包就等于玩家永远不知道结果（重连补投覆盖的是「玩家还会再来」的那部分）。
+// 本方法每局只被调用一次（结算是单次的），故关闭也**确定性发生一次**。
 func (r *Registry) CloseBattle(battleID string) {
 	r.mu.Lock()
 	victims := make([]Conn, 0, len(r.conns))
@@ -145,8 +182,21 @@ func (r *Registry) CloseBattle(battleID string) {
 		}
 	}
 	r.mu.Unlock()
+	winner, recorded := r.ended.Winner(battleID)
 	for _, c := range victims {
+		r.repushEnd(c, winner, recorded)
 		_ = r.closeConn(c)
+	}
+}
+
+// repushEnd 向一条未确认连接有界重投结算通知（未留档即跳过：不发无胜者的空通知）。
+func (r *Registry) repushEnd(c Conn, winner string, recorded bool) {
+	if !recorded {
+		return
+	}
+	msg := &battlev1.BattleEndNotify{BattleId: c.BattleID, WinnerPlayerId: winner}
+	for i := 0; i < EndRetries; i++ {
+		_ = r.pushTo(c, battlev1opclient.BattleServicePushOps.BattleEndNotify, msg)
 	}
 }
 
@@ -186,6 +236,18 @@ func (r *Registry) push(playerID, operation string, msg any) error {
 		r.Unregister(playerID, c) // 连接已死：按失效注销，避免表里堆积
 	}
 	return err
+}
+
+// pushTo 向**指定**连接推送一条 Notify：重连补投与关闭前重投走它（不经「当前连接」查表，
+// 也不做失效注销——这两条路径的连接本就不在表内或马上要被移除）。
+func (r *Registry) pushTo(c Conn, operation string, msg any) error {
+	r.mu.Lock()
+	port := r.ports[c.Kind]
+	r.mu.Unlock()
+	if port == nil {
+		return fmt.Errorf("stream: 帧面 %s 未挂载推送端口（装配期漏挂）", c.Kind)
+	}
+	return port.Push(c, operation, msg)
 }
 
 // closeConn 关闭一条连接（端口未挂载即忽略——只登记不关闭的形态仍可用）。

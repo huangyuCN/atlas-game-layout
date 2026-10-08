@@ -102,6 +102,9 @@ type Props struct {
 	Publisher biz.SettlePublisher
 	// Presence 是直连在场复核端口（规格 §9.2 硬约束②；nil = 一律视为不在场，仅供单测）。
 	Presence biz.ConnPresence
+	// Ledger 是结算留档端口（帧面据此在懒激活之前拒绝迟到 op，并在玩家重连后补投结果；
+	// nil = 不留档，仅供单测）。
+	Ledger biz.SettleLedger
 	// Metrics 是指标采集器（掉线/重连计数；nil = noop）。
 	Metrics metrics.Collector
 	Cfg     Config
@@ -115,6 +118,7 @@ type DefaultDeps struct {
 	Pusher     biz.BattlePusher
 	Publisher  biz.SettlePublisher
 	Presence   biz.ConnPresence
+	Ledger     biz.SettleLedger
 	Metrics    metrics.Collector
 }
 
@@ -129,6 +133,7 @@ func NewRuntimeProps(d DefaultDeps, cfg Config) core.Props {
 		Pusher:     d.Pusher,
 		Publisher:  d.Publisher,
 		Presence:   d.Presence,
+		Ledger:     d.Ledger,
 		Metrics:    d.Metrics,
 		Cfg:        cfg,
 	})
@@ -151,6 +156,7 @@ func NewProps(p Props) core.Props {
 				pusher:     p.Pusher,
 				publisher:  p.Publisher,
 				presence:   p.Presence,
+				ledger:     p.Ledger,
 				metrics:    p.Metrics,
 				cfg:        p.Cfg,
 				players:    make(map[string]struct{}),
@@ -188,6 +194,7 @@ type BattleActor struct {
 	pusher     biz.BattlePusher
 	publisher  biz.SettlePublisher
 	presence   biz.ConnPresence
+	ledger     biz.SettleLedger // 结算留档（帧面在懒激活之前据此拒绝迟到 op；nil = 不留档）
 	metrics    metrics.Collector
 	cfg        Config
 
