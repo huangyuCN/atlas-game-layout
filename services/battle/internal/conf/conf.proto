@@ -42,6 +42,24 @@ message BattleConf {
   // 缺省取本值的 1/3（缺省 15s → 5s）；装配期校验「数据报面 idle < offline_timeout」，
   // 不满足即启动失败（否则掉线事件会迟到缺省的 120s，本策略形同虚设）。
   string offline_timeout = 5;
+  // max_frames 是单局帧数上限（正数；**不配置 = 60**，即示例竞速在 10fps 下约 6s 一局）。
+  // 与 tick_interval_ms 共同决定单局寿命（帧数上限 × 帧间隔）；到达上限即由模拟器判出
+  // 位置领先者胜并走既有结算路径，故它同时是「一局最多持续多久」的唯一开关。
+  // 校验：>0 且 ≤ MaxFramesLimit（20000）；显式 0/负值/超上限一律启动失败——**未配置与
+  // 显式 0 必须区分**（前者取缺省 60，后者是笔误），故用 optional 而非裸标量。
+  // 上限 20000 的依据（内存/快照成本，见 services/battle/internal/actor）：
+  // 帧输入日志每帧每玩家一条 lockstep.Input（≈112B 含分配开销），快照每 SnapshotEvery
+  // （缺省 10）帧一份（≈136B）；2 人局每帧 ≈238B，20000 帧 ≈4.8MiB/局（10fps 下 ≈33 分钟）。
+  optional int64 max_frames = 6;
+  // tick_interval_ms 是帧间隔（**毫秒整数**；不配置 = 100）。选毫秒整数而非
+  // google.protobuf.Duration：本文件既有的两个时长字段（ticket_ttl / offline_timeout）
+  // 都是「字符串 + time.ParseDuration」，仓内无任何 Duration 用法；毫秒整数与 server.proto
+  // 的 int32/int64 数值风格一致，且免去 Duration 的秒/纳秒双字段误配。
+  // 校验：>0 且 ≤ MaxTickIntervalMillis（1000）；显式 0/负值/超上限一律启动失败。
+  // 上限 1000ms 的依据：① 帧同步语义——帧间隔 >1s 时客户端插值/预测窗口失效；
+  // ② 与数据报面空闲读超时耦合——server.kcp/udp 的 idle_timeout 缺省取 offline_timeout/3
+  //（缺省 15s → 5s），帧间隔 1s 时尚有 5 帧余量，再大则丢一两个包就可能被空闲超时误判掉线。
+  optional int64 tick_interval_ms = 7;
 }
 
 message Bootstrap {

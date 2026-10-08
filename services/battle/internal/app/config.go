@@ -24,7 +24,9 @@ const ticketKeyLen = 32
 //   - ticket_ttl 省略取 DefaultTicketTTL，显式值必须能被 time.ParseDuration 解析且为正；
 //   - edge_endpoints 至少一面、面不重复、地址非空（见 edgeEndpointsOf）；
 //   - offline_timeout 省略取 DefaultOfflineTimeout（15s），显式 0 表示关闭掉线判定，
-//     负值/非法即失败（见 offlineTimeoutOf）。
+//     负值/非法即失败（见 offlineTimeoutOf）；
+//   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（60）/ DefaultTickInterval（100ms），
+//     显式值越界即失败（见 frameLimitsOf）。
 func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out := actor.DefaultConfig()
 	b := cfg.GetBattle()
@@ -47,10 +49,16 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	if err != nil {
 		return out, err
 	}
+	tick, frames, err := frameLimitsOf(b)
+	if err != nil {
+		return out, err
+	}
 	out.TicketKey = key
 	out.TicketTTL = ttl
 	out.OfflineTimeout = offline
 	out.EdgeEndpoints = endpoints
+	out.TickInterval = tick
+	out.MaxFrames = frames
 	return out, nil
 }
 
@@ -125,4 +133,52 @@ func offlineTimeoutOf(raw string) (time.Duration, error) {
 		return 0, fmt.Errorf("app: battle.offline_timeout 不得为负，实际 %s（0 表示关闭掉线判定）", raw)
 	}
 	return d, nil
+}
+
+// frameLimitsOf 解析局时长两件（battle.max_frames / battle.tick_interval_ms）：字段**缺失**
+// 取缺省（60 帧 / 100ms，与硬编码常量逐字相同 → 行为零变化）；**显式值**越界即启动失败。
+// 缺省与显式 0 必须区分（proto 的 optional 就是为此存在）：前者是「没配」，后者是笔误。
+func frameLimitsOf(b *conf.BattleConf) (tickInterval int64, maxFrames uint64, err error) {
+	tickInterval, maxFrames = actor.DefaultTickInterval, actor.DefaultMaxFrames
+	if raw := b.TickIntervalMs; raw != nil {
+		if tickInterval, err = tickIntervalOf(*raw); err != nil {
+			return 0, 0, err
+		}
+	}
+	if raw := b.MaxFrames; raw != nil {
+		if maxFrames, err = maxFramesOf(*raw); err != nil {
+			return 0, 0, err
+		}
+	}
+	return tickInterval, maxFrames, nil
+}
+
+// tickIntervalOf 把帧间隔（毫秒整数）换算成纳秒并校验：必须落在
+// [MinTickIntervalMillis, MaxTickIntervalMillis] 闭区间内，越界即报错（错误信息点名字段与上限依据）。
+func tickIntervalOf(ms int64) (int64, error) {
+	if ms < actor.MinTickIntervalMillis {
+		return 0, fmt.Errorf("app: battle.tick_interval_ms 必须为正（毫秒整数），实际 %d（缺省 %d）",
+			ms, actor.DefaultTickInterval/int64(time.Millisecond))
+	}
+	if ms > actor.MaxTickIntervalMillis {
+		return 0, fmt.Errorf("app: battle.tick_interval_ms 超出上限 %d 毫秒，实际 %d"+
+			"（帧间隔过大时客户端插值/预测窗口失效，且会逼近数据报面空闲读超时 offline_timeout/3）",
+			actor.MaxTickIntervalMillis, ms)
+	}
+	return ms * int64(time.Millisecond), nil
+}
+
+// maxFramesOf 校验帧数上限：必须落在 [1, MaxFramesLimit] 闭区间内，越界即报错
+// （错误信息点名字段、缺省值与上限的内存依据）。
+func maxFramesOf(n int64) (uint64, error) {
+	if n < 1 {
+		return 0, fmt.Errorf("app: battle.max_frames 必须为正，实际 %d（缺省 %d；未配置与显式 0 语义不同）",
+			n, actor.DefaultMaxFrames)
+	}
+	if n > actor.MaxFramesLimit {
+		return 0, fmt.Errorf("app: battle.max_frames 超出上限 %d，实际 %d"+
+			"（按 2 人局每帧 ≈238B 的输入日志 + 摊薄快照估算，上限对应 ≈4.8MiB/局）",
+			actor.MaxFramesLimit, n)
+	}
+	return uint64(n), nil
 }

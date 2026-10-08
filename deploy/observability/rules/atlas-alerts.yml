@@ -1,0 +1,150 @@
+# Atlas 阶段 3 告警规则（接入层 + 战斗域）：阈值与 docs/config.md §7.5 的建议值同源，
+# 改一处必须同步改另一处（§7.5 是口径来源，本文件是可执行落地）。
+#
+# 加载方式：prometheus-config.yaml 的 rule_files 指向本目录，compose 把 ./rules 挂进容器。
+# 校验方式（不重启也能验）：docker run --rm -v "$PWD/rules:/r:ro" prom/prometheus:v3.1.0 \
+#   promtool check rules /r/atlas-alerts.yml
+#
+# 口径前提（抓取面）：本规则引用的指标分布在两个端点——edge 的 9154 与 battle 的 9153
+# （prometheus-config.yaml 的 atlas job 两个都要在，缺一个则对应规则恒不触发）。
+#
+# 已知缺口（不编：无指标则不做规则）：
+#   `TRANSPORT_DOWNLINK_FAILED` 是**错误 reason**（atlas/errors/class.go），不是指标名。
+#   它在 atlas/transport/frame/engine/reply_error.go 里生成并回给客户端，服务端**没有计数器**
+#   （帧引擎的 transport/metrics 全局实现恒为 NoopMetrics，见 transport/metrics/metrics.go）。
+#   故无法写 Prometheus 规则；替代观测路径是日志（Grafana 面板 atlas-stage3 的
+#   「下行失败 reason」Loki 面板，查询串 `|= "TRANSPORT_DOWNLINK_FAILED"`）。
+#   要变成可告警指标需在框架（transport/frame/engine）或 services/edge 打点——两者都超出本批次
+#   允许改动的路径，已在 docs/config.md §7.5 标注为待办。
+
+groups:
+  # ── 接入层（edge，指标端点 9154）──
+  - name: atlas-edge-stage3
+    rules:
+      # 并发流接近上限：edge.max_streams 是**配置项而非指标**，故阈值写死为
+      # services/edge/configs/config.yaml 里 edge.max_streams=4096 的 80%（3276.8）。
+      # 改那个配置必须同步改这里（§7.5 表第 1 行）。
+      - alert: EdgeStreamsActiveNearLimit
+        expr: max(edge_streams_active{service="edge"}) >= 3276.8
+        for: 1m
+        labels:
+          severity: warning
+          component: edge
+        annotations:
+          summary: "接入层并发流接近上限（≥ edge.max_streams 的 80%）"
+          description: "实例 {{ $labels.service_instance_id }} 活跃流 {{ $value }}，已达 4096 的 80%；需扩容接入层实例或调高 edge.max_streams。"
+
+      # 票/密钥/时钟漂移或后端解析失败：5 分钟增量 > 新流总数的 1%（§7.5 表第 2 行）。
+      # 分母口径说明：框架没有「接纳流总数」计数器，用「拆流数 + 拒绝数」近似总尝试数
+      # （每条被接纳的流最终都会拆流），并加 20 次的绝对下限，避免低流量下 1/1=100% 误报。
+      - alert: EdgeTicketRejectedRatioHigh
+        expr: |
+          sum(increase(edge_ticket_rejected_total{service="edge"}[5m])) > 20
+            and
+          sum(increase(edge_ticket_rejected_total{service="edge"}[5m]))
+            / clamp_min(
+                sum(increase(edge_streams_teared_down_total{service="edge"}[5m]))
+                + sum(increase(edge_ticket_rejected_total{service="edge"}[5m])), 1) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: edge
+        annotations:
+          summary: "接入层拒票占比超过新流总数的 1%"
+          description: "5 分钟拒绝 {{ $value | humanize }}；按 reason 定位：ticket_invalid/ticket_expired = 票或密钥或时钟漂移，backend_unavailable = 属主解析失败（查 etcd 目录与 battle 帧面实例注册）。"
+
+      # 属主迁移/目录异常：owner_changed 拆流突增（同比 > 5 倍，§7.5 表第 3 行）。
+      - alert: EdgeOwnerChangedTeardownSpike
+        expr: |
+          sum(increase(edge_streams_teared_down_total{service="edge",reason="owner_changed"}[5m])) > 5
+            and
+          sum(increase(edge_streams_teared_down_total{service="edge",reason="owner_changed"}[5m]))
+            > 5 * sum(increase(edge_streams_teared_down_total{service="edge",reason="owner_changed"}[5m] offset 1h))
+        labels:
+          severity: warning
+          component: edge
+        annotations:
+          summary: "接入层 owner_changed 拆流突增（同比 > 5 倍）"
+          description: "5 分钟 owner_changed 拆流 {{ $value }}；同时看 battle 侧 battle_reconnects_total 是否同步抬升（属主迁移会强制客户端重连）。"
+
+      # 数据报面重新握手即接管：takeover 拆流突增（同比 > 5 倍）。
+      # 正常重连也会产生 takeover（同身份新对端顶替旧 flow-id），突增说明客户端在反复重连。
+      - alert: EdgeTakeoverTeardownSpike
+        expr: |
+          sum(increase(edge_streams_teared_down_total{service="edge",reason="takeover"}[5m])) > 5
+            and
+          sum(increase(edge_streams_teared_down_total{service="edge",reason="takeover"}[5m]))
+            > 5 * sum(increase(edge_streams_teared_down_total{service="edge",reason="takeover"}[5m] offset 1h))
+        labels:
+          severity: info
+          component: edge
+        annotations:
+          summary: "接入层 takeover 拆流突增（数据报面反复重新握手）"
+          description: "5 分钟 takeover 拆流 {{ $value }}；客户端链路不稳或保活周期不当（> offline_timeout/3）会表现为反复接管。"
+
+      # 后端不可达或链路异常：5 分钟探活失败增量 > 活跃流数的 1%（§7.5 表第 4 行）。
+      - alert: EdgeProbeFailuresHigh
+        expr: |
+          sum(increase(edge_probe_failures_total{service="edge"}[5m]))
+            > 0.01 * clamp_min(sum(avg_over_time(edge_streams_active{service="edge"}[5m])), 1)
+        for: 5m
+        labels:
+          severity: warning
+          component: edge
+        annotations:
+          summary: "接入层探活失败率超过活跃流数的 1%"
+          description: "5 分钟探活失败 {{ $value }}；后端（battle 帧面）不可达或链路异常，查 battle 帧面实例注册与端口可达性。"
+
+      # 准入路径串行（hello → 验票 → 查目录 → 选帧面实例）：> 50 流/秒 持续 1 分钟需水平扩实例。
+      # 分母同样无「接纳流总数」，用拆流速率作**下界**近似（稳态下拆流速率 ≈ 接纳速率）。
+      - alert: EdgeNewStreamRateHigh
+        expr: sum(rate(edge_streams_teared_down_total{service="edge"}[1m])) > 50
+        for: 1m
+        labels:
+          severity: info
+          component: edge
+        annotations:
+          summary: "单实例新流准入速率 > 50 流/秒"
+          description: "当前 {{ $value | humanize }} 流/秒；准入在单读取循环内串行（约 45–65 新流/秒/实例），需水平扩接入层实例。"
+
+  # ── 战斗域（battle，指标端点 9153）──
+  - name: atlas-battle-stage3
+    rules:
+      # 掉线判负 > 对局数的 5%/分钟（§7.5 表第 6 行）。
+      # 对局数口径：无 battle_start_total（lib/metrics 里声明了但无人打点），用
+      # battle_online_players / 2 近似（示例竞速每局 2 人），并 clamp 到 ≥1 避免除零/低流量误报。
+      - alert: BattleOfflineTimeoutsHigh
+        expr: |
+          sum(increase(battle_offline_timeouts_total{service="battle"}[1m]))
+            > 0.05 * clamp_min(sum(battle_online_players{service="battle"}) / 2, 1)
+        for: 5m
+        labels:
+          severity: warning
+          component: battle
+        annotations:
+          summary: "掉线判负速率超过对局数的 5%/分钟"
+          description: "1 分钟判负 {{ $value }}；客户端保活缺失（须以 ≤ offline_timeout/3 的周期发帧或 Ping）。若局时长被调大（battle.max_frames）而保活周期未同步收紧，此项会先抬升。"
+
+      # 判负激增且**零回座**：说明窗口内重连不成功（票过期 / 接入层不可达 / 客户端不重连）。
+      - alert: BattleReconnectsCollapsed
+        expr: |
+          sum(increase(battle_offline_timeouts_total{service="battle"}[10m])) > 5
+            and
+          sum(increase(battle_reconnects_total{service="battle"}[10m])) == 0
+        labels:
+          severity: warning
+          component: battle
+        annotations:
+          summary: "10 分钟内掉线判负 > 5 且回座次数为 0"
+          description: "掉线窗口内无人回座：查 ticket_ttl 是否短于 offline_timeout、接入层是否可达（edge_ticket_rejected_total 同步看）。"
+
+      # 战斗域直连在线人数突降（同比 < 50%）：接入层或帧面故障时与 edge_streams_active 同步下跌。
+      - alert: BattleOnlinePlayersDrop
+        expr: sum(battle_online_players{service="battle"}) < 0.5 * sum(battle_online_players{service="battle"} offset 1h)
+        for: 5m
+        labels:
+          severity: warning
+          component: battle
+        annotations:
+          summary: "battle 在线玩家数相比 1 小时前跌去一半以上"
+          description: "当前 {{ $value }}；若 edge_streams_active 同步下跌则是接入层/帧面故障，否则查匹配链路（成局减少）。"

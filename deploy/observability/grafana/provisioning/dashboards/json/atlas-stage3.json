@@ -1,0 +1,143 @@
+{
+  "title": "Atlas 阶段 3：接入层与战斗域",
+  "uid": "atlas-stage3",
+  "tags": ["atlas", "stage3"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "description": "阶段 3 直连链路的落地面板：阈值口径与 docs/config.md §7.5 同源，告警规则见 deploy/observability/rules/atlas-alerts.yml。指标来源：edge（9154）+ battle（9153）。",
+  "panels": [
+    {
+      "id": 1,
+      "title": "接入层活跃流（阈值线 = edge.max_streams 的 80% = 3276.8）",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 3276.8 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max by (service_instance_id) (edge_streams_active{service=\"edge\"})",
+          "legendFormat": "{{service_instance_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "battle 直连在线玩家数（battle_online_players）",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(battle_online_players{service=\"battle\"})",
+          "legendFormat": "在线玩家",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "接入层转发字节速率（edge_bytes_total）",
+      "type": "timeseries",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(edge_bytes_total{service=\"edge\"}[1m]))",
+          "legendFormat": "bytes/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "接入层拒票速率（按 reason；阈值：5 分钟占比 > 1%）",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(edge_ticket_rejected_total{service=\"edge\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "接入层拆流速率（按 reason；owner_changed / takeover 突增即告警）",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(edge_streams_teared_down_total{service=\"edge\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "接入层探活失败速率（edge_probe_failures_total）",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(edge_probe_failures_total{service=\"edge\"}[5m]))",
+          "legendFormat": "probe failures/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "battle 掉线判负 / 回座速率（battle_offline_timeouts_total / battle_reconnects_total）",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(battle_offline_timeouts_total{service=\"battle\"}[5m]))",
+          "legendFormat": "offline_timeouts/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(battle_reconnects_total{service=\"battle\"}[5m]))",
+          "legendFormat": "reconnects/s",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "下行失败 reason（TRANSPORT_DOWNLINK_FAILED；日志口径——该 reason 无计数器，见 rules/atlas-alerts.yml 顶部说明）",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 21, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [
+        {
+          "expr": "{service=~\"battle|edge\"} |= \"TRANSPORT_DOWNLINK_FAILED\"",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

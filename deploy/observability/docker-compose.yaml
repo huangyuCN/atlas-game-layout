@@ -52,6 +52,9 @@ services:
       - --storage.tsdb.retention.time=3d
     volumes:
       - ./prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
+      # 告警/记录规则（阶段 3 接入层与战斗域阈值）：改规则文件后 `docker compose restart
+      # prometheus`（或热加载 POST /-/reload）即生效，不必重建镜像。
+      - ./rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     ports:
       # 宿主 9095：9090 常被本地代理（mihomo）占用；容器内仍监听 9090，

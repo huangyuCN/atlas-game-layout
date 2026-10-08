@@ -28,6 +28,13 @@ scrape_configs:
         labels:
           __path__: /srv/logs/matcher.log
           service: matcher
+      # edge（接入层）：阶段 3 起客户端战斗帧直连的入口，其日志是排障第一现场
+      # （拒票/拆流/探活失败的原因只在它这里）。不采则 Grafana 面板 atlas-stage3 的
+      # 「下行失败 reason」面板查不到 edge 侧日志。
+      - targets: [localhost]
+        labels:
+          __path__: /srv/logs/edge.log
+          service: edge
       - targets: [localhost]
         labels:
           __path__: /srv/logs/e2e.log

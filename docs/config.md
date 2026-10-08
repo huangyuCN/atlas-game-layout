@@ -92,6 +92,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `battle.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `edge.ticket_key` 同值，否则帧面全面拒票 |
 | `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
 | `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法即失败 |
+| `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 60 帧 / 100ms（与硬编码常量逐字相同，行为零变化）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
 | `battle.edge_endpoints` | 列表非空 + `transport` 非 `UNSPECIFIED` + 地址非空 + 面不重复 | **启动失败**（客户端拿到的接入层地址只有这一个来源） | 面枚举 `EDGE_TRANSPORT_{WS,KCP,UDP}`；**按面下发**、不要求三面齐全（只开 ws 也能启动） |
 | `battle.frame_advertise_host` | 无（整项缺失 = 回落） | 整项缺失 ⇒ 回落 `edge_endpoints` 的主机（**仅适合同机部署**） | 只填主机（不含端口、IPv6 不带方括号）；空白串/带端口/带方括号即启动失败；跨机部署**必须**显式配置（语义见 §7） |
 | `edge.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `battle.ticket_key` 同值 |
@@ -210,9 +211,49 @@ go build -o /tmp/loadtest ./scripts/loadtest
 | `edge_streams_active` | ≥ `edge.max_streams` 的 80% 持续 1 分钟 | 接近并发流上限，需扩容或调高上限 |
 | `edge_ticket_rejected_total{reason}` | 5 分钟增量 > 新流总数的 1% | 票/密钥/时钟漂移（`ticket_invalid`/`ticket_expired`）或后端解析失败（`backend_unavailable`） |
 | `edge_streams_teared_down_total{reason=owner_changed}` | 突增（同比 > 5 倍） | 属主迁移/目录异常；同时看 battle 侧是否在重连 |
+| `edge_streams_teared_down_total{reason=takeover}` | 突增（同比 > 5 倍） | 数据报面重新握手即接管（同身份新对端顶替旧 flow-id）；正常重连会出现，突增说明客户端在反复重连 |
 | `edge_probe_failures_total` | 5 分钟增量 > 活跃流数的 1% | 后端不可达或链路异常 |
 | 单实例新流准入速率 | > 50 流/秒 持续 1 分钟 | 准入路径串行，需水平扩接入层实例 |
 | `battle_offline_timeouts_total` | > 对局数的 5%/分钟 | 客户端保活缺失（含 **UDP/WS 的 SDK 周期心跳**这一已知待办） |
+| `battle_reconnects_total` | 与 `battle_offline_timeouts_total` 同看 | 回座次数；**回座率骤降**说明窗口内重连不成功（票过期/接入层不可达） |
+| `battle_online_players` | 突降（同比 < 50%） | 战斗域直连在线人数；突降伴随 `edge_streams_active` 同步下跌即接入层或帧面故障 |
+| `TRANSPORT_DOWNLINK_FAILED`（错误 reason） | 出现即告警（5 分钟增量 > 0） | 一次性回执超过单包上限，下行无法投递（见 `atlas/errors/class.go`；按 reason 计数需服务端在错误路径打点） |
+
+**落地位置**（阈值即上面这张表，规则与面板同源，改一处要同步改另一处）：
+
+- Prometheus 告警规则：`deploy/observability/rules/atlas-alerts.yml`（`promtool check rules` 可校验）；
+- Grafana 面板：`deploy/observability/grafana/provisioning/dashboards/json/atlas-stage3.json`。
+
+### 7.6 局时长可配（`battle.max_frames` / `battle.tick_interval_ms`）
+
+单局寿命 = `max_frames` × `tick_interval_ms`。两者**缺省即现值**（60 × 100ms ≈ 6s）——不配置时
+装配结果与硬编码常量逐字相同，行为零变化。此前这两个值是 `services/battle/internal/actor`
+里的常量，导致「单局内跑一段 8s 静默窗口」在物理上不可达（局先结束了）。
+
+| 配置 | 形态 | 缺省 | 校验（违反即**启动失败**，与 `offline_timeout` 同风格） |
+|---|---|---|---|
+| `battle.max_frames` | `optional int64`（帧数） | 60 | `>0` 且 `≤ 20000`；显式 `0`/负值/超上限报错 |
+| `battle.tick_interval_ms` | `optional int64`（**毫秒整数**） | 100 | `>0` 且 `≤ 1000`；显式 `0`/负值/超上限报错 |
+
+- **为什么是毫秒整数而不是 `google.protobuf.Duration`**：本文件既有的两个时长字段
+  （`ticket_ttl` / `offline_timeout`）都是「字符串 + `time.ParseDuration`」，全仓无任何
+  `Duration` 用法；毫秒整数与 `protobuf/configs/server.proto` 的数值风格一致，且免去
+  `Duration` 秒/纳秒双字段的误配。
+- **为什么用 `optional`**：proto3 裸标量区分不出「未配置」与「显式 0」。缺省必须保持现值，
+  而显式 `0` 是笔误——两者语义必须分开（同 `battle.frame_advertise_host` 的写法）。
+- **上限依据**：
+  - `max_frames ≤ 20000`：按 2 人局每帧 ≈238B 估算（每帧每玩家一条 `lockstep.Input` ≈112B 含
+    分配开销；快照每 `SnapshotEvery`（缺省 10）帧一份 ≈136B），20000 帧 ≈ **4.8MiB/局**
+    （10fps 下 ≈33 分钟），留有一倍以上余量。`MemoryStorage` 的快照是**只追加不裁剪**的，
+    故上限同时约束了快照增长。
+  - `tick_interval_ms ≤ 1000`：① 帧同步语义——帧间隔 >1s 时客户端插值/预测窗口失效；
+    ② 与数据报面空闲读超时耦合——`server.kcp/udp.idle_timeout` 缺省取
+    `offline_timeout/3`（缺省 15s → 5s），帧间隔 1s 时尚有 5 帧余量，再大则丢一两个包就可能
+    被空闲超时误判掉线。
+- **调大之后的连带约束**：局变长不等于可以不保活。数据报面（KCP/UDP）仍按空闲读超时判活，
+  客户端必须以 **≤ `offline_timeout/3`** 的周期发送帧或 `Ping`（见 §7.3）。
+- **长局验收**（8s 静默窗口）：把 `max_frames` 调到 `300`（30s 一局），用 Go SDK 的
+  `examples/directloop -idle-hold 8s` 断言「静默期不被判出局 + 仍收帧 + 静默后仍能补帧」。
 
 ## 8. 客户端版本门槛（gateway 登录入口专属）
 

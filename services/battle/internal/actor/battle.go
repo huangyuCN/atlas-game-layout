@@ -60,12 +60,31 @@ const (
 	DefaultOfflineTimeout = 15 * time.Second
 )
 
+// 局时长两件（max_frames / tick_interval_ms）的取值边界（配置校验与文档共用同一份常量，
+// 避免文档写的上限与代码校验的上限漂移）。依据见 conf.proto 对应字段的注释。
+const (
+	// MinTickIntervalMillis 是帧间隔下限（毫秒）：再低已无意义（10fps 的缺省是它的 100 倍，
+	// 且锁步 ticker 的调度精度不足以支撑亚毫秒帧）。
+	MinTickIntervalMillis = int64(1)
+	// MaxTickIntervalMillis 是帧间隔上限（毫秒）：帧间隔 >1s 时客户端插值/预测窗口失效，
+	// 且会逼近数据报面缺省空闲读超时（offline_timeout/3 = 5s），丢包即被误判掉线。
+	MaxTickIntervalMillis = int64(1000)
+	// MaxFramesLimit 是单局帧数上限（帧）：按「2 人局每帧 ≈238B（输入日志 + 摊薄快照）」
+	// 估算，20000 帧 ≈4.8MiB/局（10fps 下 ≈33 分钟），留有一倍以上余量。
+	MaxFramesLimit = int64(20000)
+)
+
 // 掉线策略指标名（规格 §10：掉线/重连可见）。
 const (
 	// MetricOfflineTimeouts 是掉线超时判负的累计次数。
 	MetricOfflineTimeouts = "battle_offline_timeouts_total"
 	// MetricReconnects 是掉线窗口内回座的累计次数。
 	MetricReconnects = "battle_reconnects_total"
+	// MetricOnlinePlayers 是本节点直连在册玩家数（拉取式仪表，值取自直连注册表）。
+	// 口径：**当前仍持有本节点直连（接入层→battle 帧面）的玩家数**，含已结算但尚未回收的连接；
+	// 结算会关闭本局全部直连（stream.Registry.CloseBattle），故它不是「对局中玩家数」的精确
+	// 同义词，而是「战斗域在线人数」——与 game 的 game_players_online（业务会话在线）互补。
+	MetricOnlinePlayers = "battle_online_players"
 )
 
 // DefaultConfig 返回默认战斗参数（含出票默认 TTL 与掉线窗口；密钥与接入层面列表无默认值，须由配置注入）。

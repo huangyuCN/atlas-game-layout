@@ -11,6 +11,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
 	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	"github.com/huangyuCN/atlas-game-layout/pkg/mongo"
+	"github.com/huangyuCN/atlas-game-layout/pkg/observability"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/actor"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
@@ -110,6 +111,7 @@ func registerActor(
 	if err != nil {
 		return err
 	}
+	registerOnlineGauge(meter, pusher)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error { return rt.Start(ctx) },
 		OnStop: func(ctx context.Context) error {
@@ -120,8 +122,16 @@ func registerActor(
 	return nil
 }
 
-// newStreamBridge 组装连接生命周期桥：注册表 + 非阻塞的本机投递端口（见 tellport.go）。
-// 投递走 Tell（入队即返回，不做 Ask）——帧引擎在读循环里同步回调，阻塞会拖慢帧处理；
+// registerOnlineGauge 登记拉取式仪表 battle_online_players：采集时回调直连注册表的在册连接数。
+// 用拉取式而非增减式的原因与 game_players_online 一致：值来自真相源（注册表），不依赖生命周期
+// 事件成对增减——急停、崩溃重启等不回调 OnStop 的路径会让增减式计数永久漂移。
+func registerOnlineGauge(meter metrics.Collector, reg *stream.Registry) {
+	observability.RegisterObservableGauge(meter, actor.MetricOnlinePlayers, func() float64 {
+		return float64(reg.Count())
+	})
+}
+
+// newStreamBridge 组装连接生命周期桥：注册表 + 非阻塞的本机投递端口（见 tellport.go）。// 投递走 Tell（入队即返回，不做 Ask）——帧引擎在读循环里同步回调，阻塞会拖慢帧处理；
 // 目标恒为本节点属主（帧面监听在本节点，注册表里只有本节点的连接），不涉及跨节点寻址。
 func newStreamBridge(rt *pkgactor.Runtime, reg *stream.Registry) *stream.Bridge {
 	return stream.NewBridge(reg, newLifecyclePort(rt.Raw().Local()).Tell)

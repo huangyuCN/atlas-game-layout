@@ -55,6 +55,24 @@ type BattleConf struct {
 	// 缺省取本值的 1/3（缺省 15s → 5s）；装配期校验「数据报面 idle < offline_timeout」，
 	// 不满足即启动失败（否则掉线事件会迟到缺省的 120s，本策略形同虚设）。
 	OfflineTimeout string `protobuf:"bytes,5,opt,name=offline_timeout,json=offlineTimeout,proto3" json:"offline_timeout,omitempty"`
+	// max_frames 是单局帧数上限（正数；**不配置 = 60**，即示例竞速在 10fps 下约 6s 一局）。
+	// 与 tick_interval_ms 共同决定单局寿命（帧数上限 × 帧间隔）；到达上限即由模拟器判出
+	// 位置领先者胜并走既有结算路径，故它同时是「一局最多持续多久」的唯一开关。
+	// 校验：>0 且 ≤ MaxFramesLimit（20000）；显式 0/负值/超上限一律启动失败——**未配置与
+	// 显式 0 必须区分**（前者取缺省 60，后者是笔误），故用 optional 而非裸标量。
+	// 上限 20000 的依据（内存/快照成本，见 services/battle/internal/actor）：
+	// 帧输入日志每帧每玩家一条 lockstep.Input（≈112B 含分配开销），快照每 SnapshotEvery
+	// （缺省 10）帧一份（≈136B）；2 人局每帧 ≈238B，20000 帧 ≈4.8MiB/局（10fps 下 ≈33 分钟）。
+	MaxFrames *int64 `protobuf:"varint,6,opt,name=max_frames,json=maxFrames,proto3,oneof" json:"max_frames,omitempty"`
+	// tick_interval_ms 是帧间隔（**毫秒整数**；不配置 = 100）。选毫秒整数而非
+	// google.protobuf.Duration：本文件既有的两个时长字段（ticket_ttl / offline_timeout）
+	// 都是「字符串 + time.ParseDuration」，仓内无任何 Duration 用法；毫秒整数与 server.proto
+	// 的 int32/int64 数值风格一致，且免去 Duration 的秒/纳秒双字段误配。
+	// 校验：>0 且 ≤ MaxTickIntervalMillis（1000）；显式 0/负值/超上限一律启动失败。
+	// 上限 1000ms 的依据：① 帧同步语义——帧间隔 >1s 时客户端插值/预测窗口失效；
+	// ② 与数据报面空闲读超时耦合——server.kcp/udp 的 idle_timeout 缺省取 offline_timeout/3
+	// （缺省 15s → 5s），帧间隔 1s 时尚有 5 帧余量，再大则丢一两个包就可能被空闲超时误判掉线。
+	TickIntervalMs *int64 `protobuf:"varint,7,opt,name=tick_interval_ms,json=tickIntervalMs,proto3,oneof" json:"tick_interval_ms,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -122,6 +140,20 @@ func (x *BattleConf) GetOfflineTimeout() string {
 		return x.OfflineTimeout
 	}
 	return ""
+}
+
+func (x *BattleConf) GetMaxFrames() int64 {
+	if x != nil && x.MaxFrames != nil {
+		return *x.MaxFrames
+	}
+	return 0
+}
+
+func (x *BattleConf) GetTickIntervalMs() int64 {
+	if x != nil && x.TickIntervalMs != nil {
+		return *x.TickIntervalMs
+	}
+	return 0
 }
 
 type Bootstrap struct {
@@ -222,7 +254,7 @@ var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\x83\x02\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xfa\x02\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -231,8 +263,13 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"ticket_ttl\x18\x02 \x01(\tR\tticketTtl\x12>\n" +
 	"\x0eedge_endpoints\x18\x03 \x03(\v2\x17.battle.v1.EdgeEndpointR\redgeEndpoints\x125\n" +
 	"\x14frame_advertise_host\x18\x04 \x01(\tH\x00R\x12frameAdvertiseHost\x88\x01\x01\x12'\n" +
-	"\x0foffline_timeout\x18\x05 \x01(\tR\x0eofflineTimeoutB\x17\n" +
-	"\x15_frame_advertise_host\"\xe5\x02\n" +
+	"\x0foffline_timeout\x18\x05 \x01(\tR\x0eofflineTimeout\x12\"\n" +
+	"\n" +
+	"max_frames\x18\x06 \x01(\x03H\x01R\tmaxFrames\x88\x01\x01\x12-\n" +
+	"\x10tick_interval_ms\x18\a \x01(\x03H\x02R\x0etickIntervalMs\x88\x01\x01B\x17\n" +
+	"\x15_frame_advertise_hostB\r\n" +
+	"\v_max_framesB\x13\n" +
+	"\x11_tick_interval_ms\"\xe5\x02\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
