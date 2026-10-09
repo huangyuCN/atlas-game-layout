@@ -214,7 +214,7 @@ go build -o /tmp/loadtest ./scripts/loadtest
 | `edge_streams_teared_down_total{reason=takeover}` | 突增（同比 > 5 倍） | 数据报面重新握手即接管（同身份新对端顶替旧 flow-id）；正常重连会出现，突增说明客户端在反复重连 |
 | `edge_probe_failures_total` | 5 分钟增量 > 活跃流数的 1% | 后端不可达或链路异常 |
 | 单实例新流准入速率 | > 50 流/秒 持续 1 分钟 | 准入路径串行，需水平扩接入层实例 |
-| `battle_offline_timeouts_total` | > 对局数的 5%/分钟 | 客户端保活缺失（含 **UDP/WS 的 SDK 周期心跳**这一已知待办） |
+| `battle_offline_timeouts_total` | > 对局数的 5%/分钟 | 客户端保活缺失（三 SDK 的周期心跳**已补**：缺省 2s ≤ `offline_timeout/3`，Go `084fcdf` / TS `937c8b2` / C# `f94e6fa`） |
 | `battle_reconnects_total` | 与 `battle_offline_timeouts_total` 同看 | 回座次数；**回座率骤降**说明窗口内重连不成功（票过期/接入层不可达） |
 | `battle_online_players` | 突降（同比 < 50%） | 战斗域直连在线人数；突降伴随 `edge_streams_active` 同步下跌即接入层或帧面故障 |
 | `TRANSPORT_DOWNLINK_FAILED`（错误 reason） | 出现即告警（5 分钟增量 > 0） | 一次性回执超过单包上限，下行无法投递（见 `atlas/errors/class.go`；按 reason 计数需服务端在错误路径打点） |
@@ -274,9 +274,15 @@ go build -o /tmp/loadtest ./scripts/loadtest
   「显式 OFF」，缺省值按强制处理）；要只记录请显式写 `NEGOTIATE`。
 - 拒绝回执的 message 统一为「客户端版本<成因>：当前 `<上报值>`，最低要求 `<门槛>`，请升级客户端」，
   成因区分「未上报 / 无法识别（需形如 1.2.3） / 过低」；客户端按 reason 分支即可，不必比对字面量。
-- **取值**：首个支持「战斗帧直连」的 SDK 版本。模板示例 `0.1.0` 只拒绝不报版本与 `0.0.x` 的旧客户端
-  （不误伤在用 SDK：Go `0.5.0` / TS `0.6.0` / C# `0.1.0` 均通过）；三 SDK 直连版本发布并确认覆盖后上调
-  （如 `0.7.0`）。**必须先发 SDK 再上调**，否则在用客户端会被一并拒绝。
+- **取值**：首个支持「战斗帧直连」的 SDK 版本。模板现值 `0.1.0` 是**发布前的过渡值**——只拒绝
+  不报版本与 `0.0.x` 的旧客户端，不误伤在用 SDK；**发布后目标值 `0.7.0`**（三 SDK 统一发行版号：
+  Go 打 `v0.7.0` tag、TS `@huangyucn/atlas-sdk-ts@0.7.0`、C# `HuangyuCN.Atlas.Sdk 0.7.0`）。
+  上调动作＝把模板 `services/gateway/configs/config.yaml` 的 `runtime.min_client_version`
+  由 `0.1.0` 改为 `0.7.0` 并重新部署网关（`game`/`matcher`/`battle` 三份同名样例只是字段位、
+  不参与判定，可一并对齐但非必须）。
+- **顺序硬约束：先发 SDK 再上调**，否则在用客户端会被一并拒绝。完整发布步骤（服务端先上线 →
+  三 SDK 发布 → 门槛上调 → 公告 → 观察窗，含逐步验证与回滚）见框架 `atlas` 仓
+  `docs/superpowers/plans/2026-09-29-stage3-direct-battle-connect-plan.md` 的「发布方案」。
 
 ### 8.2 版本比较与非法串处置
 
