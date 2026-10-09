@@ -5,6 +5,7 @@
 package stream
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/huangyuCN/atlas/transport"
@@ -38,6 +39,23 @@ func (c Conn) Endpoint() Endpoint {
 		return Endpoint{Kind: c.Kind, ID: c.Peer}
 	}
 	return Endpoint{Kind: c.Kind, ID: strconv.FormatUint(c.ConnID, 10)}
+}
+
+// ConnStreamID 返回 battle 侧的直连流标识：流式面（KCP/WS）`<kind>/<连接 ID>`，
+// 数据报面（UDP）`<kind>/<对端键>`；两者都取不到返回空串（不臆造）。
+//
+// 与接入层 StreamID（`s-…`）的关系：**两段各自的流标识**——接入层只做 L4 转发，
+// 帧请求不携带它的流标识，排障时按 player_id + battle_id 把两段日志串起来
+// （跨层同一个 stream_id 需要改线格式，列为待办，见 server.streamIDOf）。
+func ConnStreamID(c Conn) string {
+	switch {
+	case c.ConnID != 0:
+		return fmt.Sprintf("%s/%d", c.Kind, c.ConnID)
+	case c.Peer != "":
+		return fmt.Sprintf("%s/%s", c.Kind, c.Peer)
+	default:
+		return ""
+	}
 }
 
 // Port 是一类帧面的直连端口：推送 + 关闭（适配见 ConnPort / DatagramPort）。

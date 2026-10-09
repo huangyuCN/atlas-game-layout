@@ -4,8 +4,14 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
+	battlev1actor "github.com/huangyuCN/atlas-game-layout/api/battle/v1/actor"
+	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/ledger"
+	"github.com/huangyuCN/atlas/contrib/actor/types"
+	atlaserrors "github.com/huangyuCN/atlas/errors"
 )
 
 // ledgerRecord 是一次结算留档（帧面据此在懒激活之前拒绝迟到 op）。
@@ -75,3 +81,42 @@ func TestSettleWithoutLedger(t *testing.T) {
 
 // 静态保证：内存留档实现满足 biz 接口。
 var _ biz.SettleLedger = (*memLedger)(nil)
+
+// TestSettleWritesSharedLedger 验证结算把留档写进**跨节点**存储，且该留档能被激活闸门读到
+// （P1-7）：结算节点写一次、任意节点据此拒绝复活已结束的对局——漏了这笔，落到非结算节点的
+// 迟到帧 op / rpc 面调用会按 SpawnAuto 重建空名单实例（A1 缺陷的跨节点形态）。
+func TestSettleWritesSharedLedger(t *testing.T) {
+	store := ledger.NewMemoryStore()
+	env := newBattleEnvDeps(t, testBattleConfig(),
+		battleDeps{SharedLedger: store, SharedLedgerTTL: time.Minute})
+	ctx := context.Background()
+	seedAndJoin(t, env, ctx)
+	sendFrameInputs(t, env, ctx)
+	waitSettled(t, env)
+
+	entry, ok, err := store.Lookup(ctx, "b-test01")
+	if err != nil || !ok {
+		t.Fatalf("跨节点留档未写入: ok=%v err=%v", ok, err)
+	}
+	if entry.Winner != "p-a" || len(entry.Players) != 2 {
+		t.Fatalf("跨节点留档内容不符: %+v", entry)
+	}
+	gate := ledger.NewGate(store, battlev1actor.BattleServiceActorType, nil)
+	pid, err := types.NewPID(battlev1actor.BattleServiceActorType, "b-test01")
+	if err != nil {
+		t.Fatalf("NewPID: %v", err)
+	}
+	if err := gate.AllowActivation(ctx, pid); !errorv1.IsBattleEnded(err) {
+		t.Fatalf("激活闸门未拒绝已结束的对局: err=%v（reason=%s）", err, atlaserrors.Reason(err))
+	}
+}
+
+// TestSettleWithoutSharedLedger 验证未装配跨节点留档时结算照常（可选依赖，nil 不 panic）。
+func TestSettleWithoutSharedLedger(t *testing.T) {
+	env := newBattleEnvDeps(t, testBattleConfig(), battleDeps{SharedLedger: nil})
+	ctx := context.Background()
+	seedAndJoin(t, env, ctx)
+	sendFrameInputs(t, env, ctx)
+	waitSettled(t, env)
+	assertActorStopped(t, env)
+}

@@ -4,6 +4,7 @@
 package actor
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz/simulator"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/ledger"
 )
 
 // SendFrameInput 实现 battlev1actor.BattleService：帧输入转发 lockstep 会话。
@@ -101,6 +103,12 @@ func (b *BattleActor) settle(ctx core.ActorContext, out settleOutcome) {
 	if b.ledger != nil {
 		b.ledger.RecordEnded(b.battleID, out.Winner, sortedKeys(b.players))
 	}
+	b.recordSharedEnded(ctx, out)
+	// 结算关键路径日志（P1-4③）：actor 侧无客户端连接（结算由帧结果或掉线超时驱动），
+	// 故这里给对局级关联字段；**每条直连的 stream_id 在 stream.Registry.CloseBattle 的
+	// 结算关闭日志里**，两侧按 battle_id + player_id 对齐。
+	ctx.Logger().Info("battle: 对局结算",
+		"battle", b.battleID, "winner", out.Winner, "frames", out.Frames, "players", len(b.players))
 	res := &models.BattleResult{
 		BattleID:    b.battleID,
 		MatchID:     b.matchID,
@@ -180,5 +188,27 @@ func sessionMeta(battleID string, tickNanos int64, maxPlayers int) *locksteppb.S
 		TickMillis:       uint32(tickNanos / 1e6),
 		InputDelayFrames: 0,
 		Mode:             locksteppb.LockstepMode_LOCKSTEP_MODE_SERVER_AUTHORITATIVE,
+	}
+}
+
+// sharedLedgerWriteTimeout 是跨节点留档写入的时限：结算在 actor 线程内执行，共享存储抖动
+// 不得把结算挂死（写失败只告警——本地留档与结算本身不依赖共享存储）。
+const sharedLedgerWriteTimeout = 2 * time.Second
+
+// recordSharedEnded 写**跨节点**留档（P1-7）：结算节点写一次（带 TTL），任意节点的激活闸门
+// （ledger.Gate）据此拒绝复活已结束的对局——少了这一笔，落到非结算节点的迟到帧 op / rpc 面
+// 调用会按 SpawnAuto 重新拉起空名单实例（A1 缺陷的跨节点形态）。
+// 未装配共享留档（单测/单机形态）即 no-op；写失败只告警：本地留档已生效，且闸门在存储
+// 不可用时按放行处理（见 ledger.Gate 的失败开放说明），不在这里阻断结算。
+func (b *BattleActor) recordSharedEnded(ctx core.ActorContext, out settleOutcome) {
+	if b.shared == nil {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(ctx.Context(), sharedLedgerWriteTimeout)
+	defer cancel()
+	entry := ledger.Entry{Winner: out.Winner, Players: sortedKeys(b.players)}
+	if err := b.shared.Record(writeCtx, b.battleID, entry, b.sharedTTL); err != nil {
+		ctx.Logger().Error("battle: 跨节点留档写入失败（本地留档与结算不受影响）",
+			"battle", b.battleID, "err", err)
 	}
 }

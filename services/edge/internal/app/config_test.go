@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,31 @@ func TestProxyConfigRejectsBadListener(t *testing.T) {
 			svc.Edge.Listeners = tc.listeners
 			if _, err := proxyConfig(svc, stubResolver{}, metrics.Noop(), nil); err == nil {
 				t.Fatal("非法监听面应报错")
+			}
+		})
+	}
+}
+
+// TestProxyConfigRejectsUnknownFaceName 覆盖评审 P1-5：面名必须限定在 battle 帧面元数据
+// 端口键的取值集合 {ws,kcp,udp} 内。写错面名（如 websocket）若放行，启动成功但运行期
+// Resolver 按面名选不到端口，每条连接都以 backend_unavailable 被拒——故必须装配期失败，
+// 且在错误里点名允许值。
+func TestProxyConfigRejectsUnknownFaceName(t *testing.T) {
+	for _, name := range []string{"websocket", "WS", "tcp", "grpc", " ws"} {
+		t.Run(name, func(t *testing.T) {
+			svc := validEdgeConfig()
+			svc.Edge.Listeners = []*conf.Edge_Listener{{
+				Name: name, Network: conf.Edge_NETWORK_TCP,
+				Addr: "127.0.0.1:7100", Carrier: conf.Edge_CARRIER_WS_UPGRADE,
+			}}
+			_, err := proxyConfig(svc, stubResolver{}, metrics.Noop(), nil)
+			if err == nil {
+				t.Fatalf("面名 %q 非法应启动失败", name)
+			}
+			for _, allowed := range []string{"ws", "kcp", "udp"} {
+				if !strings.Contains(err.Error(), allowed) {
+					t.Fatalf("错误信息应点名允许值 %q，实际 %v", allowed, err)
+				}
 			}
 		})
 	}

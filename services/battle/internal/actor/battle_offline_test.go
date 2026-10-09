@@ -172,12 +172,34 @@ func notifyOffline(t *testing.T, env *offlineEnv, playerID string) {
 	}
 }
 
-// setMigration 投递迁移窗口开关（规格 §9.6 接缝）。
+// setMigration 打开/关闭迁移窗口：走**唯一入口**——迁移 op（Prepare/ResumeBattleMigration），
+// 与生产路径同一份实现（批次 6 的本地消息接缝已删除，见 battle_offline.go 顶部裁定）。
 func setMigration(t *testing.T, env *offlineEnv, paused bool) {
 	t.Helper()
-	if err := env.rt.Tell(newTestContext(), env.pid, MigrationPause{Paused: paused}); err != nil {
+	ctx := newTestContext()
+	var err error
+	if paused {
+		_, err = env.ask(ctx, &battlev1.PrepareBattleMigrationRequest{BattleId: "b-test01"})
+	} else {
+		_, err = env.ask(ctx, &battlev1.ResumeBattleMigrationRequest{BattleId: "b-test01"})
+	}
+	if err != nil {
 		t.Fatalf("迁移开关(%v): %v", paused, err)
 	}
+}
+
+// frameOf 返回该局会话当前推进到的帧号（管理面查询口径）。
+func frameOf(t *testing.T, env *offlineEnv) uint64 {
+	t.Helper()
+	raw, err := env.ask(newTestContext(), &battlev1.GetStateReq{BattleId: "b-test01"})
+	if err != nil {
+		t.Fatalf("状态查询: %v", err)
+	}
+	reply, ok := raw.(*battlev1.GetStateReply)
+	if !ok {
+		t.Fatalf("状态回执类型 %T 不符", raw)
+	}
+	return reply.GetCurrentFrame()
 }
 
 // outsFor 返回某玩家收到的出局广播记录（拷贝）。
@@ -360,15 +382,19 @@ func TestOfflineDuplicateIgnored(t *testing.T) {
 	assertNoSettle(t, env)
 }
 
-// TestOfflineDuringMigration 验证迁移期暂停计时接缝（规格 §9.6）：窗口内不计掉线，
-// 恢复后从恢复时刻重新起算。
+// TestOfflineDuringMigration 验证迁移期的**唯一入口**语义（规格 §9.6）：窗口内不计掉线
+// 且会话暂停推进（帧号冻结，客户端重连后不会看到帧回退），恢复后从恢复时刻重新起算。
 func TestOfflineDuringMigration(t *testing.T) {
 	env := newOfflineEnv(t, 3, nil)
 	seedAndJoinRoster(t, env, "p-a", "p-b", "p-c")
 
 	setMigration(t, env, true)
+	frozen := frameOf(t, env)
 	notifyOffline(t, env, "p-b") // 拆流导致的断开：迁移窗口内不计
 	assertNoOut(t, env, 3*offlineCfg(3).OfflineTimeout)
+	if got := frameOf(t, env); got != frozen {
+		t.Fatalf("迁移窗口内帧号推进了：%d → %d（迁移窗口必须同时暂停会话推进）", frozen, got)
+	}
 
 	setMigration(t, env, false) // 迁移结束：不在线者从此刻重新起算
 	waitOut(t, env, "p-a", "p-b")

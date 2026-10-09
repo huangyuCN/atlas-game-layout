@@ -67,6 +67,6 @@ func (b *Bridge) notify(battleID, playerID string, msg any) {
 		return
 	}
 	if err := b.tell(battleID, msg); err != nil {
-		atlaslog.Warnw("stream: 连接生命周期消息投递失败", "battle", battleID, "player", playerID, "err", err)
+		atlaslog.Warn("stream: 连接生命周期消息投递失败", "battle", battleID, "player", playerID, "err", err)
 	}
 }

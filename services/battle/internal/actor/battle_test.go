@@ -9,6 +9,7 @@ import (
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/models"
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/ledger"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
@@ -156,6 +157,9 @@ type battleDeps struct {
 	Metrics  metrics.Collector // 指标采集器（nil = noop）
 	Pusher   biz.BattlePusher  // 直连推送端口（nil = 内存记录实现 memPusher）
 	Ledger   biz.SettleLedger  // 结算留档端口（nil = 不留档）
+	// SharedLedger/SharedLedgerTTL 是跨节点留档（P1-7；nil = 不写）。
+	SharedLedger    ledger.Store
+	SharedLedgerTTL time.Duration
 }
 
 // newBattleEnv 起本地 actor 运行时并拉起战斗 actor（短帧间隔加速测试）。
@@ -194,16 +198,18 @@ func newBattleEnvDeps(t *testing.T, cfg Config, d battleDeps) *battleEnv {
 	result := &memResultRepo{}
 	publisher := &memPublisher{}
 	err = rt.Register(NewProps(Props{
-		Rt:         localRT{rt},
-		Registry:   reg,
-		Storage:    lockstepimpl.NewMemoryStorage(),
-		ResultRepo: result,
-		Pusher:     fanout,
-		Publisher:  publisher,
-		Presence:   d.Presence,
-		Ledger:     d.Ledger,
-		Metrics:    d.Metrics,
-		Cfg:        cfg,
+		Rt:              localRT{rt},
+		Registry:        reg,
+		Storage:         lockstepimpl.NewMemoryStorage(),
+		ResultRepo:      result,
+		Pusher:          fanout,
+		Publisher:       publisher,
+		Presence:        d.Presence,
+		Ledger:          d.Ledger,
+		SharedLedger:    d.SharedLedger,
+		SharedLedgerTTL: d.SharedLedgerTTL,
+		Metrics:         d.Metrics,
+		Cfg:             cfg,
 	}))
 	if err != nil {
 		t.Fatalf("Register: %v", err)

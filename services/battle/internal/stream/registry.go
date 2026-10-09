@@ -11,6 +11,7 @@ import (
 	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
+	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame/engine"
 )
@@ -171,22 +172,33 @@ func (r *Registry) CountBattle(battleID string) int {
 // 关闭前对每条仍未确认的连接重投 EndRetries 次结算通知：数据报面（KCP/UDP）没有重传，
 // 单次推送丢包就等于玩家永远不知道结果（重连补投覆盖的是「玩家还会再来」的那部分）。
 // 本方法每局只被调用一次（结算是单次的），故关闭也**确定性发生一次**。
+// 每条被关闭的连接打一条带 `stream_id`（battle 侧直连流标识，见 ConnStreamID）的结算日志：
+// 结算关键路径的排障关联键（与接入层 `s-…` 各记一段，按 player_id + battle_id 对齐）。
 func (r *Registry) CloseBattle(battleID string) {
 	r.mu.Lock()
-	victims := make([]Conn, 0, len(r.conns))
+	victims := make([]closedConn, 0, len(r.conns))
 	for playerID, c := range r.conns {
 		if c.BattleID == battleID {
-			victims = append(victims, c)
+			victims = append(victims, closedConn{playerID: playerID, conn: c})
 			delete(r.conns, playerID)
 			delete(r.endpoints, c.Endpoint())
 		}
 	}
 	r.mu.Unlock()
 	winner, recorded := r.ended.Winner(battleID)
-	for _, c := range victims {
-		r.repushEnd(c, winner, recorded)
-		_ = r.closeConn(c)
+	for _, v := range victims {
+		atlaslog.Info("battle: 结算关闭直连",
+			"stream_id", ConnStreamID(v.conn), "player_id", v.playerID,
+			"battle_id", battleID, "winner", winner, "recorded", recorded)
+		r.repushEnd(v.conn, winner, recorded)
+		_ = r.closeConn(v.conn)
 	}
+}
+
+// closedConn 是待回收的一条连接（玩家 ID 只用于日志关联，连接本身按端点寻址）。
+type closedConn struct {
+	playerID string
+	conn     Conn
 }
 
 // repushEnd 向一条未确认连接有界重投结算通知（未留档即跳过：不发无胜者的空通知）。

@@ -24,12 +24,14 @@ type offlineTimeout struct {
 	PlayerID string
 }
 
-// MigrationPause 是迁移期的掉线计时开关（规格 §9.6 接缝；批次 7 在属主切换窗口进出各投一次）：
-// 接入层拆流导致的断开不是掉线——窗口内不计时，窗口关闭后对仍不在线者重新起算。
-type MigrationPause struct {
-	// Paused 为真即进入迁移窗口（暂停计时），为假即退出窗口并恢复计时。
-	Paused bool
-}
+// 迁移窗口的**唯一入口**是迁移 op（battle_migrate.go 的 Prepare/ResumeBattleMigration →
+// enterMigrationWindow / exitMigrationWindow）：窗口内断开不算掉线（本文件只提供计时挂起与
+// 重新起算两个原语），且会话帧推进一并暂停。
+//
+// 裁定（P1-8）：这里原有一个本地消息接缝 `MigrationPause{Paused}`（无生产发送方，批次 7 的
+// 属主切换走迁移 op），它与迁移 op **语义不一致**——只挂起掉线计时、不暂停会话推进，
+// 误用会让客户端在迁移窗口内看到帧回退。为免两条入口漂移，接缝已删除：窗口只能由迁移 op
+// 打开/关闭，计时开关由 enterMigrationWindow / exitMigrationWindow 调用本文件的两个原语。
 
 // onPlayerOnline 实现本地消息：掉线窗口内回座（规格 §9.4）——取消计时、清除打点；
 // 补帧仍走既有 SyncFrames 语义（帧协议零改动，只是承载路径改成直连）。
@@ -95,21 +97,8 @@ func (b *BattleActor) onOfflineTimeout(ctx core.ActorContext, msg offlineTimeout
 	return nil
 }
 
-// onMigrationPause 实现本地消息：迁移窗口内的掉线计时开关（规格 §9.6 接缝）。
-// 进入窗口：取消未触发的计时但**保留打点**（窗口内断开不算掉线，窗口关闭后从新时刻起算）；
-// 退出窗口：给仍打点的玩家重新起算（迁移期间一直不在线者由此进入正常判负流程）。
-// 实现与迁移 op（battle_migrate.go）共用：两条入口语义必须完全一致。
-func (b *BattleActor) onMigrationPause(ctx core.ActorContext, msg MigrationPause) error {
-	b.migration = msg.Paused
-	if msg.Paused {
-		b.holdOfflineTimers()
-		return nil
-	}
-	b.rearmOfflineTimers(ctx)
-	return nil
-}
-
-// holdOfflineTimers 挂起全部掉线计时但保留打点（窗口内不计时）。
+// holdOfflineTimers 挂起全部掉线计时但保留打点（迁移窗口内不计时，规格 §9.6）。
+// 只由 enterMigrationWindow 调用：迁移窗口的唯一入口是迁移 op（见本文件顶部裁定）。
 func (b *BattleActor) holdOfflineTimers() {
 	for player, cancel := range b.offline {
 		if cancel == nil {
@@ -120,7 +109,7 @@ func (b *BattleActor) holdOfflineTimers() {
 	}
 }
 
-// rearmOfflineTimers 给所有仍打点的玩家重新起算掉线计时（窗口关闭/迁移完成后调用）。
+// rearmOfflineTimers 给所有仍打点的玩家重新起算掉线计时（迁移窗口关闭/迁移完成后调用）。
 func (b *BattleActor) rearmOfflineTimers(ctx core.ActorContext) {
 	for player := range b.offline {
 		b.armOffline(ctx, player)

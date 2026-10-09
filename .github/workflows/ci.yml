@@ -134,6 +134,6 @@ jobs:
       - name: 单元测试
         run: go test -count=1 ./...
 
-      - name: 四服务构建
+      - name: 五服务构建
         run: make build
 

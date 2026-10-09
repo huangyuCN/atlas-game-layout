@@ -69,7 +69,13 @@ server:
     # window_snd: 128             # 发送窗口（与 window_rcv 必须成对）
     # window_rcv: 128
     # mtu: 1400                   # 最大传输单元（字节）
-    # max_body_size: 1048576      # 单帧最大字节数
+    # max_body_size: 16368        # 单帧 body 上限（字节）。**单包 ≤16 KiB 契约**：接入层回程按
+                                  # 整个数据报计 16 KiB（超出的数据报被丢弃），故 body 上限 =
+                                  # 16 KiB − 帧头 16B = 16368；不配 = 本服务按契约补该值，
+                                  # 显式配置超过它即启动失败（配大了不会生效）。
+                                  # 超包回执不会下发给引擎（引擎静默丢弃）：帧面改回
+                                  # TRANSPORT_DOWNLINK_FAILED 并计 battle_frame_reply_oversize_total，
+                                  # 客户端应缩小请求区间（如 SyncFrames 的 last_seen_frame）后重试。
     # idle_timeout: 120s          # 连接空闲超时（本服务**不配即取 battle.offline_timeout/3**，
                                   # 见下方 offline_timeout；显式配置必须小于它，否则启动失败）
     # write_timeout: 10s          # 单次写超时（不配 = 不限）
@@ -78,7 +84,8 @@ server:
     addr: 0.0.0.0:9402
     # pool_size: 4096             # 读写缓冲池大小
     # read_buffer: 4096           # 单包读缓冲字节数
-    # max_body_size: 1048576      # 单包最大字节数
+    # max_body_size: 16368        # 单包 body 上限（字节）；口径同 server.kcp.max_body_size：
+                                  # 不配 = 按「单包 ≤16 KiB」契约补 16368，配大了启动失败。
     # idle_timeout: 120s          # 对端空闲超时（本服务**不配即取 battle.offline_timeout/3**，
                                   # 见下方 offline_timeout；显式配置必须小于它，否则启动失败）
     # max_peers: 10000            # 最大对端数（不配 = 不限）
@@ -93,7 +100,8 @@ server:
     # write_timeout: 10s          # 单次写超时（不配 = 不限）
     # read_limit: 1048576         # 单条消息读上限（字节）
     # max_conns: 10000            # 最大并发连接数（不配 = 不限）
-    # max_body_size: 1048576      # 单帧最大字节数
+    # max_body_size: 16368        # 单帧 body 上限（字节）；口径同 server.kcp.max_body_size
+                                  # （WS 走 TCP 不分片，但超包回执在接入层同样发不出去）。
     # subprotocols: [atlas]       # 协商的子协议列表（不配 = 不限定）
     # tls:                        # TLS 字段同 http.tls（Server.TLS 共用）
 

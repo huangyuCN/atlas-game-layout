@@ -3,8 +3,10 @@ package app
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
 	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/conf"
 	"github.com/huangyuCN/atlas/contrib/edge"
@@ -85,10 +87,17 @@ func listenersOf(list []*conf.Edge_Listener) ([]edge.Listener, error) {
 	return out, nil
 }
 
-// listenerOf 映射单个接入面：网络与 hello 载体按枚举映射，未知取值即启动失败。
+// listenerOf 映射单个接入面：面名限定在帧面端口键取值集合内，网络与 hello 载体按枚举映射，
+// 未知取值即启动失败。
 func listenerOf(l *conf.Edge_Listener) (edge.Listener, error) {
 	if l.GetName() == "" {
-		return edge.Listener{}, fmt.Errorf("app: edge.listeners[].name 不能为空（面名须为 ws/kcp/udp）")
+		return edge.Listener{}, fmt.Errorf("app: edge.listeners[].name 不能为空（面名须为 %s）", faceNamesText())
+	}
+	if !isFaceName(l.GetName()) {
+		// 放行写错的面名 = 启动成功但运行期每条连接都 backend_unavailable（Resolver 按面名
+		// 在帧面实例元数据里选端口，选不到即拒绝），故装配期就失败并点名允许值。
+		return edge.Listener{}, fmt.Errorf("app: edge.listeners[].name %q 非法（允许值：%s；"+
+			"面名必须与 battle 帧面实例的端口元数据键一致）", l.GetName(), faceNamesText())
 	}
 	if l.GetAddr() == "" {
 		return edge.Listener{}, fmt.Errorf("app: edge.listeners[%s].addr 不能为空", l.GetName())
@@ -103,6 +112,22 @@ func listenerOf(l *conf.Edge_Listener) (edge.Listener, error) {
 	}
 	return edge.Listener{Name: l.GetName(), Network: network, Address: l.GetAddr(), Carrier: carrier}, nil
 }
+
+// allowedFaces 是全部合法面名（＝battle 注册帧面实例时的端口元数据键，见 lib/consts）。
+var allowedFaces = []string{consts.FrameMetaPortWS, consts.FrameMetaPortKCP, consts.FrameMetaPortUDP}
+
+// isFaceName 报告面名是否在合法取值集合内（严格相等，不做大小写/空白归一——归一等于猜）。
+func isFaceName(name string) bool {
+	for _, face := range allowedFaces {
+		if name == face {
+			return true
+		}
+	}
+	return false
+}
+
+// faceNamesText 返回合法面名的可读枚举（错误信息点名用）。
+func faceNamesText() string { return strings.Join(allowedFaces, "/") }
 
 // networkOf 把配置里的监听网络映射为框架网络名。
 func networkOf(n conf.Edge_Network) (string, error) {

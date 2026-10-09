@@ -1,4 +1,4 @@
-# 模板发布流程：推送 tag（v*）时按 tag 版本构建四服务并发布产物。
+# 模板发布流程：推送 tag（v*）时按 tag 版本构建五服务（gateway/game/matcher/battle/edge）并发布产物。
 #
 # 版本注入：make build VERSION=${GITHUB_REF_NAME} → -ldflags -X lib/version.*，
 # 服务启动日志、链路资源 service.version、指标 service_version 标签均为该 tag；
@@ -83,12 +83,12 @@ jobs:
       - name: 单元测试
         run: go test -count=1 ./...
 
-      - name: 按 tag 版本构建四服务
+      - name: 按 tag 版本构建五服务
         run: make build VERSION="${GITHUB_REF_NAME}"
 
       - name: 校验版本已注入二进制
         run: |
-          for s in gateway game matcher battle; do
+          for s in gateway game matcher battle edge; do
             if ! strings "bin/$s" | grep -q "${GITHUB_REF_NAME}"; then
               echo "::error::bin/$s 未注入版本 ${GITHUB_REF_NAME}"
               exit 1

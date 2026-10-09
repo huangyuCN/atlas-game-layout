@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
@@ -76,5 +77,21 @@ func TestNewFrameServersEnabledFaces(t *testing.T) {
 	}
 	if servers.KCP == nil || servers.WS == nil || servers.UDP != nil {
 		t.Fatalf("值组装配不符: kcp=%v ws=%v udp=%v", servers.KCP, servers.WS, servers.UDP)
+	}
+}
+
+// TestNewFrameServersRejectsOversizeBody 验证「单包 ≤16 KiB」契约在装配期生效：显式把
+// max_body_size 配成大于契约值即启动失败（配大了不会生效，只会让大回执在接入层被丢弃）。
+func TestNewFrameServersRejectsOversizeBody(t *testing.T) {
+	cfg := &conf.Bootstrap{Server: &configspb.Server{
+		Udp: &configspb.Server_UDP{Addr: "127.0.0.1:0", MaxBodySize: 1 << 20},
+	}}
+	ops, err := NewFrameOps(nil, testRecorder(), testTicketKey())
+	if err != nil {
+		t.Fatalf("NewFrameOps: %v", err)
+	}
+	if _, err := NewFrameServers(cfg, ops, testPolicy(), testRecorder()); err == nil ||
+		!strings.Contains(err.Error(), "单包上限") {
+		t.Fatalf("超限的 server.udp.max_body_size 应让装配失败: %v", err)
 	}
 }

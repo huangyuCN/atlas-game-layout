@@ -49,6 +49,11 @@ type Options struct {
 	// 的 OTel+Prometheus 实现；nil 时为 noop，打点零开销）。注入后 core/cluster
 	// 运行时自动导出 actor 指标（投递计数、handler 耗时、邮箱深度、重启等）。
 	Meter metrics.Collector
+	// ActivationGate 是可选的激活闸门（框架 cluster.ActivationGate）：本节点即将为一个 PID
+	// **创建** cell 之前询问一次，消费方据此拒绝不应再被激活的 PID（battle 用它拒绝复活
+	// 已结束的对局，见 services/battle/internal/ledger.Gate）。未注入即不询问；
+	// 只影响激活路径——cell 已在本节点存活时照旧投递。
+	ActivationGate cluster.ActivationGate
 	// claimer 声明节点 ID 归属（默认走 etcd 租约键）；包内测试注入桩，业务不设置。
 	claimer nodeClaimer
 }
@@ -159,6 +164,9 @@ func newClusterRuntime(opts Options, derived namespace.Derived, nc *nats.Conn,
 	}
 	if opts.Meter != nil {
 		rtOpts = append(rtOpts, cluster.WithMetrics(opts.Meter))
+	}
+	if opts.ActivationGate != nil {
+		rtOpts = append(rtOpts, cluster.WithActivationGate(opts.ActivationGate))
 	}
 	rt, err := cluster.NewRuntime(cfg, rtOpts...)
 	if err != nil {

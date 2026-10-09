@@ -25,6 +25,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/biz/simulator"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/repo"
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/ledger"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
@@ -124,6 +125,13 @@ type Props struct {
 	// Ledger 是结算留档端口（帧面据此在懒激活之前拒绝迟到 op，并在玩家重连后补投结果；
 	// nil = 不留档，仅供单测）。
 	Ledger biz.SettleLedger
+	// SharedLedger 是**跨节点**留档端口（P1-7）：结算时写一次，任意节点的激活闸门
+	// （ledger.Gate）读得到——已结束的对局不得被别的节点按 SpawnAuto 复活。
+	// nil = 不写共享留档，仅供单测。
+	SharedLedger ledger.Store
+	// SharedLedgerTTL 是共享留档的 TTL（与本地留档同源：stream.EndedTTL，随票据有效期与
+	// 掉线窗口派生；≤0 时按本地留档 TTL 同源值由装配层给出，不由 actor 兜底）。
+	SharedLedgerTTL time.Duration
 	// Metrics 是指标采集器（掉线/重连计数；nil = noop）。
 	Metrics metrics.Collector
 	Cfg     Config
@@ -138,23 +146,28 @@ type DefaultDeps struct {
 	Publisher  biz.SettlePublisher
 	Presence   biz.ConnPresence
 	Ledger     biz.SettleLedger
-	Metrics    metrics.Collector
+	// SharedLedger/SharedLedgerTTL 是跨节点留档（P1-7；nil = 不写）。
+	SharedLedger    ledger.Store
+	SharedLedgerTTL time.Duration
+	Metrics         metrics.Collector
 }
 
 // NewRuntimeProps 以给定战斗参数组装 Props：
 // MemoryStorage 按 sessionID 分片可共享，参数默认值由调用方给出（DefaultConfig）。
 func NewRuntimeProps(d DefaultDeps, cfg Config) core.Props {
 	return NewProps(Props{
-		Rt:         d.Rt,
-		Registry:   d.Registry,
-		Storage:    lockstepimpl.NewMemoryStorage(),
-		ResultRepo: d.ResultRepo,
-		Pusher:     d.Pusher,
-		Publisher:  d.Publisher,
-		Presence:   d.Presence,
-		Ledger:     d.Ledger,
-		Metrics:    d.Metrics,
-		Cfg:        cfg,
+		Rt:              d.Rt,
+		Registry:        d.Registry,
+		Storage:         lockstepimpl.NewMemoryStorage(),
+		ResultRepo:      d.ResultRepo,
+		Pusher:          d.Pusher,
+		Publisher:       d.Publisher,
+		Presence:        d.Presence,
+		Ledger:          d.Ledger,
+		SharedLedger:    d.SharedLedger,
+		SharedLedgerTTL: d.SharedLedgerTTL,
+		Metrics:         d.Metrics,
+		Cfg:             cfg,
 	})
 }
 
@@ -176,6 +189,8 @@ func NewProps(p Props) core.Props {
 				publisher:  p.Publisher,
 				presence:   p.Presence,
 				ledger:     p.Ledger,
+				shared:     p.SharedLedger,
+				sharedTTL:  p.SharedLedgerTTL,
 				metrics:    p.Metrics,
 				cfg:        p.Cfg,
 				players:    make(map[string]struct{}),
@@ -187,9 +202,8 @@ func NewProps(p Props) core.Props {
 				core.WithLocalTell(b.onPlayerOnline),
 				core.WithLocalTell(b.onPlayerOffline),
 				core.WithLocalTell(b.onOfflineTimeout),
-				// 迁移窗口开关（批次 7 在属主切换窗口调用，规格 §9.6）。
-				core.WithLocalTell(b.onMigrationPause),
-				// 迁移状态导出/恢复（迁移控制面消息，非服务 op，见 battle_migrate.go）。
+				// 迁移状态导出/恢复（迁移控制面消息，非服务 op，见 battle_migrate.go）：
+				// 迁移窗口（暂停掉线计时 + 暂停会话帧推进）的唯一入口就是这两个 op。
 				core.WithLocalAsk(b.onPrepareMigration),
 				core.WithLocalAsk(b.onResumeMigration),
 			)
@@ -214,6 +228,8 @@ type BattleActor struct {
 	publisher  biz.SettlePublisher
 	presence   biz.ConnPresence
 	ledger     biz.SettleLedger // 结算留档（帧面在懒激活之前据此拒绝迟到 op；nil = 不留档）
+	shared     ledger.Store     // 跨节点留档（激活闸门据此拒绝复活已结束的对局；nil = 不写）
+	sharedTTL  time.Duration    // 跨节点留档 TTL（与本地留档同源）
 	metrics    metrics.Collector
 	cfg        Config
 

@@ -8,8 +8,11 @@
 //  3. **栅栏**：状态携带导出时的目录 epoch，新属主只在自身 epoch 更大时认它
 //     （目录 Claim 单调抬 epoch；陈旧状态一律丢弃，不产生状态回退或双活）。
 //
-// 迁移窗口的计时开关复用批次 6 的接缝实现（enterMigrationWindow / exitMigrationWindow），
-// 因此本地消息 MigrationPause 与迁移 op 两条入口语义完全一致。
+// 迁移窗口只有一个入口：本文件的 PrepareBattleMigration / ResumeBattleMigration → OnStart 的
+// 恢复路径（规格 §9.6）。窗口语义 = **暂停掉线计时 + 暂停会话帧推进**（两件事必须同进同出，
+// 只做前者会让客户端在窗口内看到帧回退）。批次 6 遗留的本地消息接缝 `MigrationPause` 只做
+// 前者、且无生产发送方，已删除（裁定见 battle_offline.go 顶部注释）；计时开关原语
+//（holdOfflineTimers / rearmOfflineTimers）只由 enter/exitMigrationWindow 调用。
 
 package actor
 
@@ -55,9 +58,14 @@ func (b *BattleActor) onResumeMigration(ctx core.ActorContext, req *battlev1.Res
 
 // enterMigrationWindow 进入迁移窗口：窗口内断开不算掉线（规格 §9.6），
 // 且会话暂停推进——导出与恢复之间帧号严格一致，客户端重连后不会看到帧回退。
+// 关键路径日志（P1-4③）：迁移 op 由编排面发起、**没有客户端连接**，故这里只有对局/节点/
+// 代际关联字段；同一局的直连侧日志（帧面拒绝、结算关闭）各带自己的 stream_id，
+// 按 battle_id 关联（跨层同一个 stream_id 需要改线格式，列为待办）。
 func (b *BattleActor) enterMigrationWindow(ctx core.ActorContext) {
 	b.migration = true
 	b.holdOfflineTimers()
+	ctx.Logger().Info("battle: 进入迁移窗口",
+		"battle", b.battleID, "node", ctx.Node(), "epoch", ctx.Epoch(), "marked", len(b.offline))
 	_ = b.rt.Tell(ctx.Context(), b.sessionPID, lockstep.PauseSession{Reason: migrationPauseReason})
 }
 
@@ -65,6 +73,8 @@ func (b *BattleActor) enterMigrationWindow(ctx core.ActorContext) {
 func (b *BattleActor) exitMigrationWindow(ctx core.ActorContext) {
 	b.migration = false
 	b.rearmOfflineTimers(ctx)
+	ctx.Logger().Info("battle: 退出迁移窗口",
+		"battle", b.battleID, "node", ctx.Node(), "epoch", ctx.Epoch(), "marked", len(b.offline))
 	if !b.settled {
 		_ = b.rt.Tell(ctx.Context(), b.sessionPID, lockstep.ResumeSession{})
 	}

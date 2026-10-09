@@ -17,8 +17,10 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/repo"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/infra"
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/ledger"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/server"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/stream"
+	"github.com/huangyuCN/atlas/contrib/actor/cluster"
 	"github.com/huangyuCN/atlas/contrib/actor/frameops"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
 	"github.com/huangyuCN/atlas/metrics"
@@ -49,6 +51,10 @@ var Module = fx.Module("battle",
 		NewMongoClient,
 		NewActorRuntime,
 		NewPubSub,
+		// 跨节点结算留档（etcd）+ 激活闸门（任意节点拒绝复活已结束的对局，P1-7）；
+		// 闸门以框架接口 cluster.ActivationGate 进图——注入点只认框架接缝，不认实现类型。
+		newLedgerStore,
+		fx.Annotate(newActivationGate, fx.As(new(cluster.ActivationGate))),
 		// ── data：结算仓储 ──
 		newResultRepo,
 		// ── biz：结算事件实现与 grpc handler ──
@@ -58,8 +64,9 @@ var Module = fx.Module("battle",
 		newStreamRegistry, // player_id → 连接注册表（帧槽验票登记 + 直连推送端口 + 在场复核 + 结束留档）
 		newStreamBridge,   // 连接生命周期桥（引擎断开事件 → 非阻塞投递到战斗 actor）
 		newFramePolicy,    // 帧面掉线策略（数据报面空闲超时按掉线窗口推导/校验）
-		newFrameOps,       // 帧 op 服务端（路由表 + 帧槽验票身份 + 本地 actor 投递）
-		server.NewFrameServers,
+		newFrameMetrics,   // 帧面观测出口（票据拒绝按 reason、帧 op 耗时与失败，P1-4）
+		newFrameOps,       // 帧 op 服务端（路由表 + 帧槽验票身份 + 目标校验 + 本地 actor 投递）
+		newFrameServers,   // 三个直连帧面（构造 + 观测包装）
 		// 帧面实例注册器（服务名 battle-frame）：接入层按 node_id + 元数据端口发现本节点帧面。
 		NewFrameRegistrar,
 		// ── server：传输层构造（启停归属驱动方）──
@@ -95,6 +102,7 @@ func registerActor(
 	publisher biz.SettlePublisher,
 	cfg actor.Config,
 	meter metrics.Collector,
+	store *ledger.EtcdStore,
 ) error {
 	err := rt.Register(actor.NewRuntimeProps(actor.DefaultDeps{
 		Rt:         rt,
@@ -105,8 +113,12 @@ func registerActor(
 		// 在场复核端口就是直连注册表：应用掉线事件前复核玩家是否仍有存活连接（规格 §9.2）。
 		Presence: pusher,
 		// 结算留档端口也是它：帧面据此在懒激活之前拒绝迟到 op，并在重连后补投结果。
-		Ledger:  pusher,
-		Metrics: meter,
+		Ledger: pusher,
+		// 跨节点留档（P1-7）：结算时写一笔到 etcd（TTL 与本地留档同源），
+		// 任意节点的激活闸门据此拒绝复活已结束的对局。
+		SharedLedger:    store,
+		SharedLedgerTTL: stream.EndedTTL(cfg.TicketTTL, cfg.OfflineTimeout),
+		Metrics:         meter,
 	}, cfg))
 	if err != nil {
 		return err
@@ -149,10 +161,22 @@ func newFramePolicy(cfg actor.Config) server.FramePolicy {
 	return server.FramePolicy{OfflineTimeout: cfg.OfflineTimeout}
 }
 
+// newFrameMetrics 构造帧面观测出口（P1-4）：票据 hook 与 op 包装共用同一份句柄缓存。
+func newFrameMetrics(meter metrics.Collector) *server.FrameMetrics {
+	return server.NewFrameMetrics(meter)
+}
+
 // newFrameOps 组装帧面的帧 op 服务端（配置里的票据密钥在此注入身份解析器，
-// 验票通过即经连接生命周期桥登记直连并上报上线）。
-func newFrameOps(rt *pkgactor.Runtime, bridge *stream.Bridge, cfg actor.Config) (*frameops.Handler, error) {
-	return server.NewFrameOps(rt, bridge, cfg.TicketKey)
+// 验票通过即经连接生命周期桥登记直连并上报上线；观测出口同源注入）。
+func newFrameOps(rt *pkgactor.Runtime, bridge *stream.Bridge, cfg actor.Config,
+	fm *server.FrameMetrics) (*frameops.Handler, error) {
+	return server.NewFrameOps(rt, bridge, cfg.TicketKey, server.WithFrameMetrics(fm))
+}
+
+// newFrameServers 构造三个直连帧面并注入观测包装（耗时直方图 + 失败计数，P1-4②）。
+func newFrameServers(cfg *conf.Bootstrap, ops *frameops.Handler, policy server.FramePolicy,
+	life *stream.Bridge, fm *server.FrameMetrics) (server.FrameServers, error) {
+	return server.NewFrameServers(cfg, ops, policy, life, server.WithFrameMetrics(fm))
 }
 
 // registerFramePorts 把三个帧面的直连推送端口挂到注册表（端口即传输服务端，构造完成后才有）；

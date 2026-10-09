@@ -48,41 +48,61 @@ func (d *LocatorDirectory) OwnerNode(ctx context.Context, pid string) (string, e
 // 目录记录在租约续期时会被重写，故回调会重复触发；比较属主是否变化由调用方（guard）负责。
 // 监听按前缀建立，回调前按 key 精确过滤——PID 形如 battle:b1 与 battle:b10 前缀相同，
 // 不过滤会把别的对局的属主变化误当成自己的。
+//
+// 返回的 cancel 幂等且**必须**两件事一起做：取消派生 ctx（关掉客户端侧 watch 流）＋停掉
+// watcher（唤醒阻塞在 Next() 的监听 goroutine）——只 close 停止信号会按局泄漏 1 watch + 1 goroutine。
 func (d *LocatorDirectory) WatchOwner(ctx context.Context, pid string, onChange func(owner string)) (func(), error) {
 	parsed, err := types.ParsePID(pid)
 	if err != nil {
 		return nil, err
 	}
 	key := parsed.Key().String()
+	ctx, cancelWatch := context.WithCancel(ctx) // 客户端侧 watch 流挂在 ctx 上，取消它才算关掉监听
 	w, err := d.loc.Watch(ctx, locator.WatchOptions{
 		KeyPrefix: key, LocationBuilder: types.NewLocationBuilder(),
 	})
 	if err != nil {
+		cancelWatch()
 		return nil, fmt.Errorf("resolver: 监听目录 %s 失败: %w", pid, err)
 	}
 	stop := make(chan struct{})
+	var stopOnce sync.Once
+	stopWatch := func() { stopOnce.Do(func() { _ = w.Stop() }) } // etcd 实现重复 Stop 会 panic，故恰好一次
 	go func() {
-		defer func() { _ = w.Stop() }()
+		defer stopWatch()
 		for {
-			events, err := w.Next()
-			if err != nil {
-				return // 上下文取消或监听终止：静默退出（接入层不再拆该局的流）
-			}
-			for _, ev := range events {
-				if ev.Key == nil || ev.Key.String() != key {
-					continue
-				}
-				onChange(ownerOfLocation(ev.Loc))
-			}
 			select {
+			case <-ctx.Done():
+				return
 			case <-stop:
 				return
 			default:
 			}
+			events, err := w.Next()
+			if err != nil {
+				return // 监听终止（Stop 或 ctx 取消）：静默退出（接入层不再拆该局的流）
+			}
+			deliverOwner(events, key, onChange)
 		}
 	}()
 	var once sync.Once
-	return func() { once.Do(func() { close(stop) }) }, nil
+	return func() {
+		once.Do(func() {
+			cancelWatch()
+			stopWatch()
+			close(stop)
+		})
+	}, nil
+}
+
+// deliverOwner 回调本局的属主变化：同一前缀下的别局事件（battle:b10 之于 battle:b1）按 key 精确过滤。
+func deliverOwner(events []locator.WatchEvent, key string, onChange func(owner string)) {
+	for _, ev := range events {
+		if ev.Key == nil || ev.Key.String() != key {
+			continue
+		}
+		onChange(ownerOfLocation(ev.Loc))
+	}
 }
 
 // ownerOfLocation 从目录记录解出属主节点（类型不符或删除事件返回空串）。

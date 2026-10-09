@@ -10,6 +10,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/data/repo"
+	"github.com/huangyuCN/atlas/contrib/actor/cluster"
 	"github.com/huangyuCN/atlas/contrib/actor/pubsub"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/namespace"
@@ -57,7 +58,8 @@ func newResultRepo(cli *mongo.Client) repo.ResultRepo {
 // NewActorRuntime 装配 actor 集群运行时（战斗 actor 宿主，
 // Locator=etcd、传输=NATS、懒激活按服务发现选 battle 节点）。
 // 服务发现由装配层提供（fxkit.NewEtcdDiscovery），保证与注册端同一键前缀。
-func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter metrics.Collector) (*pkgactor.Runtime, error) {
+func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter metrics.Collector,
+	gate cluster.ActivationGate) (*pkgactor.Runtime, error) {
 	var endpoints []string
 	if r := cfg.GetRegistry(); r != nil && r.GetEtcd() != nil {
 		endpoints = r.GetEtcd().GetEndpoints()
@@ -80,6 +82,8 @@ func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter me
 		Tracer:        pkgactor.DefaultTracer(),
 		Meter:         meter,
 		Discovery:     discovery,
+		// 激活闸门（P1-7）：已结束的对局在任意节点都不得被懒激活复活。
+		ActivationGate: gate,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app: 构造 actor 运行时失败: %w", err)
