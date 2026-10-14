@@ -1,0 +1,22 @@
+// 公共配置：actor 集群租约（归属键 TTL 与续租周期）。
+//
+// 缺省约定（唯一规则）见 docs/config.md §10：两项都是**可选参数**——空 = 取缺省
+// 60s/20s，不覆盖底层默认；显式值必须能被 time.ParseDuration 解析、为正，且
+// lease_renew_interval 严格小于 lease_ttl，违反即启动失败（不静默回落、不静默归一）。
+// 时长统一为字符串（本仓无 google.protobuf.Duration 用法，见 battle conf 的同类说明）。
+syntax = "proto3";
+
+package atlas.configs;
+
+option go_package = "github.com/huangyuCN/atlas-game-layout/protobuf/configs;configs";
+
+message Actor {
+  // lease_ttl 是 actor 目录归属键的租约时长（time.ParseDuration 字符串，如 "60s"；空 = 60s）。
+  // 它同时决定 etcd 键 TTL 与归属记录的 lease_deadline：太短会被后端抖动放大成批量失租
+  // （实测 etcd commit 0.88→24.12ms、fsync 0.66→14.12ms；10s 的键会在续租落地前过期），
+  // 太长则故障接管等待（= lease_ttl + QuiesceGrace）随之变久。取舍与实测口径见 docs/config.md §10。
+  string lease_ttl = 1;
+  // lease_renew_interval 是归属续租周期（time.ParseDuration 字符串，如 "20s"；空 = 20s）。
+  // 必须为正且**严格小于** lease_ttl（建议 TTL/3）：续租周期逼近 TTL 时，一次抖动就整批失租。
+  string lease_renew_interval = 2;
+}

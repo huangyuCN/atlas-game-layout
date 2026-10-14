@@ -68,6 +68,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `runtime.env` | 无 | — | 空 ⇒ `default`（**仅标签**） |
 | `runtime.min_client_version` | 无 | — | 空 ⇒ **仅记录**（记录客户端上报版本，不拒绝）；非空 ⇒ **登录期强制**（低于门槛/未上报/版本串非法一律拒绝，reason 常量 `CLIENT_VERSION_TOO_LOW`）。比较规则、非法串处置与取值见 §8 |
 | `runtime.min_client_version_mode` | 无 | — | 只有 `NEGOTIATE` 有意义（只记录不拒绝的灰度逃生门）；缺省（含 `OFF`）与 `ENFORCE` 在网关侧同义 = 强制（见 §8） |
+| `actor.lease_ttl` / `actor.lease_renew_interval` | 无（常驻能力：只有 actor 宿主 battle / game 持有归属对象） | 空 ⇒ 缺省 `60s` / `20s`（不覆盖底层默认） | 显式值必须是 `time.ParseDuration` 字符串、为正，且 `lease_renew_interval` **严格小于** `lease_ttl`，违反即**启动失败**（不静默回落）；TTL 与接管等待的取舍见 §10 |
 | `registry.etcd.endpoints` | 非空 | etcd 客户端构造失败（装配期报错，注册/发现均不可用） | — |
 | `registry.ttl` | 无 | — | `""` ⇒ 底层默认 15s（`registry.NewEtcd` 只在 `>0` 时追加 `RegisterTTL`） |
 | `server.grpc.edge_addr` | 非空 | **不启用 edge 面**（不监听、不注册 Edge 接口） | 见下「共享可选参数」 |
@@ -346,3 +347,52 @@ curl -s -o /tmp/heap.pb.gz http://127.0.0.1:6063/debug/pprof/heap
 
 > 面板与长跑采样的落地位置同 §7.5（`deploy/observability/**`）：内存 / goroutine / fd 三张图的
 > PromQL 取值来源即 9.1 的指标；常开采样（Prometheus 抓取）只看 9.1，pprof 只在 9.2 的按需窗口开。
+
+## 10. actor 集群租约（`actor.lease_ttl` / `actor.lease_renew_interval`）
+
+actor 目录的归属是 etcd 里**带 TTL 的键**（前缀 `/atlas/actors/<ns>`）：属主每
+`lease_renew_interval` 对本节点全部 owned 做一次「LookupCAS + CAS」，把键 TTL 与记录的
+`lease_deadline` 一起推到「当下 + `lease_ttl`」。两项都只对 **actor 宿主服务**
+（battle / game）有意义；gateway / matcher 是 actor 平面的调用方（不持有归属），
+配了也没有对象可续租。
+
+| 配置 | 缺省 | 语义 |
+|---|---|---|
+| `actor.lease_ttl` | `60s` | 归属键 TTL 与 `lease_deadline` 的写入值（`time.ParseDuration` 字符串） |
+| `actor.lease_renew_interval` | `20s` | 归属续租周期（建议取 `lease_ttl/3`） |
+
+**为空/缺失** ⇒ 取上表缺省（不追加配置、交底层默认）；**显式值**必须能被 `time.ParseDuration`
+解析、为正，且 `lease_renew_interval` **严格小于** `lease_ttl`——违反即**启动失败**（不静默回落、
+不静默归一）。校验点在 `pkg/actor.NewRuntime`（`Options.leaseConfig`），且发生在建 NATS/etcd
+连接**之前**：配置写错在装配期就炸，不拖到运行期。
+
+### 10.1 为什么缺省不是框架的 10s/3s
+
+框架 `cluster.DefaultLease()` 是**开发期取值**（10s/3s）。生产实测（1024 流压测，单节点 etcd）：
+
+- etcd 后端抖动：commit 延迟 0.88ms → **24.12ms**、WAL fsync 0.66ms → **14.12ms**，抖动窗口十几秒；
+- `TTL=10s` 时键会在续租落地**之前**过期 ⇒ 该轮续租读到 `ErrNotFound` ⇒ 判 Lost：
+  同一秒约 100 个对局被冻结（`renewed=27 lost=72`），上层表现为 matcher 取票超时、
+  客户端「匹配成功但成局失败」；
+- 同一抖动下 `TTL=60s` 完全无影响（抖动 ≪ TTL）。框架自带压测节点用的就是 `60s/20s`。
+
+### 10.2 代价：接管等待 = `lease_ttl` + `QuiesceGrace`
+
+TTL 变长不是免费的：他节点必须等「租约过期 + QuiesceGrace（缺省 5s）」才能抢占失效属主。
+
+| 配置 | 抖动容忍 | 崩溃 / 被 kill 后他节点接管等待 | etcd 写量（相对） |
+|---|---|---|---|
+| 框架缺省 `10s` / `3s` | 约 10s | 约 **15s** | 1× |
+| 模板缺省 `60s` / `20s` | 约 60s | 约 **65s** | 约 **1/6.7** |
+
+写量口径：每个 owned PID 每周期 2 次 etcd 往返（`LookupCAS` + `CAS`），commit 速率
+≈ `2 / lease_renew_interval`。调法：强单活业务若不能接受 65s 接管窗口，把 `lease_ttl`
+下调（如 `30s`，`lease_renew_interval: 10s`）即可——只要 TTL 仍显著大于实测抖动幅度。
+
+### 10.3 判 Lost 之后（自愈）
+
+`60s/20s` 只降低失租概率，不改变「已经 Lost」的处理：判 Lost 立即打栅栏 + 冻结本地 cell
+（杜绝双活窗口），随后框架按指数退避**自动重 Claim**（1s 起、30s 封顶、最多 8 次，走既有
+Lookup-first / 按 PID 单飞 / 隔离窗口 / 激活闸门纪律）；成功即恢复服务，用尽上限则保持冻结
+并输出 Error 日志 + `actor_reclaim_total{result="exhausted"}`（可告警）。语义细节见框架仓
+`contrib/actor/cluster/doc.go` 的「Lost 自愈（判 Lost 不再永久冻结）」一节。

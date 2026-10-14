@@ -15,6 +15,16 @@ runtime:
   # 本服务声明仅为「每服务一份自包含 YAML」的样例；OFF=不校验；NEGOTIATE=只协商；ENFORCE=拒绝低版本。
   min_client_version: 0.1.0
   min_client_version_mode: MIN_CLIENT_VERSION_MODE_NEGOTIATE
+# actor 集群租约（归属键 TTL 与续租周期）：两项都是**可选参数**——空 = 缺省 60s/20s，
+# 不覆盖底层默认。TTL 太短会被后端抖动放大成批量失租（实测 etcd commit 0.88→24.12ms、
+# fsync 0.66→14.12ms；10s 的键会在续租落地前过期，判 Lost）；TTL 太长则故障接管等待
+# （= lease_ttl + QuiesceGrace，缺省 grace 5s）随之变久：10s→15s，60s→65s。
+# lease_renew_interval 必须为正且**严格小于** lease_ttl（建议 TTL/3），否则启动失败。
+# 缺省约定、实测口径与取舍见 docs/config.md §10。
+actor:
+  lease_ttl: 60s
+  lease_renew_interval: 20s
+
 registry:
   etcd:
     endpoints:

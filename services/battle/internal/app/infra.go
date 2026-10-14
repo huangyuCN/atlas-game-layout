@@ -73,6 +73,12 @@ func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter me
 		}
 		nodeID, derived = r.GetId(), d
 	}
+	// 租约两项来自配置（actor.lease_ttl / actor.lease_renew_interval；空 = 缺省 60s/20s）：
+	// 本节点是战斗 actor 宿主，归属键 TTL 太短会把后端抖动直接放大成批量失租。
+	leaseTTL, leaseRenew, err := pkgactor.LeaseFromConf(cfg.GetActor())
+	if err != nil {
+		return nil, fmt.Errorf("app: %w", err)
+	}
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,
 		Namespace:     derived.Namespace,
@@ -83,7 +89,9 @@ func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter me
 		Meter:         meter,
 		Discovery:     discovery,
 		// 激活闸门（P1-7）：已结束的对局在任意节点都不得被懒激活复活。
-		ActivationGate: gate,
+		ActivationGate:     gate,
+		LeaseTTL:           leaseTTL,
+		LeaseRenewInterval: leaseRenew,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("app: 构造 actor 运行时失败: %w", err)

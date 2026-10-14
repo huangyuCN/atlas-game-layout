@@ -12,6 +12,7 @@ import "protobuf/configs/server.proto";
 import "protobuf/configs/data.proto";
 import "protobuf/configs/log.proto";
 import "protobuf/configs/observability.proto";
+import "protobuf/configs/actor.proto";
 
 // BattleConf 是战斗域直连出票配置（阶段 3 批次 2）：
 // 入场票据的 AEAD 密钥与接入层各面地址，两者都由 battle 侧装配期校验。
@@ -72,4 +73,7 @@ message Bootstrap {
   atlas.configs.Observability observability = 6;
   // battle 是直连出票配置（批次 2 起必填：缺段/缺密钥即启动失败）。
   BattleConf battle = 7;
+  // actor 是 actor 集群租约（归属键 TTL 与续租周期；两项空 = 缺省 60s/20s）。
+  // 缺省约定与取舍见 docs/config.md §10；非法组合（Renew ≥ TTL）即启动失败。
+  atlas.configs.Actor actor = 8;
 }

@@ -11,6 +11,7 @@ import "protobuf/configs/server.proto";
 import "protobuf/configs/data.proto";
 import "protobuf/configs/log.proto";
 import "protobuf/configs/observability.proto";
+import "protobuf/configs/actor.proto";
 
 message Bootstrap {
   atlas.configs.Runtime runtime = 1;
@@ -22,6 +23,9 @@ message Bootstrap {
   atlas.configs.Observability observability = 6;
   // admin 是管理面（GM/运维）配置：仅 internal listener 可达，见 server.grpc.internal_addr。
   game.conf.Admin admin = 7;
+  // actor 是 actor 集群租约（归属键 TTL 与续租周期；两项空 = 缺省 60s/20s）。
+  // 缺省约定与取舍见 docs/config.md §10；非法组合（Renew ≥ TTL）即启动失败。
+  atlas.configs.Actor actor = 8;
 }
 
 // Admin 是管理面（GM/运维）配置。

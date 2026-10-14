@@ -40,6 +40,15 @@ type Options struct {
 	Namespace namespace.Namespace
 	// Discovery 是可选的服务发现（懒激活选节点；nil 时懒激活退化到本机）。
 	Discovery registry.Discovery
+	// LeaseTTL 是 actor 目录归属键的租约时长（0 = 缺省 60s）。
+	//
+	// 这一项同时决定 etcd 键 TTL 与归属记录的 lease_deadline：太短则后端抖动（实测
+	// commit 尖峰 24ms、fsync 14ms）会让键在续租落地前过期、整批判 Lost；太长则故障
+	// 接管等待（= LeaseTTL + QuiesceGrace）变久。取舍见 docs/config.md §10。
+	LeaseTTL time.Duration
+	// LeaseRenewInterval 是归属续租周期（0 = 缺省 20s；必须为正且严格小于 LeaseTTL）。
+	// 来源：配置段 actor.lease_renew_interval，经 LeaseFromConf 解析。
+	LeaseRenewInterval time.Duration
 	// Tracer 是可选的链路追踪器（core.Tracer 适配，如 contrib/actor/observe/otel
 	// 的 otel 实现；nil 时 Ask/Tell 不产生 span，noop 热路径零开销）。
 	// 模板装配传入 otel.New(otel.GetTracerProvider().Tracer("atlas-actor"))，
@@ -74,8 +83,13 @@ type Runtime struct {
 }
 
 // NewRuntime 装配集群运行时（惰性：Start 前不建任何连接）。
+// 租约参数在**建连接之前**校验：非法配置必须启动失败，而不是连上后端之后才炸。
 func NewRuntime(opts Options) (*Runtime, error) {
 	derived, err := deriveOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	lease, err := opts.leaseConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -88,18 +102,25 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		nc.Close()
 		return nil, err
 	}
-	inner, dir, tr, err := newClusterRuntime(opts, derived, nc, loc)
+	inner, dir, tr, err := newClusterRuntime(opts, derived, lease, nc, loc)
 	if err != nil {
 		nc.Close()
 		_ = ec.Close()
 		return nil, err
 	}
-	claimer := opts.claimer
-	if claimer == nil {
-		claimer = etcdNodeClaimer{ec: ec, prefix: derived.EtcdDirectory, ttl: nodeLeaseTTL}
-	}
+	claimer := newNodeClaimer(opts, ec, derived.EtcdDirectory, lease.TTL)
 	return &Runtime{inner: inner, nc: nc, ec: ec, nodeID: opts.NodeID, claimer: claimer,
 		dir: dir, tr: tr}, nil
+}
+
+// newNodeClaimer 构造节点 ID 归属声明器：**TTL 跟随 actor 目录租约**（同一个 etcd、同一份
+// 后端抖动，两把键对 TTL 的要求相同——TTL 必须显著大于抖动幅度，否则节点归属键会先过期，
+// 同 ID 的第二个进程即可声明成功而静默串台）。opts.claimer 非空时按其注入（包内测试桩）。
+func newNodeClaimer(opts Options, ec *clientv3.Client, prefix string, ttl time.Duration) nodeClaimer {
+	if opts.claimer != nil {
+		return opts.claimer
+	}
+	return etcdNodeClaimer{ec: ec, prefix: prefix, ttl: ttl}
 }
 
 // deriveOptions 校验必填项并派生命名空间五面：命名空间缺失或非法即报错
@@ -139,8 +160,8 @@ func newLocator(opts Options, derived namespace.Derived) (*clientv3.Client, *etc
 // newClusterRuntime 组装集群运行时（目录 + NATS 传输 + 可选发现/追踪/指标）。
 // 日志不显式注入：cluster 默认取 atlas 全局 Logger（bootstrap 已把本服务配置好的 Logger
 // 装进全局），再捕获一次只会在将来二次 SetLogger 时固化为旧实例。
-func newClusterRuntime(opts Options, derived namespace.Derived, nc *nats.Conn,
-	loc *etcdlocator.Locator) (*cluster.Runtime, cluster.Directory, *cluster.NATSTransport, error) {
+func newClusterRuntime(opts Options, derived namespace.Derived, lease cluster.LeaseConfig,
+	nc *nats.Conn, loc *etcdlocator.Locator) (*cluster.Runtime, cluster.Directory, *cluster.NATSTransport, error) {
 	transport, err := cluster.NewNATSTransport(nc,
 		cluster.WithLocalNodeID(opts.NodeID), cluster.WithNamespace(derived.Namespace.String()))
 	if err != nil {
@@ -149,9 +170,11 @@ func newClusterRuntime(opts Options, derived namespace.Derived, nc *nats.Conn,
 	cfg := cluster.Config{
 		NodeID: opts.NodeID,
 		Mode:   cluster.ModeCluster,
-		Lease:  cluster.DefaultLease(),
+		Lease:  lease,
 	}
-	dir := cluster.NewDirectory(loc, opts.NodeID, 10*time.Second)
+	// Directory 的 TTL 必须与租约一致：它写进归属记录的截止时间与 etcd 键的 TTL。
+	// 只改续租周期会把「配置生效」变成假象（键仍按旧 TTL 过期）。
+	dir := cluster.NewDirectory(loc, opts.NodeID, lease.TTL)
 	rtOpts := []cluster.Option{
 		cluster.WithDirectory(dir),
 		cluster.WithTransport(transport),

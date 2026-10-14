@@ -34,7 +34,10 @@ type Bootstrap struct {
 	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
 	Observability *configs.Observability `protobuf:"bytes,6,opt,name=observability,proto3" json:"observability,omitempty"`
 	// admin 是管理面（GM/运维）配置：仅 internal listener 可达，见 server.grpc.internal_addr。
-	Admin         *Admin `protobuf:"bytes,7,opt,name=admin,proto3" json:"admin,omitempty"`
+	Admin *Admin `protobuf:"bytes,7,opt,name=admin,proto3" json:"admin,omitempty"`
+	// actor 是 actor 集群租约（归属键 TTL 与续租周期；两项空 = 缺省 60s/20s）。
+	// 缺省约定与取舍见 docs/config.md §10；非法组合（Renew ≥ TTL）即启动失败。
+	Actor         *configs.Actor `protobuf:"bytes,8,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -118,6 +121,13 @@ func (x *Bootstrap) GetAdmin() *Admin {
 	return nil
 }
 
+func (x *Bootstrap) GetActor() *configs.Actor {
+	if x != nil {
+		return x.Actor
+	}
+	return nil
+}
+
 // Admin 是管理面（GM/运维）配置。
 type Admin struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -169,7 +179,7 @@ var File_services_game_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_game_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"&services/game/internal/conf/conf.proto\x12\tgame.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xdc\x02\n" +
+	"&services/game/internal/conf/conf.proto\x12\tgame.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\x88\x03\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
@@ -177,7 +187,8 @@ const file_services_game_internal_conf_conf_proto_rawDesc = "" +
 	"\x04data\x18\x04 \x01(\v2\x13.atlas.configs.DataR\x04data\x12$\n" +
 	"\x03log\x18\x05 \x01(\v2\x12.atlas.configs.LogR\x03log\x12B\n" +
 	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x12&\n" +
-	"\x05admin\x18\a \x01(\v2\x10.game.conf.AdminR\x05admin\"/\n" +
+	"\x05admin\x18\a \x01(\v2\x10.game.conf.AdminR\x05admin\x12*\n" +
+	"\x05actor\x18\b \x01(\v2\x14.atlas.configs.ActorR\x05actor\"/\n" +
 	"\x05Admin\x12&\n" +
 	"\x0fmax_grant_count\x18\x01 \x01(\rR\rmaxGrantCountBIZGgithub.com/huangyuCN/atlas-game-layout/services/game/internal/conf;confb\x06proto3"
 
@@ -203,6 +214,7 @@ var file_services_game_internal_conf_conf_proto_goTypes = []any{
 	(*configs.Data)(nil),          // 5: atlas.configs.Data
 	(*configs.Log)(nil),           // 6: atlas.configs.Log
 	(*configs.Observability)(nil), // 7: atlas.configs.Observability
+	(*configs.Actor)(nil),         // 8: atlas.configs.Actor
 }
 var file_services_game_internal_conf_conf_proto_depIdxs = []int32{
 	2, // 0: game.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
@@ -212,11 +224,12 @@ var file_services_game_internal_conf_conf_proto_depIdxs = []int32{
 	6, // 4: game.conf.Bootstrap.log:type_name -> atlas.configs.Log
 	7, // 5: game.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
 	1, // 6: game.conf.Bootstrap.admin:type_name -> game.conf.Admin
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	8, // 7: game.conf.Bootstrap.actor:type_name -> atlas.configs.Actor
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_services_game_internal_conf_conf_proto_init() }

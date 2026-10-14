@@ -63,7 +63,7 @@ func TestEtcdNodeClaimConflict(t *testing.T) {
 		t.Skipf("etcd 不可用: %v", err)
 	}
 	t.Cleanup(func() { _ = ec.Close() })
-	claimer := etcdNodeClaimer{ec: ec, prefix: "/atlas/actors/it-claim", ttl: nodeLeaseTTL}
+	claimer := etcdNodeClaimer{ec: ec, prefix: "/atlas/actors/it-claim", ttl: defaultNodeLeaseTTL}
 	nodeID := fmt.Sprintf("it-claim-%d", time.Now().UnixNano())
 
 	// 用带截止的 ctx 调用：etcd 不可达时快速失败并跳过，而不是挂到测试超时。
@@ -140,4 +140,67 @@ func TestEtcdNodeClaimReclaimAfterCrash(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatal("租约到期后仍无法重新声明（崩溃残留窗口未收敛）")
+}
+
+// TestNodeClaimerFollowsLeaseTTL 验证节点归属键的 TTL 跟随 actor 目录租约
+// （而不是写死 10s）：两把键同处一个 etcd、同一份后端抖动，TTL 必须同量级地大于抖动幅度，
+// 否则节点归属键会先过期——同 ID 的第二个进程即可声明成功而静默串台（本机制要防的正是它）。
+// 依据与代价见 node_claim.go 的 defaultNodeLeaseTTL 注释与 docs/config.md §10。
+func TestNodeClaimerFollowsLeaseTTL(t *testing.T) {
+	lease, err := Options{}.leaseConfig()
+	if err != nil {
+		t.Fatalf("缺省租约组装失败: %v", err)
+	}
+	c := newNodeClaimer(Options{}, nil, "/atlas/actors/it-lease-ttl", lease.TTL)
+	etcdC, ok := c.(etcdNodeClaimer)
+	if !ok {
+		t.Fatalf("默认声明器应为 etcdNodeClaimer，实际 %T", c)
+	}
+	if etcdC.ttl != lease.TTL {
+		t.Fatalf("节点归属键 TTL = %s，期望跟随目录租约 %s", etcdC.ttl, lease.TTL)
+	}
+	if etcdC.ttl != DefaultLeaseTTL {
+		t.Fatalf("缺省节点归属键 TTL = %s，期望 %s", etcdC.ttl, DefaultLeaseTTL)
+	}
+}
+
+// TestNodeClaimerHonorsInjectedClaimer 验证 opts.claimer 注入优先（包内测试桩不被覆盖）。
+func TestNodeClaimerHonorsInjectedClaimer(t *testing.T) {
+	fc := &fakeClaimer{}
+	if c := newNodeClaimer(Options{claimer: fc}, nil, "/atlas/actors/it-stub", time.Minute); c != nodeClaimer(fc) {
+		t.Fatalf("注入的 claimer 应原样返回，实际 %T", c)
+	}
+}
+
+// TestEtcdNodeClaimUsesRequestedTTL 验证请求的 TTL 真的落到 etcd 租约上
+// （不是只改了结构体字段）。无 etcd 时跳过（按 AGENTS.md 在 10.10.9.36 执行）。
+func TestEtcdNodeClaimUsesRequestedTTL(t *testing.T) {
+	ctx := context.Background()
+	ec, err := etcd.NewClient(etcd.Options{Endpoints: []string{"127.0.0.1:12379"}})
+	if err != nil {
+		t.Skipf("etcd 不可用: %v", err)
+	}
+	t.Cleanup(func() { _ = ec.Close() })
+	const ttl = 60 * time.Second
+	claimer := etcdNodeClaimer{ec: ec, prefix: "/atlas/actors/it-claim-ttl", ttl: ttl}
+	nodeID := fmt.Sprintf("it-ttl-%d", time.Now().UnixNano())
+
+	claimCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	leaseID, _, ch, err := claimer.claimOnce(claimCtx, claimCtx, nodeID, ttl)
+	if err != nil {
+		t.Skipf("etcd 不可用（租约声明失败）: %v", err)
+	}
+	defer func() {
+		claimer.revokeBestEffort(ctx, leaseID)
+		for range ch { // 排空续租通道，避免 goroutine 泄漏
+		}
+	}()
+	resp, err := ec.TimeToLive(ctx, leaseID)
+	if err != nil {
+		t.Fatalf("TimeToLive: %v", err)
+	}
+	if resp.TTL <= 50 || resp.TTL > 60 {
+		t.Fatalf("etcd 租约剩余 TTL = %ds，期望落在 (50,60]（请求 %s）", resp.TTL, ttl)
+	}
 }

@@ -20,10 +20,15 @@ var ErrNodeConflict = errors.New("actor: actor 节点 ID 已被占用")
 // 请求生命周期结束后仍然生效），但也**不能没有上限**——etcd 不可达时会挂住停机流程。
 const revokeTimeout = 3 * time.Second
 
-// nodeLeaseTTL 是节点归属键的租约 TTL（与目录租约同量级）。
-// 进程被 kill -9 后旧租约仍会占键至多该时长——同 ID 快速重启会被自己的残留挡住，
-// 与注册中心的实例冲突窗口同性质（等租约过期即可）。
-const nodeLeaseTTL = 10 * time.Second
+// defaultNodeLeaseTTL 是节点归属键租约的**兜底** TTL（仅在调用方未显式传 ttl 时使用）。
+//
+// 生产路径不取它：pkg/actor 会把 actor 目录租约的 TTL（actor.lease_ttl，缺省 60s）原样传进来
+// ——两把键同处一个 etcd、同一份后端抖动，TTL 必须同量级地大于抖动幅度，否则节点归属键会在
+// 续租落地前过期：此时同 ID 的另一个进程可以成功声明该键，落回「共用 NodeID」的静默串台
+// （正是本机制要防的状态），而本进程只会收到 watchLease 的重声明失败告警。
+// 代价与目录租约同一处权衡：TTL 越长，进程被 kill -9 后同 ID 残留挡住重启的窗口越长
+// （≤ TTL）；滚动重启须等进程真正退出，或给每进程显式唯一 runtime.id（见 docs/config.md §5）。
+const defaultNodeLeaseTTL = 10 * time.Second
 
 // reclaimBackoff 返回第 attempt 次重新声明归属的退避间隔（步进 500ms，上限 5s）。
 func reclaimBackoff(attempt int) time.Duration {
@@ -54,7 +59,7 @@ func (c etcdNodeClaimer) Claim(ctx context.Context, nodeID string) (func(context
 	}
 	ttl := c.ttl
 	if ttl <= 0 {
-		ttl = nodeLeaseTTL
+		ttl = defaultNodeLeaseTTL
 	}
 	// keepCtx 只用于续租：与调用方请求生命周期解耦（Start 的 ctx 结束后仍要续租），
 	// 但 Grant/Txn 仍用调用方 ctx——否则 etcd 不可达时会永久阻塞启动。

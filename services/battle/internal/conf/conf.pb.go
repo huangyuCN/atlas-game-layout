@@ -166,7 +166,10 @@ type Bootstrap struct {
 	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
 	Observability *configs.Observability `protobuf:"bytes,6,opt,name=observability,proto3" json:"observability,omitempty"`
 	// battle 是直连出票配置（批次 2 起必填：缺段/缺密钥即启动失败）。
-	Battle        *BattleConf `protobuf:"bytes,7,opt,name=battle,proto3" json:"battle,omitempty"`
+	Battle *BattleConf `protobuf:"bytes,7,opt,name=battle,proto3" json:"battle,omitempty"`
+	// actor 是 actor 集群租约（归属键 TTL 与续租周期；两项空 = 缺省 60s/20s）。
+	// 缺省约定与取舍见 docs/config.md §10；非法组合（Renew ≥ TTL）即启动失败。
+	Actor         *configs.Actor `protobuf:"bytes,8,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -250,11 +253,18 @@ func (x *Bootstrap) GetBattle() *BattleConf {
 	return nil
 }
 
+func (x *Bootstrap) GetActor() *configs.Actor {
+	if x != nil {
+		return x.Actor
+	}
+	return nil
+}
+
 var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xfa\x02\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xfa\x02\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -269,7 +279,7 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\x10tick_interval_ms\x18\a \x01(\x03H\x02R\x0etickIntervalMs\x88\x01\x01B\x17\n" +
 	"\x15_frame_advertise_hostB\r\n" +
 	"\v_max_framesB\x13\n" +
-	"\x11_tick_interval_ms\"\xe5\x02\n" +
+	"\x11_tick_interval_ms\"\x91\x03\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
@@ -277,7 +287,8 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\x04data\x18\x04 \x01(\v2\x13.atlas.configs.DataR\x04data\x12$\n" +
 	"\x03log\x18\x05 \x01(\v2\x12.atlas.configs.LogR\x03log\x12B\n" +
 	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x12/\n" +
-	"\x06battle\x18\a \x01(\v2\x17.battle.conf.BattleConfR\x06battleBKZIgithub.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;confb\x06proto3"
+	"\x06battle\x18\a \x01(\v2\x17.battle.conf.BattleConfR\x06battle\x12*\n" +
+	"\x05actor\x18\b \x01(\v2\x14.atlas.configs.ActorR\x05actorBKZIgithub.com/huangyuCN/atlas-game-layout/services/battle/internal/conf;confb\x06proto3"
 
 var (
 	file_services_battle_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -302,6 +313,7 @@ var file_services_battle_internal_conf_conf_proto_goTypes = []any{
 	(*configs.Data)(nil),          // 6: atlas.configs.Data
 	(*configs.Log)(nil),           // 7: atlas.configs.Log
 	(*configs.Observability)(nil), // 8: atlas.configs.Observability
+	(*configs.Actor)(nil),         // 9: atlas.configs.Actor
 }
 var file_services_battle_internal_conf_conf_proto_depIdxs = []int32{
 	2, // 0: battle.conf.BattleConf.edge_endpoints:type_name -> battle.v1.EdgeEndpoint
@@ -312,11 +324,12 @@ var file_services_battle_internal_conf_conf_proto_depIdxs = []int32{
 	7, // 5: battle.conf.Bootstrap.log:type_name -> atlas.configs.Log
 	8, // 6: battle.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
 	0, // 7: battle.conf.Bootstrap.battle:type_name -> battle.conf.BattleConf
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	9, // 8: battle.conf.Bootstrap.actor:type_name -> atlas.configs.Actor
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_services_battle_internal_conf_conf_proto_init() }
