@@ -80,3 +80,12 @@ observability:
   otlp: grpc://127.0.0.1:4317
   metrics:
     prometheus: 0.0.0.0:9152
+  # 抓取端点同时导出 Go 运行时与进程指标（go_goroutines / go_memstats_* /
+  # process_resident_memory_bytes / process_open_fds 等，来自 client_golang 官方 collector）——
+  # 长跑的内存/句柄/goroutine 增长判据取这里。
+  # pprof 是运行时剖析端点（host:port）：**空或不配 = 不监听**（默认关闭，零开销）。
+  # 安全：/debug/pprof/ 会暴露进程内存、goroutine 与调用栈——**只绑回环或内网**，
+  # 公网暴露等于把内存与调用栈交出去；生产建议按需临时开启（压测剖析/内存排查），
+  # 采样完立即关闭。同机起全栈的建议端口：gateway 6060 / game 6061 / matcher 6062
+  # / battle 6063 / edge 6064（本服务 6062）。
+  # pprof: 127.0.0.1:6062

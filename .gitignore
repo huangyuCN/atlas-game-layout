@@ -37,3 +37,7 @@ go.work.sum
 /e2e
 /e2e*/
 /check-dup
+
+# macOS 垃圾文件（勿入库）
+.DS_Store
+**/.DS_Store

@@ -50,16 +50,7 @@ func TestInitMetricsEndpoint(t *testing.T) {
 	}
 	m.Collector.Gauge("test_players_online").Set(3)
 
-	resp, err := http.Get("http://" + m.Addr + "/metrics")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(body)
+	text := scrape(t, m.Addr)
 	// 常量标签随行导出（Prometheus 按标签名排序）：服务身份四项齐全。
 	want := `test_players_online{env="test",service="game",service_instance_id="game-1",service_version="v1.2.3"} 3`
 	if !strings.Contains(text, want) {
@@ -82,7 +73,40 @@ func TestInitMetricsInstallsGlobalProvider(t *testing.T) {
 	}
 	counter.Add(context.Background(), 7)
 
-	resp, err := http.Get("http://" + m.Addr + "/metrics")
+	text := scrape(t, m.Addr)
+	if !strings.Contains(text, "native_counter_total") {
+		t.Fatalf("/metrics 缺少 OTel 原生埋点（全局 provider 未装）:\n%s", text)
+	}
+}
+
+// TestInitMetricsExposesRuntimeMetrics 验证抓取端点带 Go 运行时与进程指标：
+// go_*（goroutine/堆内存/GC）与 process_*（常驻内存/打开 fd/CPU）——
+// 长跑观测（内存与句柄增长、goroutine 泄漏）的判据抓手（投产清单 OBS-4），
+// 由 client_golang 的 go/process collector 提供，不手写一套。
+func TestInitMetricsExposesRuntimeMetrics(t *testing.T) {
+	m, err := InitMetrics("127.0.0.1:0", ServiceIdentity{Name: "game", ID: "game-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Shutdown(context.Background()) }()
+
+	text := scrape(t, m.Addr)
+	for _, name := range []string{
+		"go_goroutines",
+		"go_memstats_heap_inuse_bytes",
+		"process_resident_memory_bytes",
+		"process_cpu_seconds_total",
+	} {
+		if !hasSample(text, name) {
+			t.Errorf("/metrics 缺运行时指标样本 %q：\n%s", name, text)
+		}
+	}
+}
+
+// scrape 抓取抓取端点的 /metrics 文本（用例共用，避免逐处重复 HTTP 样板）。
+func scrape(t *testing.T, addr string) string {
+	t.Helper()
+	resp, err := http.Get("http://" + addr + "/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,9 +115,19 @@ func TestInitMetricsInstallsGlobalProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "native_counter_total") {
-		t.Fatalf("/metrics 缺少 OTel 原生埋点（全局 provider 未装）:\n%s", body)
+	return string(body)
+}
+
+// hasSample 判断抓取文本中是否存在该指标名的样本行：样本行 = 指标名后紧跟 " "（无标签）
+// 或 "{"（有标签）——据此排除 "# HELP"/"# TYPE" 注释行与同前缀的其它指标名。
+func hasSample(text, name string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		rest, ok := strings.CutPrefix(line, name)
+		if ok && (strings.HasPrefix(rest, " ") || strings.HasPrefix(rest, "{")) {
+			return true
+		}
 	}
+	return false
 }
 
 // plainCollector 是不支持拉取式能力的采集器（用于验证降级路径）。

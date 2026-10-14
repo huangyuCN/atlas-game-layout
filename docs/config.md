@@ -88,6 +88,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `observability.otlp` | 非空（端点即必需参数） | **exporter noop**（不导出，零开销） | — |
 | `observability.metrics.prometheus` | 非空 | **不暴露抓取端点**（采集器退化为 noop） | — |
 | `observability.sampler` | 无 | — | 未设置/`0` ⇒ `PARENT_BASED_RATIO`；`sample_ratio` 未设置 ⇒ `1.0` |
+| `observability.pprof` | 非空 | **不监听任何端口**（默认关闭，零开销） | 非空 ⇒ 该地址暴露 `/debug/pprof/`；地址非法 ⇒ **装配期失败**（不静默降级）。安全约定、建议端口与验证命令见 §9 |
 | `server.kcp.idle_timeout` / `server.udp.idle_timeout`（battle） | 无（本服务按掉线窗口推导） | 空/`0s` ⇒ 取 `battle.offline_timeout / 3`（缺省 15s → 5s） | 显式值必须**严格小于** `battle.offline_timeout`，否则装配期启动失败（数据报面无关闭握手，掉线只能靠空闲读超时发现，见 §7） |
 | `battle.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `edge.ticket_key` 同值，否则帧面全面拒票 |
 | `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
@@ -294,3 +295,54 @@ go build -o /tmp/loadtest ./scripts/loadtest
 - **版本串非法按「低于门槛」处理**（复用同一 reason `CLIENT_VERSION_TOO_LOW`）：新增独立 reason 要改
   `api/error/v1` 协议，且客户端与客服的分支只需「升级客户端」一条；用 message 的成因措辞区分即可。
   未上报（空串）同样拒绝——旧客户端恰恰多数不报版本，放行等于把「匹配成功但连不上」放回来。
+
+## 9. 运行时自省面：pprof 与 go/process 运行时指标（OBS-4）
+
+### 9.1 运行时指标（无需配置，抓取端点启用即随行导出）
+
+来源是 `client_golang` 官方 collector（`collectors.NewGoCollector` / `collectors.NewProcessCollector`，
+**不手写一套**），与 OTel 采集指标**同一份注册表**：框架 `contrib/metrics/otel` 的 Exporter 持
+**私有**注册表、未开放「追加 collector」的接缝，故模板经框架明确支持的 `otelmetrics.WithReader`
+接缝交回自建注册表（口径逐项对齐：不加计数后缀、不带 scope/unit/target 信息、服务身份作常量标签）。
+
+| 组 | 代表指标 | 用途 |
+|---|---|---|
+| `go_*` | `go_goroutines`、`go_memstats_heap_inuse_bytes`、`go_gc_duration_seconds` | goroutine 泄漏、堆增长、GC 压力 |
+| `process_*` | `process_resident_memory_bytes`、`process_open_fds`、`process_cpu_seconds_total` | 常驻内存与句柄泄漏（长跑判据） |
+
+验证（抓取端口见 §4 的 `observability.metrics.prometheus`，五服务分别为 9151/9150/9152/9153/9154）：
+
+```bash
+curl -s http://127.0.0.1:9153/metrics | grep -c '^go_'                                 # > 0
+curl -s http://127.0.0.1:9153/metrics | grep -E '^(go_goroutines|process_resident_memory_bytes) '
+```
+
+### 9.2 pprof（`observability.pprof`，**默认关闭**）
+
+值为监听地址 `host:port`：**空/不配 = 不监听任何端口**；配了但地址非法 ⇒ **装配期失败**
+（不静默降级成「不监听」——「配了没生效」比启动失败更贵）。处理器复用框架
+`transport/http/pprof`（单源：模板不再自行注册一套 `net/http/pprof`）。
+
+| 服务 | 建议端口（同机起全栈时避免撞端口） |
+|---|---|
+| gateway / game / matcher / battle / edge | 6060 / 6061 / 6062 / 6063 / 6064 |
+
+安全策略（三条，缺一不可）：
+
+1. **只绑回环或内网**：`/debug/pprof/` 会暴露进程内存、goroutine 与调用栈——**公网暴露等于把
+   内存与调用栈交出去**；生产用 `127.0.0.1:606x`（同机排障）或内网管理网卡地址。绑到非回环地址时
+   启动日志给一条 `WARN`（**仅告警不拒绝**：绑内网按需采样是允许的部署形态）。
+2. **按需开启**：压测剖析/内存排查时临时打开，采样完立即关闭；不长期常开。
+3. **不走公网入口**：接入层、K8s Service、LB 一律不转发 `/debug/pprof/*`。
+
+验证：
+
+```bash
+curl -s http://127.0.0.1:6063/debug/pprof/ | head                       # 索引页（goroutine/heap/profile）
+curl -s -o /tmp/cpu.pb.gz "http://127.0.0.1:6063/debug/pprof/profile?seconds=30"
+go tool pprof -top /tmp/cpu.pb.gz
+curl -s -o /tmp/heap.pb.gz http://127.0.0.1:6063/debug/pprof/heap
+```
+
+> 面板与长跑采样的落地位置同 §7.5（`deploy/observability/**`）：内存 / goroutine / fd 三张图的
+> PromQL 取值来源即 9.1 的指标；常开采样（Prometheus 抓取）只看 9.1，pprof 只在 9.2 的按需窗口开。

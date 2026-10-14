@@ -2,6 +2,9 @@ package bootstrap
 
 import (
 	"errors"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,4 +186,71 @@ func TestAssembleLoadedKeepsIdentity(t *testing.T) {
 	if cfg.GetId() != "demo-1" || cfg.GetEnv() != "prod" {
 		t.Fatalf("显式身份被覆盖: id=%q env=%q", cfg.GetId(), cfg.GetEnv())
 	}
+}
+
+// TestAssembleLoadedStartsPprofWhenConfigured 验证 observability.pprof 被装配消费：
+// 配了地址即在该地址起监听且 /debug/pprof/ 可访问（未接线时本用例必红）。
+// 端口由内核分配（先绑 :0 读回真实地址再释放），极小概率被其它进程抢走时换一个重试。
+func TestAssembleLoadedStartsPprofWhenConfigured(t *testing.T) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		addr := freeAddr(t)
+		cfg := &testBootstrap{
+			Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1", Namespace: "test"},
+			lg:      &configspb.Log{Level: "error"},
+			obs:     &configspb.Observability{Pprof: addr},
+		}
+		if _, err := AssembleLoaded(cfg); err != nil {
+			lastErr = err
+			continue
+		}
+		body, code := getText(t, "http://"+addr+"/debug/pprof/")
+		if code != http.StatusOK {
+			t.Fatalf("/debug/pprof/ 状态码 = %d，期望 200", code)
+		}
+		if !strings.Contains(body, "goroutine") {
+			t.Fatalf("/debug/pprof/ 索引页异常（未列出 goroutine）:\n%s", body)
+		}
+		return
+	}
+	t.Fatalf("装配 pprof 连续失败（端口不可用或未接线）: %v", lastErr)
+}
+
+// TestAssembleLoadedPprofBadAddr 验证 pprof 地址非法即装配期失败：
+// 配了却起不来必须让启动失败，不能静默降级成「不监听」。
+func TestAssembleLoadedPprofBadAddr(t *testing.T) {
+	cfg := &testBootstrap{
+		Runtime: &configspb.Runtime{Name: "demo", Id: "demo-1", Namespace: "test"},
+		lg:      &configspb.Log{Level: "error"},
+		obs:     &configspb.Observability{Pprof: "127.0.0.1:not-a-port"},
+	}
+	if _, err := AssembleLoaded(cfg); err == nil {
+		t.Fatal("pprof 地址非法应装配失败，实际为 nil")
+	}
+}
+
+// freeAddr 返回一个当前空闲的回环地址（绑 :0 读回真实端口后立即释放）。
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("预留空闲端口失败: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	return ln.Addr().String()
+}
+
+// getText 取该 URL 的响应体与状态码。
+func getText(t *testing.T, url string) (string, int) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s 失败: %v", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("读 %s 响应失败: %v", url, err)
+	}
+	return string(body), resp.StatusCode
 }

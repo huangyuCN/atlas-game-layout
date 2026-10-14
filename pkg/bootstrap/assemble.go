@@ -88,24 +88,56 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 		return nil, err
 	}
 
-	// 指标采集与 Prometheus 抓取端点（未配置时 noop 采集器，热路径零开销）：
-	// 常量标签带同一份服务身份，服务停止时关闭抓取端点与底层 provider。
-	m, err := observability.InitMetrics(like.GetObservability().GetMetrics().GetPrometheus(), identity)
+	// 指标抓取端点与 pprof 调试端点：未配置的端点一律**不监听**（默认关闭，零开销）。
+	obs, err := initObsEndpoints(like, identity)
 	if err != nil {
 		return nil, err
 	}
 
 	opts := []fx.Option{
 		fx.Supply(cfg),
-		fx.Provide(func() metrics.Collector { return m.Collector }),
+		fx.Provide(func() metrics.Collector { return obs.metrics.Collector }),
 		fx.Invoke(func(lc fx.Lifecycle) {
 			lc.Append(fx.Hook{OnStop: shutdownTrace})
-			lc.Append(fx.Hook{OnStop: m.Shutdown})
+			lc.Append(fx.Hook{OnStop: obs.stop})
 		}),
 		ModuleFor(like),
 	}
 	opts = append(opts, extra...)
 	return opts, nil
+}
+
+// obsEndpoints 汇总一次装配启动的可观测性端点（指标抓取端点 + pprof），
+// 供 fx 停机钩子统一关闭；未配置的端点是空实例，Shutdown 为空操作。
+type obsEndpoints struct {
+	metrics *observability.Metrics
+	pprof   *observability.Pprof
+}
+
+// initObsEndpoints 启动指标采集器/抓取端点与 pprof 调试端点：
+// 配置缺失不阻断启动（端点不监听）；配置错误在装配期直接失败。
+func initObsEndpoints(like ConfigLike, identity observability.ServiceIdentity) (obsEndpoints, error) {
+	// 指标采集与 Prometheus 抓取端点（未配置时 noop 采集器，热路径零开销）：
+	// 常量标签带同一份服务身份。
+	m, err := observability.InitMetrics(like.GetObservability().GetMetrics().GetPrometheus(), identity)
+	if err != nil {
+		return obsEndpoints{}, err
+	}
+	// pprof 调试端点（observability.pprof）：未配置即不监听（默认关闭）；
+	// 地址由运维显式配置，生产只应绑回环/内网（安全约定见 docs/config.md §9）。
+	pp, err := observability.InitPprof(like.GetObservability().GetPprof())
+	if err != nil {
+		return obsEndpoints{}, err
+	}
+	return obsEndpoints{metrics: m, pprof: pp}, nil
+}
+
+// stop 关闭两个端点（fx 停机钩子）：先抓取端点后 pprof，各自幂等且不返回致命错误。
+func (o obsEndpoints) stop(ctx context.Context) error {
+	if err := o.metrics.Shutdown(ctx); err != nil {
+		return err
+	}
+	return o.pprof.Shutdown(ctx)
 }
 
 // initLogging 按 log 配置段初始化全局日志（服务名取 runtime.name；文件输出供采集器进 Loki）。

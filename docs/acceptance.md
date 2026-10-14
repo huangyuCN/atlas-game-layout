@@ -77,3 +77,35 @@
   `ATLAS_DAEMON_ADDR`）；`scripts/e2e` 六种形态（dual/single/party/fault/kick/freeze）+ `direct` 全部闭环
 - **待办**：`scripts/loadtest` 仍按旧「网关 KCP 战斗通道」驱动，**当前不可用**，待阶段 3 批次 8 改写为
   直连驱动；迁移（rebalance/rollout）、网络损伤、压测与 ADR 同属批次 7/8 待办
+
+## 8. 投产清单 OBS-4 增量：运行时自省面（2026-10-13）✅
+
+> 缺口：抓取端点用的是**空注册表**（无 `go_*` / `process_*`），且生产服务没有 pprof——
+> 长跑（内存/句柄/goroutine 增长）与按需剖析都缺抓手（框架
+> `docs/superpowers/plans/2026-10-09-production-readiness-plan.md` 的 OBS-4）。
+
+- **运行时指标**：抓取端点随行导出 `client_golang` **官方 collector** 的 `go_*`
+  （`go_goroutines`、`go_memstats_heap_inuse_bytes`、`go_gc_duration_seconds`…）与 `process_*`
+  （`process_resident_memory_bytes`、`process_open_fds`、`process_cpu_seconds_total`），
+  与 OTel 采集指标**同一份注册表**；**不需要新配置**（配了 `observability.metrics.prometheus` 即有）。
+  来源与接缝（为何是模板自建注册表）见 `docs/config.md` §9.1。
+- **pprof**：新增 `observability.pprof`（**默认关闭**：空 = 不监听任何端口；配了但地址非法 ⇒
+  **装配期失败**），处理器复用框架 `transport/http/pprof`（单源）；安全约定（只绑回环/内网、
+  按需开启、不走公网入口）与建议端口见 `docs/config.md` §9.2。
+- **验证（用例）**：`pkg/observability/pprof_test.go`（空配置不监听 / 随机端口 `127.0.0.1:0`
+  读回真实地址后 `/debug/pprof/` 可访问 / `profile?seconds=1` 非空 / 停机不再服务 / 回环判定）、
+  `pkg/observability/metrics_test.go` 的 `TestInitMetricsExposesRuntimeMetrics`（断言**样本行**含
+  `go_goroutines`、`go_memstats_heap_inuse_bytes`、`process_resident_memory_bytes`、`process_cpu_seconds_total`）、
+  `pkg/bootstrap/assemble_test.go`（配置了 ⇒ 该地址可访问；地址非法 ⇒ 装配失败）。
+- **验证（服务器 10.10.9.36，端口偏移的隔离 battle 实例，`runtime.namespace=pprofchk`）**：
+  `curl -s http://127.0.0.1:9253/metrics | grep -c '^go_'` = **35**；
+  `go_goroutines 167`、`process_resident_memory_bytes 3.40e+07`、`process_open_fds 22`、
+  `process_cpu_seconds_total 0.04`；`curl -s http://127.0.0.1:7063/debug/pprof/` 返回索引页；
+  heap profile 10 104 B（`pprof -top` 出真实符号）、3 秒 CPU profile 2 783 B（70 ms 样本）、
+  goroutine profile total 164。**对照（改动前）**：运行中的旧栈
+  `curl -s http://127.0.0.1:9153/metrics | grep -c '^go_'` = **0**。
+  ⚠️ **未重启**该栈：其上正跑容量测量负载（1030 条来自 10.10.1.23 的连接），故用隔离实例取证。
+- **门禁**：五服务 `go test ./services/<svc>/... -count=1` 全绿（31 包 ok / 0 fail）；
+  `make lint` 四项 0（包名前缀 / Go doc 注释五项计数 0 / 重复函数 0 组 / 依赖边界 OK）；
+  `gofmt -l` 空；`make proto` 幂等 ×2（两次生成物哈希一致、无新增 diff）；
+  `go vet ./...` 与 `make build` 通过；改动文件均 ≤500 行、函数 ≤50 行。

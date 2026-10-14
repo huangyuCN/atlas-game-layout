@@ -92,7 +92,15 @@ type Observability struct {
 	// sampler 是采样器；不配置 = 跟随父级、根 span 按 sample_ratio 抽取。
 	Sampler TraceSampler `protobuf:"varint,3,opt,name=sampler,proto3,enum=atlas.configs.TraceSampler" json:"sampler,omitempty"`
 	// sample_ratio 是采样率（0..1，缺省 1.0）；仅 PARENT_BASED_RATIO 使用。
-	SampleRatio   *float64 `protobuf:"fixed64,4,opt,name=sample_ratio,json=sampleRatio,proto3,oneof" json:"sample_ratio,omitempty"`
+	SampleRatio *float64 `protobuf:"fixed64,4,opt,name=sample_ratio,json=sampleRatio,proto3,oneof" json:"sample_ratio,omitempty"`
+	// pprof 是 Go 运行时剖析（pprof）端点的监听地址（host:port，如 127.0.0.1:6060）；
+	// **空 = 不监听任何端口**（默认关闭，零开销）。
+	//
+	// 安全：/debug/pprof/ 会暴露进程内存、goroutine 与调用栈——**只能绑回环或内网**，
+	// 公网暴露等于把内存与调用栈交出去；生产建议按需临时开启（压测剖析/内存排查），
+	// 采样完立即关闭。各服务建议端口（同机起全栈时避免撞端口，见 docs/config.md）：
+	// gateway 6060 / game 6061 / matcher 6062 / battle 6063 / edge 6064。
+	Pprof         string `protobuf:"bytes,5,opt,name=pprof,proto3" json:"pprof,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -155,6 +163,13 @@ func (x *Observability) GetSampleRatio() float64 {
 	return 0
 }
 
+func (x *Observability) GetPprof() string {
+	if x != nil {
+		return x.Pprof
+	}
+	return ""
+}
+
 // Metrics 是指标暴露配置。
 type Metrics struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -206,12 +221,13 @@ var File_protobuf_configs_observability_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_observability_proto_rawDesc = "" +
 	"\n" +
-	"$protobuf/configs/observability.proto\x12\ratlas.configs\"\xc5\x01\n" +
+	"$protobuf/configs/observability.proto\x12\ratlas.configs\"\xdb\x01\n" +
 	"\rObservability\x12\x12\n" +
 	"\x04otlp\x18\x01 \x01(\tR\x04otlp\x120\n" +
 	"\ametrics\x18\x02 \x01(\v2\x16.atlas.configs.MetricsR\ametrics\x125\n" +
 	"\asampler\x18\x03 \x01(\x0e2\x1b.atlas.configs.TraceSamplerR\asampler\x12&\n" +
-	"\fsample_ratio\x18\x04 \x01(\x01H\x00R\vsampleRatio\x88\x01\x01B\x0f\n" +
+	"\fsample_ratio\x18\x04 \x01(\x01H\x00R\vsampleRatio\x88\x01\x01\x12\x14\n" +
+	"\x05pprof\x18\x05 \x01(\tR\x05pprofB\x0f\n" +
 	"\r_sample_ratio\")\n" +
 	"\aMetrics\x12\x1e\n" +
 	"\n" +

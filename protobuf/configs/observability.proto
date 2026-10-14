@@ -31,6 +31,14 @@ message Observability {
   TraceSampler sampler = 3;
   // sample_ratio 是采样率（0..1，缺省 1.0）；仅 PARENT_BASED_RATIO 使用。
   optional double sample_ratio = 4;
+  // pprof 是 Go 运行时剖析（pprof）端点的监听地址（host:port，如 127.0.0.1:6060）；
+  // **空 = 不监听任何端口**（默认关闭，零开销）。
+  //
+  // 安全：/debug/pprof/ 会暴露进程内存、goroutine 与调用栈——**只能绑回环或内网**，
+  // 公网暴露等于把内存与调用栈交出去；生产建议按需临时开启（压测剖析/内存排查），
+  // 采样完立即关闭。各服务建议端口（同机起全栈时避免撞端口，见 docs/config.md）：
+  // gateway 6060 / game 6061 / matcher 6062 / battle 6063 / edge 6064。
+  string pprof = 5;
 }
 
 // Metrics 是指标暴露配置。
