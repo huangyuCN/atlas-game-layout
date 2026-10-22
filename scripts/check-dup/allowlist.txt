@@ -16,3 +16,30 @@ NewUDPServer
 # 薄映射对（req/resp 类型不同，收敛需引入泛型噪音大于收益）。
 GetBackpack
 GetPlayer
+# scripts/lt-driver 是远程压测驱动：它的 client/edgeconn/stats 三个文件与
+# scripts/loadtest 同名文件**逐字一致**（package main 不可 import，改库包需
+# 重命名数十标识符并动 e2e，收益不抵风险——故按最小复制保留在仓库内）。
+# 这批同构副本属设计性重复：同步纪律见 scripts/lt-driver/README.md。
+Dial
+dialAndJoin
+dialEdgeUDP
+dialFrameByOpts
+dialFrame
+join
+onNotify
+probeOnce
+pump
+registerLogin
+sendInput
+waitStarted
+watch
+newLoadPlayer
+parallelFor
+pumpAll
+ReadFrame
+readFull
+merge
+window
+summarize
+udpHello
+WriteFrame
