@@ -100,9 +100,17 @@ type Observability struct {
 	// 公网暴露等于把内存与调用栈交出去；生产建议按需临时开启（压测剖析/内存排查），
 	// 采样完立即关闭。各服务建议端口（同机起全栈时避免撞端口，见 docs/config.md）：
 	// gateway 6060 / game 6061 / matcher 6062 / battle 6063 / edge 6064。
-	Pprof         string `protobuf:"bytes,5,opt,name=pprof,proto3" json:"pprof,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Pprof string `protobuf:"bytes,5,opt,name=pprof,proto3" json:"pprof,omitempty"`
+	// block_profile_rate 是 Go 阻塞事件采样率（runtime.SetBlockProfileRate 的入参，纳秒粒度）：
+	// **0 = 关闭**（默认，零开销）；1 = 记录每次阻塞事件；n = 平均每 n 纳秒的阻塞量记录一次。
+	// 开启后 /debug/pprof/block 可看到阻塞样本（用于定位排队/锁问题）；负数 = **装配期失败**。
+	BlockProfileRate int32 `protobuf:"varint,6,opt,name=block_profile_rate,json=blockProfileRate,proto3" json:"block_profile_rate,omitempty"`
+	// mutex_profile_fraction 是互斥锁竞争采样分数（runtime.SetMutexProfileFraction 的入参）：
+	// **0 = 关闭**（默认，零开销）；1 = 记录每次竞争；n = 平均每 n 次竞争记录一次。
+	// 开启后 /debug/pprof/mutex 可看到持锁样本；负数 = **装配期失败**。
+	MutexProfileFraction int32 `protobuf:"varint,7,opt,name=mutex_profile_fraction,json=mutexProfileFraction,proto3" json:"mutex_profile_fraction,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Observability) Reset() {
@@ -170,6 +178,20 @@ func (x *Observability) GetPprof() string {
 	return ""
 }
 
+func (x *Observability) GetBlockProfileRate() int32 {
+	if x != nil {
+		return x.BlockProfileRate
+	}
+	return 0
+}
+
+func (x *Observability) GetMutexProfileFraction() int32 {
+	if x != nil {
+		return x.MutexProfileFraction
+	}
+	return 0
+}
+
 // Metrics 是指标暴露配置。
 type Metrics struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -221,13 +243,15 @@ var File_protobuf_configs_observability_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_observability_proto_rawDesc = "" +
 	"\n" +
-	"$protobuf/configs/observability.proto\x12\ratlas.configs\"\xdb\x01\n" +
+	"$protobuf/configs/observability.proto\x12\ratlas.configs\"\xbf\x02\n" +
 	"\rObservability\x12\x12\n" +
 	"\x04otlp\x18\x01 \x01(\tR\x04otlp\x120\n" +
 	"\ametrics\x18\x02 \x01(\v2\x16.atlas.configs.MetricsR\ametrics\x125\n" +
 	"\asampler\x18\x03 \x01(\x0e2\x1b.atlas.configs.TraceSamplerR\asampler\x12&\n" +
 	"\fsample_ratio\x18\x04 \x01(\x01H\x00R\vsampleRatio\x88\x01\x01\x12\x14\n" +
-	"\x05pprof\x18\x05 \x01(\tR\x05pprofB\x0f\n" +
+	"\x05pprof\x18\x05 \x01(\tR\x05pprof\x12,\n" +
+	"\x12block_profile_rate\x18\x06 \x01(\x05R\x10blockProfileRate\x124\n" +
+	"\x16mutex_profile_fraction\x18\a \x01(\x05R\x14mutexProfileFractionB\x0f\n" +
 	"\r_sample_ratio\")\n" +
 	"\aMetrics\x12\x1e\n" +
 	"\n" +

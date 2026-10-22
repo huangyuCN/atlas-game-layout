@@ -129,6 +129,14 @@ func initObsEndpoints(like ConfigLike, identity observability.ServiceIdentity) (
 	if err != nil {
 		return obsEndpoints{}, err
 	}
+	// 阻塞/互斥采样（observability.block_profile_rate / mutex_profile_fraction）：
+	// 缺省关闭（不触碰运行时）；开启后配合 pprof 端点抓 /debug/pprof/block 与 /mutex。
+	if err := observability.InitProfiling(
+		int(like.GetObservability().GetBlockProfileRate()),
+		int(like.GetObservability().GetMutexProfileFraction()),
+	); err != nil {
+		return obsEndpoints{}, err
+	}
 	return obsEndpoints{metrics: m, pprof: pp}, nil
 }
 

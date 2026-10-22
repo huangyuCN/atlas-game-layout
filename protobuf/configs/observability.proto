@@ -39,6 +39,14 @@ message Observability {
   // 采样完立即关闭。各服务建议端口（同机起全栈时避免撞端口，见 docs/config.md）：
   // gateway 6060 / game 6061 / matcher 6062 / battle 6063 / edge 6064。
   string pprof = 5;
+  // block_profile_rate 是 Go 阻塞事件采样率（runtime.SetBlockProfileRate 的入参，纳秒粒度）：
+  // **0 = 关闭**（默认，零开销）；1 = 记录每次阻塞事件；n = 平均每 n 纳秒的阻塞量记录一次。
+  // 开启后 /debug/pprof/block 可看到阻塞样本（用于定位排队/锁问题）；负数 = **装配期失败**。
+  int32 block_profile_rate = 6;
+  // mutex_profile_fraction 是互斥锁竞争采样分数（runtime.SetMutexProfileFraction 的入参）：
+  // **0 = 关闭**（默认，零开销）；1 = 记录每次竞争；n = 平均每 n 次竞争记录一次。
+  // 开启后 /debug/pprof/mutex 可看到持锁样本；负数 = **装配期失败**。
+  int32 mutex_profile_fraction = 7;
 }
 
 // Metrics 是指标暴露配置。
