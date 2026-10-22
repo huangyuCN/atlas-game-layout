@@ -58,10 +58,14 @@ func ConnStreamID(c Conn) string {
 	}
 }
 
-// Port 是一类帧面的直连端口：推送 + 关闭（适配见 ConnPort / DatagramPort）。
+// Port 是一类帧面的直连端口：推送（现场编码 / 复用已编码载荷）+ 关闭
+// （适配见 ConnPort / DatagramPort）。
 type Port interface {
-	// Push 向该连接推送一条 Notify 消息。
+	// Push 向该连接推送一条 Notify 消息（由帧引擎现场编码）。
 	Push(c Conn, operation string, msg any) error
+	// PushRaw 向该连接推送一条**已编码**的 Notify 载荷：同一帧下发给多个目标时复用它，
+	// 免得逐目标重复编码（编码由调用方一次完成）。
+	PushRaw(c Conn, operation string, payload []byte) error
 	// Close 关闭该连接（数据报面为移除对端）。
 	Close(c Conn) error
 }
@@ -70,6 +74,8 @@ type Port interface {
 type ConnServer interface {
 	// Push 按连接 ID 推送一条 Notify 消息。
 	Push(connID uint64, operation string, msg any) error
+	// PushRaw 按连接 ID 推送一条已编码载荷（不二次编码）。
+	PushRaw(connID uint64, operation string, payload []byte) error
 	// CloseConn 主动关闭指定连接。
 	CloseConn(connID uint64) error
 }
@@ -85,6 +91,11 @@ func (p ConnPort) Push(c Conn, operation string, msg any) error {
 	return p.Srv.Push(c.ConnID, operation, msg)
 }
 
+// PushRaw 实现 Port：按连接 ID 推送已编码载荷（不二次编码）。
+func (p ConnPort) PushRaw(c Conn, operation string, payload []byte) error {
+	return p.Srv.PushRaw(c.ConnID, operation, payload)
+}
+
 // Close 实现 Port：按连接 ID 关闭。
 func (p ConnPort) Close(c Conn) error { return p.Srv.CloseConn(c.ConnID) }
 
@@ -92,6 +103,8 @@ func (p ConnPort) Close(c Conn) error { return p.Srv.CloseConn(c.ConnID) }
 type DatagramServer interface {
 	// PushTo 按对端键推送一条 Notify 数据报。
 	PushTo(peer string, operation string, msg any) error
+	// PushToRaw 按对端键推送一条已编码载荷（不二次编码）。
+	PushToRaw(peer string, operation string, payload []byte) error
 	// DropPeer 主动移除指定对端。
 	DropPeer(peer string) error
 }
@@ -105,6 +118,11 @@ type DatagramPort struct {
 // Push 实现 Port：按对端键推送。
 func (p DatagramPort) Push(c Conn, operation string, msg any) error {
 	return p.Srv.PushTo(c.Peer, operation, msg)
+}
+
+// PushRaw 实现 Port：按对端键推送已编码载荷（不二次编码）。
+func (p DatagramPort) PushRaw(c Conn, operation string, payload []byte) error {
+	return p.Srv.PushToRaw(c.Peer, operation, payload)
 }
 
 // Close 实现 Port：移除对端（UDP 无连接语义）。

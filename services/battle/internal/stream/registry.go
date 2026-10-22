@@ -26,6 +26,7 @@ type Registry struct {
 	endpoints map[Endpoint]endpointRef // 端点 → 玩家与对局（断开事件反查）
 	ports     map[transport.Kind]Port  // 帧面类型 → 直连端口（装配期挂载）
 	ended     *EndedBook               // 结束留档：懒激活前拒绝迟到 op + 重连补投
+	encode    Encoder                  // 推送载荷编码器（默认 encodeJSON，测试注入计数钩子）
 }
 
 // endpointRef 是端点反查项：断开事件据此找到玩家与对局（对局用于把消息投给正确的 actor）。
@@ -51,6 +52,7 @@ func NewRegistryWithTTL(ttl time.Duration) *Registry {
 		endpoints: make(map[Endpoint]endpointRef),
 		ports:     make(map[transport.Kind]Port),
 		ended:     NewEndedBook(ttl),
+		encode:    encodeJSON,
 	}
 }
 
@@ -212,10 +214,29 @@ func (r *Registry) repushEnd(c Conn, winner string, recorded bool) {
 	}
 }
 
-// PublishFrame 实现 biz.BattlePusher：把一帧以 FrameBroadcast 直发该玩家的当前连接。
-func (r *Registry) PublishFrame(_ context.Context, playerID, battleID string, frame *locksteppb.LockstepFrame) error {
-	return r.push(playerID, battlev1opclient.BattleServicePushOps.FrameBroadcast,
-		&battlev1.FrameBroadcast{BattleId: battleID, Frame: frame})
+// PublishFrames 实现 biz.BattlePusher：把**同一帧**下发给该局的全部目标。
+//
+// 每帧只编码一次（r.encode），产物 []byte 复用于该帧全部目标；每个目标仍各写一帧
+// （PushRaw 会把载荷拷进该连接自己的帧体——写是必需的 syscall，且各目标互不共享帧体）。
+// 载荷**按帧新分配、不跨帧复用**：目标写入是并发的，跨帧复用同一块字节会在上一帧还没写完时
+// 被下一帧改写（串数据）。单目标写失败不影响其余目标，返回首个错误；死链按失效注销。
+func (r *Registry) PublishFrames(_ context.Context, battleID string, players []string,
+	frame *locksteppb.LockstepFrame) error {
+	if len(players) == 0 {
+		return nil // 没有目标就不为这一帧付编码与分配（名单可能已被掉线判负清空）
+	}
+	payload, err := r.encode(&battlev1.FrameBroadcast{BattleId: battleID, Frame: frame})
+	if err != nil {
+		return fmt.Errorf("stream: 帧广播编码失败: %w", err)
+	}
+	operation := battlev1opclient.BattleServicePushOps.FrameBroadcast
+	var firstErr error
+	for _, playerID := range players {
+		if pushErr := r.pushPayload(playerID, operation, payload); pushErr != nil && firstErr == nil {
+			firstErr = pushErr
+		}
+	}
+	return firstErr
 }
 
 // PublishEnd 实现 biz.BattlePusher：把战斗结束通知直发该玩家的当前连接。
@@ -230,9 +251,22 @@ func (r *Registry) PublishOut(_ context.Context, playerID, battleID, outPlayerID
 		&battlev1.PlayerOutNotify{BattleId: battleID, PlayerId: outPlayerID, Reason: reason})
 }
 
-// push 向玩家当前连接推送一条 Notify：未登记即跳过（返回 nil——直连未建立不是错误），
-// 端口未挂载即报错（装配期不一致不该在请求期静默）；连接已死按失效注销。
+// push 向玩家当前连接推送一条 Notify（由帧引擎现场编码）。
 func (r *Registry) push(playerID, operation string, msg any) error {
+	return r.pushConn(playerID, func(port Port, c Conn) error { return port.Push(c, operation, msg) })
+}
+
+// pushPayload 向玩家当前连接推送一条**已编码**载荷（同一帧复用的字节，不重复编码）。
+func (r *Registry) pushPayload(playerID, operation string, payload []byte) error {
+	return r.pushConn(playerID, func(port Port, c Conn) error {
+		return port.PushRaw(c, operation, payload)
+	})
+}
+
+// pushConn 是两条推送路径的共同骨架：查玩家当前连接 → 取该帧面端口 → 交发送函数。
+// 未登记即跳过（返回 nil——直连未建立不是错误），端口未挂载即报错（装配期不一致不该在
+// 请求期静默）；连接已死按失效注销，避免表里堆积。
+func (r *Registry) pushConn(playerID string, send func(port Port, c Conn) error) error {
 	r.mu.Lock()
 	c, ok := r.conns[playerID]
 	port := r.ports[c.Kind]
@@ -243,7 +277,7 @@ func (r *Registry) push(playerID, operation string, msg any) error {
 	if port == nil {
 		return fmt.Errorf("stream: 帧面 %s 未挂载推送端口（装配期漏挂）", c.Kind)
 	}
-	err := port.Push(c, operation, msg)
+	err := send(port, c)
 	if errors.Is(err, engine.ErrConnNotFound) || errors.Is(err, engine.ErrPeerNotFound) {
 		r.Unregister(playerID, c) // 连接已死：按失效注销，避免表里堆积
 	}

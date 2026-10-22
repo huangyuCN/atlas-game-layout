@@ -24,3 +24,27 @@ func TestBattleActorDirectPush(t *testing.T) {
 		t.Fatalf("结算后未关闭本局直连: %v", closed)
 	}
 }
+
+// TestBattleActorFrameBroadcastIsOneCallPerFrame 验证帧广播不再「逐目标各调一次」：
+// 每帧只发起**一次**广播调用（目标数在实现内部展开），故广播次数与每个玩家收到的帧数
+// 一一对应、目标数合计恒等于「目标数 × 帧数」（一次编码、多人复用）。
+func TestBattleActorFrameBroadcastIsOneCallPerFrame(t *testing.T) {
+	env := newBattleEnv(t)
+	seedAndJoin(t, env, newTestContext())
+	sendFrameInputs(t, env, newTestContext())
+	waitSettled(t, env)
+
+	frames, _, _ := env.pusher.snapshots()
+	calls, targets := env.pusher.broadcastStats()
+	if calls == 0 {
+		t.Fatal("对局期间没有发生帧广播")
+	}
+	for _, p := range []string{"p-a", "p-b"} {
+		if len(frames[p]) != calls {
+			t.Fatalf("广播调用 %d 次，玩家 %s 收到 %d 帧：期望每帧一次广播", calls, p, len(frames[p]))
+		}
+	}
+	if want := 2 * calls; targets != want {
+		t.Fatalf("广播目标数合计 = %d, 期望 %d（2 人 × %d 次广播）", targets, want, calls)
+	}
+}

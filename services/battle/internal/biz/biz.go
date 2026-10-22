@@ -13,8 +13,10 @@ import (
 // 推送原语（Push/PushRaw/PushTo）直发客户端，不再绕网关（阶段 3 批次 5 已删 NATS 路）。
 // 未登记直连的玩家即跳过（不报错）——玩家可能在帧面尚未登记连接时结算。
 type BattlePusher interface {
-	// PublishFrame 向指定玩家的直连连接下发一帧（信封 FrameBroadcast）。
-	PublishFrame(ctx context.Context, playerID, battleID string, frame *locksteppb.LockstepFrame) error
+	// PublishFrames 把**同一帧**下发到该局的全部目标（players 为参战名单）：「一次序列化、
+	// 多人复用」——实现必须每帧只编码一次并把同一份载荷复用于全部目标，每个目标仍各写一帧。
+	// 单目标写失败不影响其余目标（广播不得被一条死链打断）。
+	PublishFrames(ctx context.Context, battleID string, players []string, frame *locksteppb.LockstepFrame) error
 	// PublishEnd 向指定玩家的直连连接下发战斗结束通知（含胜者）——结算的首投；
 	// 关闭前重投与重连补投由 CloseBattle / 帧面补投路径承担（都幂等、有界）。
 	PublishEnd(ctx context.Context, playerID, battleID, winner string) error

@@ -8,6 +8,7 @@ import (
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	battlev1opclient "github.com/huangyuCN/atlas-game-layout/api/battle/v1/opclient"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
+	"github.com/huangyuCN/atlas/encoding"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame/engine"
 )
@@ -19,19 +20,39 @@ type pushRecord struct {
 	msg       any
 }
 
-// fakePort 是记录推送与关闭的帧面端口（failErr 非空时推送一律失败）。
-type fakePort struct {
-	pushed  []pushRecord
-	closed  []Conn
-	failErr error
+// rawRecord 是一次**已编码载荷**推送的观测记录。
+type rawRecord struct {
+	conn      Conn
+	operation string
+	payload   []byte
 }
 
-// Push 实现 Port：记录推送（failErr 非空时返回该错误）。
+// fakePort 是记录推送与关闭的帧面端口：
+// 推送记为 push（编码下发）/ raw（复用同一份载荷）；failErr 非空时按 failConn 失败
+// （failConn = 0 表示所有连接都失败）。
+type fakePort struct {
+	pushed   []pushRecord
+	raw      []rawRecord
+	closed   []Conn
+	failErr  error
+	failConn uint64
+}
+
+// Push 实现 Port：记录编码下发（failErr 命中时返回该错误）。
 func (p *fakePort) Push(c Conn, operation string, msg any) error {
-	if p.failErr != nil {
-		return p.failErr
+	if err := p.failure(c); err != nil {
+		return err
 	}
 	p.pushed = append(p.pushed, pushRecord{conn: c, operation: operation, msg: msg})
+	return nil
+}
+
+// PushRaw 实现 Port：记录已编码载荷下发（failErr 命中时返回该错误）。
+func (p *fakePort) PushRaw(c Conn, operation string, payload []byte) error {
+	if err := p.failure(c); err != nil {
+		return err
+	}
+	p.raw = append(p.raw, rawRecord{conn: c, operation: operation, payload: payload})
 	return nil
 }
 
@@ -39,6 +60,18 @@ func (p *fakePort) Push(c Conn, operation string, msg any) error {
 func (p *fakePort) Close(c Conn) error {
 	p.closed = append(p.closed, c)
 	return nil
+}
+
+// failure 返回该连接应报的推送错误（nil = 正常推送）；failConn 只让指定连接失败，
+// 用于验证「单目标写失败不影响其余目标」。
+func (p *fakePort) failure(c Conn) error {
+	if p.failErr == nil {
+		return nil
+	}
+	if p.failConn != 0 && c.ConnID != p.failConn {
+		return nil
+	}
+	return p.failErr
 }
 
 // kcpConn 返回一条 KCP 面的连接句柄。
@@ -55,6 +88,15 @@ func newTestRegistry() (*Registry, *fakePort, *fakePort) {
 	return reg, kcpPort, udpPort
 }
 
+// decodePayload 用 json codec（protojson）解码一条推送载荷——与客户端收到的字节同源。
+func decodePayload(payload []byte, v any) error {
+	codec := encoding.GetCodec("json")
+	if codec == nil {
+		return errCodecMissing
+	}
+	return codec.Unmarshal(payload, v)
+}
+
 // TestRegistryRegisterUnregister 验证登记后推送落对应连接、注销后不再推送。
 func TestRegistryRegisterUnregister(t *testing.T) {
 	reg, kcpPort, _ := newTestRegistry()
@@ -65,29 +107,33 @@ func TestRegistryRegisterUnregister(t *testing.T) {
 	}
 
 	frame := &locksteppb.LockstepFrame{FrameId: 3}
-	if err := reg.PublishFrame(context.Background(), "p-a", "b-1", frame); err != nil {
-		t.Fatalf("PublishFrame: %v", err)
+	if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, frame); err != nil {
+		t.Fatalf("PublishFrames: %v", err)
 	}
-	if len(kcpPort.pushed) != 1 {
-		t.Fatalf("推送次数 = %d, 期望 1", len(kcpPort.pushed))
+	if len(kcpPort.raw) != 1 {
+		t.Fatalf("推送次数 = %d, 期望 1", len(kcpPort.raw))
 	}
-	got := kcpPort.pushed[0]
+	got := kcpPort.raw[0]
 	if got.conn != conn || got.operation != battlev1opclient.BattleServicePushOps.FrameBroadcast {
 		t.Fatalf("推送记录不符: %+v", got)
 	}
-	if bc, ok := got.msg.(*battlev1.FrameBroadcast); !ok || bc.GetBattleId() != "b-1" || bc.GetFrame().GetFrameId() != 3 {
-		t.Fatalf("帧广播载荷不符: %+v", got.msg)
+	var bc battlev1.FrameBroadcast
+	if err := decodePayload(got.payload, &bc); err != nil {
+		t.Fatalf("帧广播载荷解码失败: %v", err)
+	}
+	if bc.GetBattleId() != "b-1" || bc.GetFrame().GetFrameId() != 3 {
+		t.Fatalf("帧广播载荷不符: %+v", &bc)
 	}
 
 	reg.Unregister("p-a", conn)
 	if reg.Count() != 0 {
 		t.Fatalf("注销后连接数 = %d, 期望 0", reg.Count())
 	}
-	if err := reg.PublishFrame(context.Background(), "p-a", "b-1", frame); err != nil {
+	if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, frame); err != nil {
 		t.Fatalf("未登记玩家的推送不应报错: %v", err)
 	}
-	if len(kcpPort.pushed) != 1 {
-		t.Fatalf("注销后仍收到推送: %d", len(kcpPort.pushed))
+	if len(kcpPort.raw) != 1 {
+		t.Fatalf("注销后仍收到推送: %d", len(kcpPort.raw))
 	}
 }
 
@@ -104,11 +150,11 @@ func TestRegistryReconnectTakeover(t *testing.T) {
 	if len(kcpPort.closed) != 1 || kcpPort.closed[0] != old {
 		t.Fatalf("旧连接未被关闭: %+v", kcpPort.closed)
 	}
-	if err := reg.PublishFrame(context.Background(), "p-a", "b-1", &locksteppb.LockstepFrame{FrameId: 1}); err != nil {
-		t.Fatalf("PublishFrame: %v", err)
+	if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, &locksteppb.LockstepFrame{FrameId: 1}); err != nil {
+		t.Fatalf("PublishFrames: %v", err)
 	}
-	if len(kcpPort.pushed) != 1 || kcpPort.pushed[0].conn != fresh {
-		t.Fatalf("推送未落新连接: %+v", kcpPort.pushed)
+	if len(kcpPort.raw) != 1 || kcpPort.raw[0].conn != fresh {
+		t.Fatalf("推送未落新连接: %+v", kcpPort.raw)
 	}
 	// 旧连接的迟到注销不得摘掉新连接。
 	reg.Unregister("p-a", old)
@@ -123,7 +169,8 @@ func TestRegistryPushFailureUnregisters(t *testing.T) {
 	reg.Register("p-a", kcpConn(7, "b-1"))
 	kcpPort.failErr = engine.ErrConnNotFound
 
-	if err := reg.PublishFrame(context.Background(), "p-a", "b-1", &locksteppb.LockstepFrame{FrameId: 1}); !errors.Is(err, engine.ErrConnNotFound) {
+	err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, &locksteppb.LockstepFrame{FrameId: 1})
+	if !errors.Is(err, engine.ErrConnNotFound) {
 		t.Fatalf("推送错误 = %v, 期望 ErrConnNotFound", err)
 	}
 	if reg.Count() != 0 {
@@ -165,11 +212,11 @@ func TestRegistryCloseBattle(t *testing.T) {
 	if len(kcpPort.closed) != 2 {
 		t.Fatalf("关闭记录数 = %d, 期望 2", len(kcpPort.closed))
 	}
-	if err := reg.PublishFrame(context.Background(), "p-a", "b-1", &locksteppb.LockstepFrame{FrameId: 1}); err != nil {
+	if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, &locksteppb.LockstepFrame{FrameId: 1}); err != nil {
 		t.Fatalf("已关闭对局的推送不应报错: %v", err)
 	}
-	if len(kcpPort.pushed) != 0 {
-		t.Fatalf("已关闭对局仍收到推送: %+v", kcpPort.pushed)
+	if len(kcpPort.raw) != 0 {
+		t.Fatalf("已关闭对局仍收到推送: %+v", kcpPort.raw)
 	}
 	reg.CloseBattle("b-2")
 	if reg.Count() != 0 {

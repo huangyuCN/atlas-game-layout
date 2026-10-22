@@ -57,9 +57,9 @@ func (b *BattleActor) onFrameResult(ctx core.ActorContext, result lockstep.Frame
 	for _, in := range result.Inputs {
 		frame.Inputs = append(frame.Inputs, toPBInput(in))
 	}
-	for player := range b.players {
-		_ = b.pusher.PublishFrame(ctx.Context(), player, b.battleID, frame)
-	}
+	// 每帧只发起一次广播（一次编码、载荷复用于全部目标）：逐目标各调一次、各编码一次
+	// 曾是 8192 超载 profile 里 protojson.Marshal 11.73% + GC 的主因（目标数越大越糟）。
+	_ = b.pusher.PublishFrames(ctx.Context(), b.battleID, sortedKeys(b.players), frame)
 	// 快照携带胜负状态：分出胜负即结算。
 	if result.Snapshot != nil && !b.settled {
 		b.checkSettle(ctx, result)

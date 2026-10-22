@@ -213,6 +213,7 @@ type framePort struct {
 	pushed []string // 推送的 operation 序列
 	ends   []string // 结算通知的胜者序列
 	closed []stream.Conn
+	raw    [][]byte // 已编码载荷（帧广播走 PushRaw，载荷按 operation 归档）
 }
 
 // Push 实现 stream.Port：记录一次推送。
@@ -223,6 +224,15 @@ func (p *framePort) Push(_ stream.Conn, operation string, msg any) error {
 	if n, ok := msg.(*battlev1.BattleEndNotify); ok {
 		p.ends = append(p.ends, n.GetWinnerPlayerId())
 	}
+	return nil
+}
+
+// PushRaw 实现 stream.Port：记录一次已编码载荷推送（帧广播路径，载荷复用于全体目标）。
+func (p *framePort) PushRaw(_ stream.Conn, operation string, payload []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pushed = append(p.pushed, operation)
+	p.raw = append(p.raw, payload)
 	return nil
 }
 
