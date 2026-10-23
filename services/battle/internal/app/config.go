@@ -26,7 +26,11 @@ const ticketKeyLen = 32
 //   - offline_timeout 省略取 DefaultOfflineTimeout（15s），显式 0 表示关闭掉线判定，
 //     负值/非法即失败（见 offlineTimeoutOf）；
 //   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（60）/ DefaultTickInterval（100ms），
-//     显式值越界即失败（见 frameLimitsOf）。
+//     显式值越界即失败（见 frameLimitsOf）；
+//   - seat_window_ms 省略取 DefaultSeatWindow（3s），显式 0 表示**关闭入座窗口**（旧行为），
+//     负值/超上限失败（见 seatWindowOf）；
+//   - max_players 省略取 DefaultMaxPlayers（10，与 matcher 的 5v5 对齐），
+//     显式值必须落在 [1, MaxPlayersLimit]（见 maxPlayersOf）。
 func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out := actor.DefaultConfig()
 	b := cfg.GetBattle()
@@ -53,13 +57,61 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	if err != nil {
 		return out, err
 	}
+	window, err := seatWindowOf(b)
+	if err != nil {
+		return out, err
+	}
+	players, err := maxPlayersOf(b)
+	if err != nil {
+		return out, err
+	}
 	out.TicketKey = key
 	out.TicketTTL = ttl
 	out.OfflineTimeout = offline
 	out.EdgeEndpoints = endpoints
 	out.TickInterval = tick
 	out.MaxFrames = frames
+	out.SeatWindow = window
+	out.MaxPlayers = players
 	return out, nil
+}
+
+// seatWindowOf 解析入座窗口（battle.seat_window_ms）：字段**缺失**取缺省 3s；
+// 显式 0 = 关闭窗口（成局即开打，旧行为）；负值或 > MaxSeatWindow 启动失败。
+// 缺省与显式 0 必须区分：前者是「没配」，后者是明确的关闭（与 max_frames 同一口径）。
+func seatWindowOf(b *conf.BattleConf) (time.Duration, error) {
+	raw := b.SeatWindowMs
+	if raw == nil {
+		return actor.DefaultSeatWindow, nil
+	}
+	if *raw == 0 {
+		return 0, nil
+	}
+	if *raw < 0 {
+		return 0, fmt.Errorf("app: battle.seat_window_ms 不得为负，实际 %d（显式 0 表示关闭入座窗口）", *raw)
+	}
+	window := time.Duration(*raw) * time.Millisecond
+	if window > actor.MaxSeatWindow {
+		return 0, fmt.Errorf("app: battle.seat_window_ms 超出上限 %s，实际 %s"+
+			"（再长已不是「等入座」而是挂住对局，缺省 %s）", actor.MaxSeatWindow, window, actor.DefaultSeatWindow)
+	}
+	return window, nil
+}
+
+// maxPlayersOf 解析每局会话容量（battle.max_players）：字段缺失取缺省 10
+// （与 matcher 的 5v5 对齐）；显式值必须落在 [1, MaxPlayersLimit]，否则启动失败
+// （0 不是「不限」：容量必须显式，否则一个病态名单能无限扩张会话）。
+func maxPlayersOf(b *conf.BattleConf) (int, error) {
+	raw := b.MaxPlayers
+	if raw == nil {
+		return actor.DefaultMaxPlayers, nil
+	}
+	n := int(*raw)
+	if n < 1 || n > actor.MaxPlayersLimit {
+		return 0, fmt.Errorf("app: battle.max_players 必须在 [1, %d] 内，实际 %d（缺省 %d）",
+			actor.MaxPlayersLimit, n, actor.DefaultMaxPlayers)
+	}
+	return n, nil
 }
 
 // ticketKeyOf 解析并校验票据密钥：必须存在、base64 合法且解码后恰好 32 字节，

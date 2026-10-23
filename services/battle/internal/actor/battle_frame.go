@@ -98,6 +98,8 @@ func (b *BattleActor) settle(ctx core.ActorContext, out settleOutcome) {
 		return
 	}
 	b.settled = true
+	// 结算即收敛入座窗口：不再等待未入座者，也不再恢复对局时钟。
+	b.cancelSeating()
 	// 先留档再推送：帧面据此判定「已结束」，迟到的帧 op 才会在懒激活之前被拒——
 	// 否则 SpawnAuto 会重建一个空名单实例，它恢复快照后立刻再次结算并反复关闭直连。
 	if b.ledger != nil {

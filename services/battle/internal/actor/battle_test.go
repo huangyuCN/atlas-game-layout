@@ -399,7 +399,8 @@ func TestHashBytes(t *testing.T) {
 // TestSessionMeta 验证会话元信息字段。
 func TestSessionMeta(t *testing.T) {
 	meta := sessionMeta("b-1", int64(100*time.Millisecond), DefaultMaxPlayers)
-	if meta.GetSessionId() != "b-1" || meta.GetMaxPlayers() != 2 || meta.GetTickMillis() != 100 ||
+	// 容量缺省与 matcher 的 5v5 对齐（10 人）：旧值 2 只够示例双人对局。
+	if meta.GetSessionId() != "b-1" || meta.GetMaxPlayers() != uint32(DefaultMaxPlayers) || meta.GetTickMillis() != 100 ||
 		meta.GetMode() != locksteppb.LockstepMode_LOCKSTEP_MODE_SERVER_AUTHORITATIVE {
 		t.Fatalf("会话元信息不符: %+v", meta)
 	}

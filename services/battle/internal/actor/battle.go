@@ -47,6 +47,10 @@ type Config struct {
 	// OfflineTimeout 是掉线判定窗口（规格 §9.2；≤0 = 关闭掉线判定，仅供测试/特例）。
 	// 数据报面帧面的空闲读超时按它推导（1/3）并在装配期校验，见 server.FramePolicy。
 	OfflineTimeout time.Duration
+	// SeatWindow 是成局后的**入座窗口**（≤0 = 关闭窗口，成局即开打——旧行为）。
+	// 窗口内对局时钟不推进：等全部参战者的帧连接建立（入座），或窗口到期即开打。
+	// 语义与配置见 battle_seating.go / conf.proto 的 seat_window_ms。
+	SeatWindow time.Duration
 }
 
 // 默认战斗参数（示例竞速对局：10fps、5 格赛道、60 帧上限）。
@@ -55,10 +59,19 @@ const (
 	DefaultTrackLen      = int32(5)
 	DefaultMaxFrames     = uint64(60)
 	DefaultSnapshotEvery = uint64(10)
-	// DefaultMaxPlayers 是每局会话容量的缺省值（示例竞速为双人对局）。
-	DefaultMaxPlayers = 2
+	// DefaultMaxPlayers 是每局会话容量的缺省值（10 人）：casual 规则集单侧上限 5
+	// （matcher 的 MaxSide=5）故一局最多 10 人。旧值 2 只够示例双人对局——5v5 成局后
+	// 多出来的 8 人会因「会话已满」进不去，等于把 10 人局做成 2 人局。
+	DefaultMaxPlayers = 10
+	// MaxPlayersLimit 是每局会话容量的上限（配置校验与文档共用同一份常量）。
+	MaxPlayersLimit = 64
 	// DefaultOfflineTimeout 是掉线判定窗口的缺省值（规格 §9.2：默认 15s，不写死在判定点）。
 	DefaultOfflineTimeout = 15 * time.Second
+	// DefaultSeatWindow 是成局后入座窗口的缺省值（3s）：客户端从收到成局通知到建连、
+	// 握手、首帧，实测 1–2s，留一倍余量；再长就等于「成局不开打」。
+	DefaultSeatWindow = 3 * time.Second
+	// MaxSeatWindow 是入座窗口的上限：超过它已不是「等入座」而是「挂住对局」。
+	MaxSeatWindow = 30 * time.Second
 )
 
 // 局时长两件（max_frames / tick_interval_ms）的取值边界（配置校验与文档共用同一份常量，
@@ -81,6 +94,9 @@ const (
 	MetricOfflineTimeouts = "battle_offline_timeouts_total"
 	// MetricReconnects 是掉线窗口内回座的累计次数。
 	MetricReconnects = "battle_reconnects_total"
+	// MetricSeatWindow 是入座窗口的结束次数（按 outcome 分：all_seated 坐满即开打 / timeout 到期开打）。
+	// 它是「晚到玩家 BATTLE_ENDED」的测量口径：timeout 占比高说明客户端入座慢于窗口。
+	MetricSeatWindow = "battle_seat_window_total"
 	// MetricOnlinePlayers 是本节点直连在册玩家数（拉取式仪表，值取自直连注册表）。
 	// 口径：**当前仍持有本节点直连（接入层→battle 帧面）的玩家数**，含已结算但尚未回收的连接；
 	// 结算会关闭本局全部直连（stream.Registry.CloseBattle），故它不是「对局中玩家数」的精确
@@ -195,6 +211,7 @@ func NewProps(p Props) core.Props {
 				cfg:        p.Cfg,
 				players:    make(map[string]struct{}),
 				offline:    make(map[string]core.CancelFunc),
+				seated:     make(map[string]struct{}),
 			}
 			return battlev1actor.NewBattleService(b,
 				core.WithLocalTell(b.onFrameResult),
@@ -202,6 +219,8 @@ func NewProps(p Props) core.Props {
 				core.WithLocalTell(b.onPlayerOnline),
 				core.WithLocalTell(b.onPlayerOffline),
 				core.WithLocalTell(b.onOfflineTimeout),
+				// 入座窗口到期（成局后等全部参战者入座，见 battle_seating.go）。
+				core.WithLocalTell(b.onSeatWindowExpired),
 				// 迁移状态导出/恢复（迁移控制面消息，非服务 op，见 battle_migrate.go）：
 				// 迁移窗口（暂停掉线计时 + 暂停会话帧推进）的唯一入口就是这两个 op。
 				core.WithLocalAsk(b.onPrepareMigration),
@@ -244,6 +263,9 @@ type BattleActor struct {
 	admission *battlev1.IssueEntryTicketReply
 
 	offline   map[string]core.CancelFunc // 参战者 → 掉线计时取消句柄（nil = 已打点但无计时，规格 §9.2）
+	seating   bool                       // 入座窗口打开中（对局时钟暂停，等坐满或到期，见 battle_seating.go）
+	seated    map[string]struct{}        // 已入座（帧连接建立）的参战者
+	seatTimer core.CancelFunc            // 入座窗口到期计时取消句柄（nil = 未计时）
 	migration bool                       // 迁移窗口：暂停掉线计时（规格 §9.6）
 	restored  bool                       // 本实例由迁移恢复拉起（需把名单重新登记进新会话）
 	lastFrame uint64                     // 最近一次帧广播的帧号（判负结算的总帧数）

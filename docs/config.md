@@ -95,6 +95,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
 | `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法即失败 |
 | `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 60 帧 / 100ms（与硬编码常量逐字相同，行为零变化）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
+| `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
 | `battle.edge_endpoints` | 列表非空 + `transport` 非 `UNSPECIFIED` + 地址非空 + 面不重复 | **启动失败**（客户端拿到的接入层地址只有这一个来源） | 面枚举 `EDGE_TRANSPORT_{WS,KCP,UDP}`；**按面下发**、不要求三面齐全（只开 ws 也能启动） |
 | `battle.frame_advertise_host` | 无（整项缺失 = 回落） | 整项缺失 ⇒ 回落 `edge_endpoints` 的主机（**仅适合同机部署**） | 只填主机（不含端口、IPv6 不带方括号）；空白串/带端口/带方括号即启动失败；跨机部署**必须**显式配置（语义见 §7） |
 | `edge.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `battle.ticket_key` 同值 |
@@ -256,6 +257,32 @@ go build -o /tmp/loadtest ./scripts/loadtest
   客户端必须以 **≤ `offline_timeout/3`** 的周期发送帧或 `Ping`（见 §7.3）。
 - **长局验收**（8s 静默窗口）：把 `max_frames` 调到 `300`（30s 一局），用 Go SDK 的
   `examples/directloop -idle-hold 8s` 断言「静默期不被判出局 + 仍收帧 + 静默后仍能补帧」。
+
+### 7.7 坐满再开打（`battle.seat_window_ms` / `battle.max_players`）
+
+成局到开打之间原来没有缝：`Admit`（开局 + 出票）一返回，lockstep 会话时钟就开始走，而客户端
+从收到成局通知到建连、握手、发出首帧要 1–2s——这段时间被算进单局寿命（缺省 60 帧 × 100ms ≈ 6s），
+于是晚到玩家拿到的是 `BATTLE_ENDED`（压测一轮实测 9,986 次）。
+
+现在成局后先打开**入座窗口**：会话挂起（帧号停在 0，不产生任何对局时间），等参战者的帧连接建立。
+
+| 配置 | 形态 | 缺省 | 校验（违反即**启动失败**） |
+|---|---|---|---|
+| `battle.seat_window_ms` | `optional int64`（**毫秒整数**） | 3000 | 显式 `0` = **关闭窗口**（成局即开打，旧行为）；负值或 `> 30000` 报错 |
+| `battle.max_players` | `optional int32`（人数） | 10 | `[1, 64]`；`0`/负值/超上限报错（`0` 不是「不限」） |
+
+语义（三条必须说清）：
+
+1. **坐满立即开打**：最后一名参战者的帧连接建立即结束窗口（`outcome="all_seated"`）。
+2. **到期即开打**：窗口到期仍未坐满时不再等待（`outcome="timeout"`）；未入座者**不剔除、不重配**——
+   他在对局结束前仍可加入并参与，只是对局不再等他（迟到补投/拒绝仍是既有的 `BATTLE_ENDED`
+   语义，帧协议零改动）。若需要「踢掉未入座者」的强语义，属另一轮（要给客户端新的失败回执）。
+3. **窗口内掉线释放座位**：该玩家重新回到「等入座」，窗口截止时刻不变。
+
+测量口径：`battle_seat_window_total{outcome}`。`timeout` 占比高说明客户端入座慢于窗口
+（要么调大 `seat_window_ms`，要么查建连/取票耗时）；恒为 `all_seated` 说明窗口已够。
+**`max_players` 必须 ≥ 实际成局人数**（casual 规则集单侧上限 5 ⇒ 一局 10 人）：小于成局人数时
+多出来的人会因「会话已满」进不去——旧缺省 `2` 就等于把 10 人局做成 2 人局。
 
 ## 8. 客户端版本门槛（gateway 登录入口专属）
 

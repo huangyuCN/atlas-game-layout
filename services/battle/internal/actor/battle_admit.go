@@ -20,7 +20,7 @@ import (
 // 签票失败即整体不产生，不会留下「有名单无票」；票只经成功回执下发，不会「有票无名单」。
 // 幂等：首次成功即冻结回执（票密文与过期时刻都不变），重复调用原样返回——名单不翻倍、
 // 不重复出票，调用方超时重试安全。
-func (b *BattleActor) Admit(_ core.ActorContext, req *battlev1.AdmitBattleReq) (*battlev1.IssueEntryTicketReply, error) {
+func (b *BattleActor) Admit(ctx core.ActorContext, req *battlev1.AdmitBattleReq) (*battlev1.IssueEntryTicketReply, error) {
 	if b.admission != nil {
 		return b.admission, nil
 	}
@@ -37,6 +37,8 @@ func (b *BattleActor) Admit(_ core.ActorContext, req *battlev1.AdmitBattleReq) (
 		b.players[playerID] = struct{}{}
 	}
 	b.admission = reply
+	// 坐满再开打：出票即打开入座窗口（窗口关闭时为空操作，见 battle_seating.go）。
+	b.beginSeating(ctx)
 	return reply, nil
 }
 

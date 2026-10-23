@@ -60,6 +60,24 @@ type report struct {
 	SteadyProbe latency `json:"steady_rtt_ms"`
 	DialDown    latency `json:"dial_broadcast_downlink_ms"`
 	SteadyDown  latency `json:"steady_broadcast_downlink_ms"`
+
+	// 入场窗口细分（入池阶段 vs 成局阶段）：上一轮两段混在一起，看不出哪段慢。
+	QueueConc        int     `json:"queue_concurrency"`
+	PrefillWant      int     `json:"prefill_requested"`
+	PrefillEntered   int     `json:"prefill_entered"`
+	PrefillFailed    int     `json:"prefill_failed"`
+	PrefillS         float64 `json:"prefill_phase_s"`
+	PrefillQPS       float64 `json:"prefill_qps"`
+	QueueEntered     int     `json:"queue_entered"`
+	QueueFailed      int     `json:"queue_failed"`
+	QueueS           float64 `json:"queue_phase_s"`
+	QueueQPS         float64 `json:"queue_qps"`
+	QueueRTT         latency `json:"queue_rtt_ms"`
+	Matched          int     `json:"players_matched_notify"`
+	MatchS           float64 `json:"match_phase_s"`
+	MatchPlayersPerS float64 `json:"match_players_per_s"`
+	EntryWindowS     float64 `json:"entry_window_s"`
+	EntryPlayersPerS float64 `json:"entry_players_per_s"`
 }
 
 // windows 是一轮压测的分段边界。
@@ -88,6 +106,7 @@ type loadRun struct {
 	edgeUDP        string
 	battleWS       string
 	battleUDP      string
+	queue          queueCfg
 	pump           pumpCfg
 }
 
@@ -121,6 +140,9 @@ func parseFlags() loadRun {
 	matchTimeout := flag.Duration("match-timeout", 60*time.Second, "成局阶段的总超时（到点即用已匹配的玩家开打）")
 	matchQuiet := flag.Duration("match-quiet", 3*time.Second, "成局静默期：连续这么久无新成局即认为成局收尾，立刻开打")
 	conc := flag.Int("dial-concurrency", 64, "建连/注册的并发度")
+	queueConc := flag.Int("queue-concurrency", 512, "入池（EnterMatchQueue）并发度：单票 RTT 110–200ms，靠并发盖出速率（上限 2048）")
+	prefill := flag.Int("prefill", 0, "预灌池票数：先以 -queue-concurrency 把 N 张票灌进池、再开匹配（0 = 不预灌）")
+	prefillSettle := flag.Duration("prefill-settle", 2*time.Second, "预灌后静默时长：让池子积起来再开匹配")
 	gateway := flag.String("gateway", "10.10.1.23:9001", "远端网关业务面地址（host:port）")
 	edgeWS := flag.String("edge-ws", "10.10.1.23:7100", "远端接入层 WS 面地址")
 	edgeUDP := flag.String("edge-udp", "10.10.1.23:7102", "远端接入层 UDP 面地址")
@@ -138,12 +160,17 @@ func parseFlags() loadRun {
 	if *perBattle != 2 {
 		fmt.Fprintf(os.Stderr, "[提示] -per-battle=%d 仅记录：真实每局人数由成局通知的 match_id 统计\n", *perBattle)
 	}
+	qc := queueCfg{conc: *queueConc, prefill: *prefill, settle: *prefillSettle}
+	if err := qc.check(*players); err != nil {
+		fatalf("%v", err)
+	}
 	return loadRun{
 		players: *players, perBattle: *perBattle, dialConc: *conc, connectTimeout: *connectTimeout,
 		matchTimeout: *matchTimeout, matchQuiet: *matchQuiet,
 		totalTimeout: *total, via: *via, transport: *transport, steady: *steady, rateEvery: *rateEvery,
 		gateway: *gateway, edgeWS: *edgeWS, edgeUDP: *edgeUDP, battleWS: *battleWS, battleUDP: *battleUDP,
-		pump: pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
+		queue: qc,
+		pump:  pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
 	}
 }
 
@@ -156,12 +183,12 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 	defer closePlayers(ps)
 	fmt.Printf("[客户端] 已注册登录 %d 个压测账号\n", len(ps))
 
-	matched, battles, err := matchAll(ctx, ps, cfg.matchTimeout, cfg.matchQuiet)
+	out, err := matchAll(ctx, ps, cfg.matchTimeout, cfg.matchQuiet, cfg.queue)
 	if err != nil {
 		return nil, err
 	}
 	fmt.Printf("[匹配] 成局 %d 局（收到成局通知的玩家 %d/%d，约 %.1f 人/局）\n",
-		battles, matched, len(ps), perBattleActual(matched, battles))
+		out.battles, out.matched, len(ps), perBattleActual(out.matched, out.battles))
 
 	active := matchedPlayers(ps)
 	dialStart := time.Now()
@@ -180,8 +207,11 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 	pumpAll(ctx, active, cfg.pump)
 	elapsed := time.Since(start)
 	win := windows{dialStart: dialStart, dialEnd: dialEnd, pumpEnd: time.Now(), steady: cfg.steady}
-	rep := collect(active, cfg, battles, failed, elapsed, win)
+	rep := collect(active, cfg, out.battles, failed, elapsed, win)
 	rep.Rates = rates()
+	rep.QueueConc = cfg.queue.conc
+	rep.QueueRTT = queueRTT(ps)
+	out.attachPhases(rep)
 	return rep, nil
 }
 
@@ -360,6 +390,12 @@ func printReport(r *report) {
 		r.PlayersWant, r.Battles, r.PerBattleReal, r.Connected, r.ConnectFailed, r.DurationS)
 	fmt.Printf("包速率：上行 %.0f pkt/s（共 %d），下行帧广播 %.0f pkt/s（共 %d）；帧面失败 %d，出局通知 %d\n",
 		r.InputPPS, r.Inputs, r.BroadcastPPS, r.Broadcasts, r.Failures, r.OutNotifies)
+	fmt.Printf("入场窗口：入池 %.2fs（%.0f 票/秒，成功 %d 失败 %d，RTT p50=%.1f p99=%.1f）→ 成局 %.2fs（%.0f 玩家/秒）\n",
+		r.QueueS, r.QueueQPS, r.QueueEntered, r.QueueFailed, r.QueueRTT.P50, r.QueueRTT.P99,
+		r.MatchS, r.MatchPlayersPerS)
+	fmt.Printf("          合计 %.2fs 收到成局通知 %d 人（%.0f 玩家/秒，入池并发 %d）；预灌 %d 票 %.2fs（%.0f 票/秒）\n",
+		r.EntryWindowS, r.Matched, r.EntryPlayersPerS, r.QueueConc,
+		r.PrefillEntered, r.PrefillS, r.PrefillQPS)
 	fmt.Printf("延迟：入局往返 p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
 		r.Handshake.P50, r.Handshake.P95, r.Handshake.P99, r.Handshake.Count)
 	fmt.Printf("      SyncFrames 往返 p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",

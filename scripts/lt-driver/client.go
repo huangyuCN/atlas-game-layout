@@ -85,6 +85,7 @@ type loadPlayer struct {
 	handshake *samples // 入局（JoinBattle）往返
 	probe     *samples // SyncFrames 探针往返
 	downlink  *samples // 帧广播下行（服务端 server_time → 收到）
+	queue     *samples // 入池（EnterMatchQueue）往返：入池阶段的单票 RTT
 }
 
 // newLoadPlayer 建立业务会话（注册/登录）并挂接成局通知；帧连接在拿到票据后另建。
@@ -105,7 +106,7 @@ func newLoadPlayer(ctx context.Context, gatewayTCP, tag string) (*loadPlayer, er
 		tag: tag, sess: sess, biz: cli,
 		ops:       gamev1opclient.NewPlayerService(sess),
 		started:   make(chan *gamev1.MatchStartedNotify, 4),
-		handshake: &samples{}, probe: &samples{}, downlink: &samples{},
+		handshake: &samples{}, probe: &samples{}, downlink: &samples{}, queue: &samples{},
 	}
 	cli.On(gamev1opclient.PlayerServicePushOps.MatchStartedNotify, p.watch)
 	if err := p.registerLogin(ctx); err != nil {
@@ -152,10 +153,16 @@ func (p *loadPlayer) watch(operation string, payload []byte) {
 }
 
 // enterQueue 经业务通道入队（1v1 casual；属性由服务端权威填充）。
+//
+// 这里是入池阶段唯一的耗时来源：单票一次请求-响应往返（实测 110–200ms）。
+// 入池 QPS = 并发度 / 单票 RTT，故驱动侧靠 -queue-concurrency 抬速率，
+// 每票 RTT 单独进样本（报告里的 queue_rtt_ms），别把入池慢算到成局侧头上。
 func (p *loadPlayer) enterQueue(ctx context.Context) error {
+	start := time.Now()
 	if _, err := p.ops.EnterMatchQueue(ctx, &gamev1.EnterMatchQueueReq{Ruleset: "casual"}); err != nil {
 		return fmt.Errorf("%s 入队失败: %w", p.tag, err)
 	}
+	p.queue.add(time.Since(start))
 	return nil
 }
 

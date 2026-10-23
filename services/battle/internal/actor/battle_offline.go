@@ -36,10 +36,12 @@ type offlineTimeout struct {
 // onPlayerOnline 实现本地消息：掉线窗口内回座（规格 §9.4）——取消计时、清除打点；
 // 补帧仍走既有 SyncFrames 语义（帧协议零改动，只是承载路径改成直连）。
 // 已出局/未知玩家的上线消息忽略：判负后重新取票只对新一局有意义（规格 §9.5）。
-func (b *BattleActor) onPlayerOnline(_ core.ActorContext, msg biz.PlayerOnline) error {
+func (b *BattleActor) onPlayerOnline(ctx core.ActorContext, msg biz.PlayerOnline) error {
 	if _, ok := b.players[msg.PlayerID]; !ok {
 		return nil
 	}
+	// 入座窗口：第一条连接即算入座（坐满即开打，见 battle_seating.go）。
+	b.takeSeat(ctx, msg.PlayerID)
 	if _, marked := b.offline[msg.PlayerID]; !marked {
 		return nil // 本就在线：逐帧重复登记已被桥去重，此处无计时可取消
 	}
@@ -57,6 +59,8 @@ func (b *BattleActor) onPlayerOffline(ctx core.ActorContext, msg biz.PlayerOffli
 	if b.settled {
 		return nil
 	}
+	// 入座窗口内断开即释放座位：他重新回到「等入座」，窗口截止时刻不变。
+	b.releaseSeat(msg.PlayerID)
 	if _, ok := b.players[msg.PlayerID]; !ok {
 		return nil
 	}

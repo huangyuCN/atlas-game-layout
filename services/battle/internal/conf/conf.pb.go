@@ -73,8 +73,24 @@ type BattleConf struct {
 	// ② 与数据报面空闲读超时耦合——server.kcp/udp 的 idle_timeout 缺省取 offline_timeout/3
 	// （缺省 15s → 5s），帧间隔 1s 时尚有 5 帧余量，再大则丢一两个包就可能被空闲超时误判掉线。
 	TickIntervalMs *int64 `protobuf:"varint,7,opt,name=tick_interval_ms,json=tickIntervalMs,proto3,oneof" json:"tick_interval_ms,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// seat_window_ms 是成局后的**入座窗口**（毫秒整数）：成局（出票）后对局时钟不推进，
+	// 等全部参战者的帧连接建立（入座）或窗口到期再开打——把「客户端还没到场」的时间
+	// 从对局寿命里扣掉（旧行为成局即开打，晚到玩家拿到 BATTLE_ENDED）。
+	//   - 不配置：缺省 3000ms（客户端建连+握手实测 1–2s，留一倍余量）；
+	//   - 显式 0：**关闭窗口**（成局即开打，旧行为）；未配置与显式 0 必须区分，故用 optional；
+	//   - 负值或 > 30000ms：启动失败（负数没有语义，超上限已不是「等入座」而是挂住对局）。
+	//
+	// 到期仍有人未入座时：不再等待、立即开打；未入座者不剔除、不重配——他在对局结束前
+	// 仍可加入并参与，迟到补投/拒绝仍是既有的 BATTLE_ENDED 语义（帧协议零改动）。
+	SeatWindowMs *int64 `protobuf:"varint,8,opt,name=seat_window_ms,json=seatWindowMs,proto3,oneof" json:"seat_window_ms,omitempty"`
+	// max_players 是每局会话容量上限（= 一个对局里的参战人数上限）：
+	// 不配置 = 10（与 matcher 的 5v5 对齐——casual 规则集单侧上限 5，故一局最多 10 人）；
+	// 校验：1–64，显式 0/负值/超上限一律启动失败（0 不是「不限」：那会让一个病态名单
+	// 无限扩张会话，容量必须显式）。**小于实际成局人数会让多出来的玩家「进不去会话」**，
+	// 故它与 matcher 的 MaxSide 必须一致或更大。
+	MaxPlayers    *int32 `protobuf:"varint,9,opt,name=max_players,json=maxPlayers,proto3,oneof" json:"max_players,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BattleConf) Reset() {
@@ -152,6 +168,20 @@ func (x *BattleConf) GetMaxFrames() int64 {
 func (x *BattleConf) GetTickIntervalMs() int64 {
 	if x != nil && x.TickIntervalMs != nil {
 		return *x.TickIntervalMs
+	}
+	return 0
+}
+
+func (x *BattleConf) GetSeatWindowMs() int64 {
+	if x != nil && x.SeatWindowMs != nil {
+		return *x.SeatWindowMs
+	}
+	return 0
+}
+
+func (x *BattleConf) GetMaxPlayers() int32 {
+	if x != nil && x.MaxPlayers != nil {
+		return *x.MaxPlayers
 	}
 	return 0
 }
@@ -264,7 +294,7 @@ var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xfa\x02\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xee\x03\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -276,10 +306,15 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\x0foffline_timeout\x18\x05 \x01(\tR\x0eofflineTimeout\x12\"\n" +
 	"\n" +
 	"max_frames\x18\x06 \x01(\x03H\x01R\tmaxFrames\x88\x01\x01\x12-\n" +
-	"\x10tick_interval_ms\x18\a \x01(\x03H\x02R\x0etickIntervalMs\x88\x01\x01B\x17\n" +
+	"\x10tick_interval_ms\x18\a \x01(\x03H\x02R\x0etickIntervalMs\x88\x01\x01\x12)\n" +
+	"\x0eseat_window_ms\x18\b \x01(\x03H\x03R\fseatWindowMs\x88\x01\x01\x12$\n" +
+	"\vmax_players\x18\t \x01(\x05H\x04R\n" +
+	"maxPlayers\x88\x01\x01B\x17\n" +
 	"\x15_frame_advertise_hostB\r\n" +
 	"\v_max_framesB\x13\n" +
-	"\x11_tick_interval_ms\"\x91\x03\n" +
+	"\x11_tick_interval_msB\x11\n" +
+	"\x0f_seat_window_msB\x0e\n" +
+	"\f_max_players\"\x91\x03\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
