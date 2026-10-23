@@ -19,13 +19,35 @@ type FlexTeams struct {
 }
 
 // Run 实现 matchmaker.MatchFunction：
-// 优先成型「本批候选能容纳的最大对局」——单侧人数 T 自大到小尝试
-// （全部玩家参与的大对局优先于小对局，避免不满员 party 长期饿死）。
+// **一轮调用内反复成型直到没有可成的局**——每成局一局就从候选里剔除参战票，
+// 继续在余票上成型。语义与旧实现一致（单局内部规则不变）：
+//   - 公平性：每局优先成型「本批余票能容纳的最大对局」——单侧人数 T 自大到小尝试
+//     （大对局优先于小对局，避免不满员 party 长期饿死）；票序按 (平均等级, ID) 稳定升序，
+//     同输入同输出（可重试）。
+//   - 去重：成局票从余票中 `exclude` 掉，故同一张票在一轮内只可能进一局（不重复配对）。
+//   - 不漏配：成型失败的余票原样返回给调用方（引擎按未匹配票回池），不在此吞掉。
+//
+// 收益：旧实现每轮恒定只返回 1 局，成局速率被 tick 频率钉死（FetchSize 再大也只 1 局/轮）；
+// 循环成型后单轮可成 ⌊候选/对局规模⌋ 局。
 func (f FlexTeams) Run(_ context.Context, candidates []matchmaker.Candidate) ([]matchmaker.Match, error) {
 	if len(candidates) < 2 || f.MaxSide <= 0 {
 		return nil, nil
 	}
-	// 确定性排序：平均等级升序，等级相同按 ticket ID 升序。
+	remaining := sortedTickets(candidates)
+	matches := make([]matchmaker.Match, 0, len(remaining)/2)
+	for {
+		m, rest, ok := f.formOne(remaining)
+		if !ok {
+			return matches, nil
+		}
+		matches = append(matches, m)
+		remaining = rest
+	}
+}
+
+// sortedTickets 把候选票排序为「公平性序」：平均等级升序，等级相同按 ticket ID 升序。
+// 返回新切片，不改调用方入参（Run 的纯性契约）。
+func sortedTickets(candidates []matchmaker.Candidate) []matchmaker.Ticket {
 	sorted := append([]matchmaker.Ticket(nil), ticketsOf(candidates)...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		li, lj := avgLevel(sorted[i]), avgLevel(sorted[j])
@@ -34,6 +56,12 @@ func (f FlexTeams) Run(_ context.Context, candidates []matchmaker.Candidate) ([]
 		}
 		return sorted[i].ID < sorted[j].ID
 	})
+	return sorted
+}
+
+// formOne 在余票上成型一局，返回该局、剩余票（已剔除参战票）与是否成功。
+// 单侧人数 T 自 maxT 递减尝试；两侧人数相等且平均等级差 ≤ MaxGap 即成立。
+func (f FlexTeams) formOne(sorted []matchmaker.Ticket) (matchmaker.Match, []matchmaker.Ticket, bool) {
 	totalPlayers := 0
 	for _, t := range sorted {
 		totalPlayers += len(t.PlayerIDs())
@@ -42,7 +70,6 @@ func (f FlexTeams) Run(_ context.Context, candidates []matchmaker.Candidate) ([]
 	if half := totalPlayers / 2; half < maxT {
 		maxT = half
 	}
-
 	for t := maxT; t >= 1; t-- {
 		a, ok := pickSide(sorted, t)
 		if !ok {
@@ -57,16 +84,21 @@ func (f FlexTeams) Run(_ context.Context, candidates []matchmaker.Candidate) ([]
 		if absDiff(la, lb) > f.MaxGap {
 			continue
 		}
-		return []matchmaker.Match{{
-			ID: fmt.Sprintf("m-%s-%s", joinIDs(a), joinIDs(b)),
-			Teams: []matchmaker.Team{
-				{Name: "red", PlayerIDs: ticketPlayerIDs(a)},
-				{Name: "blue", PlayerIDs: ticketPlayerIDs(b)},
-			},
-			Tickets: append(append([]matchmaker.Ticket(nil), a...), b...),
-		}}, nil
+		return newMatch(a, b), exclude(rest, b), true
 	}
-	return nil, nil
+	return matchmaker.Match{}, nil, false
+}
+
+// newMatch 由两侧票组装对局（ID 由票 ID 派生：确定性，同输入同 ID）。
+func newMatch(a, b []matchmaker.Ticket) matchmaker.Match {
+	return matchmaker.Match{
+		ID: fmt.Sprintf("m-%s-%s", joinIDs(a), joinIDs(b)),
+		Teams: []matchmaker.Team{
+			{Name: "red", PlayerIDs: ticketPlayerIDs(a)},
+			{Name: "blue", PlayerIDs: ticketPlayerIDs(b)},
+		},
+		Tickets: append(append([]matchmaker.Ticket(nil), a...), b...),
+	}
 }
 
 // pickSide 在候选中找「人数和恰为 size」的第一个组合（固定顺序 DFS，确定性）。

@@ -72,7 +72,8 @@ type loadPlayer struct {
 
 	started  chan *gamev1.MatchStartedNotify
 	frame    frameClient
-	battleID string
+	battleID string // 本局战斗 ID（帧连接寻址）
+	matchID  string // 本局匹配 ID（局数去重口径）
 	ticket   []byte
 
 	inputs     atomic.Int64  // 已发出的帧输入数（含失败）
@@ -159,18 +160,20 @@ func (p *loadPlayer) enterQueue(ctx context.Context) error {
 }
 
 // waitStarted 等待成局通知（取 battle_id 与本人票据）；票据缺失即显式失败。
-func (p *loadPlayer) waitStarted(ctx context.Context, timeout time.Duration) error {
+// 返回通知本体：局数按其中的 match_id 去重统计（不再用「人数/2」折算）。
+func (p *loadPlayer) waitStarted(ctx context.Context, timeout time.Duration) (*gamev1.MatchStartedNotify, error) {
 	select {
 	case n := <-p.started:
 		if len(n.GetBattleTicket()) == 0 {
-			return fmt.Errorf("%s 成局通知缺 battle_ticket", p.tag)
+			return nil, fmt.Errorf("%s 成局通知缺 battle_ticket", p.tag)
 		}
 		p.battleID = n.GetBattleId()
-		return nil
+		p.matchID = n.GetMatchId()
+		return n, nil
 	case <-time.After(timeout):
-		return fmt.Errorf("%s 未在 %v 内收到成局通知", p.tag, timeout)
+		return nil, fmt.Errorf("%s 未在 %v 内收到成局通知", p.tag, timeout)
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 }
 

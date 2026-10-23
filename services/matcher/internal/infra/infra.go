@@ -15,8 +15,10 @@ import (
 	pkredis "github.com/huangyuCN/atlas-game-layout/pkg/redis"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/matchfunc"
+	mmmetrics "github.com/huangyuCN/atlas/contrib/matchmaker/metrics"
 	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
 	"github.com/huangyuCN/atlas/matchmaker"
+	"github.com/huangyuCN/atlas/metrics"
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -219,14 +221,25 @@ func (a *BattleGRPCAdmitter) Admit(ctx context.Context, battleID, matchID string
 // 复用既有回执语义是关键取舍：不新增事件类型、不加协议字段、不改客户端 SDK。
 const DefaultRequestTimeout = 30 * time.Second
 
-// NewMatchmakerRuntime 装配 matchmaker redis 运行时
-// （等级相近灵活组队规则集 + 本地 Placement）。
-// requestTimeout 是单张票的最长等待时间（≤0 取 DefaultRequestTimeout）。
-func NewMatchmakerRuntime(cli *pkredis.Client, requestTimeout time.Duration) (*matchredis.Runtime, error) {
+// DefaultTickInterval 是池扫描周期的缺省值（10ms）：成局上限 = tick 频率 × 每 tick 成局数，
+// 旧值 50ms 与「每轮只成 1 局」叠加即 20 局/秒 = 200 玩家/秒（实测 19.95 贴顶）。
+// 规则集已改成一轮多局，故把周期收到 10ms 直接把上限抬 5 倍。
+//
+// 代价（诊断 §5 P0-2）：每 tick 的固定开销（抢锁/3 个扫描/池大小/认领 = ~4 次 Redis 往返）
+// 从 20 次/秒升到 100 次/秒；matcher 全轮实测仅 0.067 核，CPU 可忽略，真正的成本在共享
+// Redis 的 QPS 上——故本值可配（conf tick_interval_ms），按池深度与 Redis 余量调。
+const DefaultTickInterval = 10 * time.Millisecond
+
+// MatchmakerRegistry 返回 casual 规则集的撮合配置（等待阈值与扫描周期；≤0 取缺省）。
+// 单独导出以便装配前就能断言「跑的是什么周期」，不必启动 tick 循环去反推。
+func MatchmakerRegistry(requestTimeout, tickInterval time.Duration) matchmaker.Registry {
 	if requestTimeout <= 0 {
 		requestTimeout = DefaultRequestTimeout
 	}
-	reg := matchmaker.Registry{
+	if tickInterval <= 0 {
+		tickInterval = DefaultTickInterval
+	}
+	return matchmaker.Registry{
 		biz.DefaultMatchmakerName: {
 			Name:              biz.DefaultMatchmakerName,
 			RequestTimeout:    requestTimeout,
@@ -235,11 +248,21 @@ func NewMatchmakerRuntime(cli *pkredis.Client, requestTimeout time.Duration) (*m
 			MatchFunction:     matchfunc.FlexTeams{MaxGap: DefaultMaxLevelGap, MaxSide: DefaultMaxSide},
 			Placement:         LocalPlacement{},
 			FetchSize:         10,
-			TickInterval:      50 * time.Millisecond,
+			TickInterval:      tickInterval,
 		},
 	}
+}
+
+// NewMatchmakerRuntime 装配 matchmaker redis 运行时
+// （等级相近灵活组队规则集 + 本地 Placement）。
+// requestTimeout 是单张票的最长等待时间，tickInterval 是池扫描周期（均 ≤0 取缺省）。
+// meter 用于导出 tick 级指标（matcher_tick_duration_seconds 等）；nil 时降级为 noop。
+func NewMatchmakerRuntime(cli *pkredis.Client, requestTimeout, tickInterval time.Duration,
+	meter metrics.Collector) (*matchredis.Runtime, error) {
+	reg := MatchmakerRegistry(requestTimeout, tickInterval)
 	return matchredis.NewRuntime(cli.Raw(), matchredis.Registry(reg),
-		matchredis.WithPrefix(cli.Keys().MatchmakerPrefix()))
+		matchredis.WithPrefix(cli.Keys().MatchmakerPrefix()),
+		matchredis.WithMetrics(mmmetrics.New(meter)))
 }
 
 // NewMatchmakerParty 装配整队名册引擎（redis Party，容量原子校验）。

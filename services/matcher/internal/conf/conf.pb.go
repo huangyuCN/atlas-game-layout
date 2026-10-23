@@ -41,9 +41,15 @@ type Matchmaker struct {
 	// 超时即按失败处置（发失败事件 + 回池），不无限挂住。
 	AdmitTimeoutMs int64 `protobuf:"varint,3,opt,name=admit_timeout_ms,json=admitTimeoutMs,proto3" json:"admit_timeout_ms,omitempty"`
 	// admit_wait_ms 是拿不到并发槽时的等槽预算（毫秒；缺省 5000）：超时同样按失败处置。
-	AdmitWaitMs   int64 `protobuf:"varint,4,opt,name=admit_wait_ms,json=admitWaitMs,proto3" json:"admit_wait_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AdmitWaitMs int64 `protobuf:"varint,4,opt,name=admit_wait_ms,json=admitWaitMs,proto3" json:"admit_wait_ms,omitempty"`
+	// tick_interval_ms 是池扫描周期（毫秒；缺省 10）。
+	// 50ms 时「每 tick 只成 1 局」把成局速率钉死在 20 局/秒 = 200 玩家/秒（诊断实测 19.95）；
+	// 调到 10ms 即把成局上限按 tick 频率抬 5 倍。代价：tick 频率 ×N ⟹ 每 tick 固定的
+	// 4 次 Redis 扫描往返/秒 ×N（matcher 全轮实测仅 0.067 核，CPU 仍可忽略），
+	// 代价是共享 Redis 上的 QPS 上升——故本值可配，按池深度与 Redis 余量调。
+	TickIntervalMs int64 `protobuf:"varint,5,opt,name=tick_interval_ms,json=tickIntervalMs,proto3" json:"tick_interval_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Matchmaker) Reset() {
@@ -100,6 +106,13 @@ func (x *Matchmaker) GetAdmitTimeoutMs() int64 {
 func (x *Matchmaker) GetAdmitWaitMs() int64 {
 	if x != nil {
 		return x.AdmitWaitMs
+	}
+	return 0
+}
+
+func (x *Matchmaker) GetTickIntervalMs() int64 {
+	if x != nil {
+		return x.TickIntervalMs
 	}
 	return 0
 }
@@ -202,13 +215,14 @@ var File_services_matcher_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_matcher_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	")services/matcher/internal/conf/conf.proto\x12\fmatcher.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xb5\x01\n" +
+	")services/matcher/internal/conf/conf.proto\x12\fmatcher.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xdf\x01\n" +
 	"\n" +
 	"Matchmaker\x12,\n" +
 	"\x12request_timeout_ms\x18\x01 \x01(\x03R\x10requestTimeoutMs\x12+\n" +
 	"\x11admit_concurrency\x18\x02 \x01(\x05R\x10admitConcurrency\x12(\n" +
 	"\x10admit_timeout_ms\x18\x03 \x01(\x03R\x0eadmitTimeoutMs\x12\"\n" +
-	"\radmit_wait_ms\x18\x04 \x01(\x03R\vadmitWaitMs\"\xee\x02\n" +
+	"\radmit_wait_ms\x18\x04 \x01(\x03R\vadmitWaitMs\x12(\n" +
+	"\x10tick_interval_ms\x18\x05 \x01(\x03R\x0etickIntervalMs\"\xee\x02\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +

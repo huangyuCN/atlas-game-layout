@@ -29,6 +29,12 @@ message Matchmaker {
   int64 admit_timeout_ms = 3;
   // admit_wait_ms 是拿不到并发槽时的等槽预算（毫秒；缺省 5000）：超时同样按失败处置。
   int64 admit_wait_ms = 4;
+  // tick_interval_ms 是池扫描周期（毫秒；缺省 10）。
+  // 50ms 时「每 tick 只成 1 局」把成局速率钉死在 20 局/秒 = 200 玩家/秒（诊断实测 19.95）；
+  // 调到 10ms 即把成局上限按 tick 频率抬 5 倍。代价：tick 频率 ×N ⟹ 每 tick 固定的
+  // 4 次 Redis 扫描往返/秒 ×N（matcher 全轮实测仅 0.067 核，CPU 仍可忽略），
+  // 代价是共享 Redis 上的 QPS 上升——故本值可配，按池深度与 Redis 余量调。
+  int64 tick_interval_ms = 5;
 }
 
 message Bootstrap {

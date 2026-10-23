@@ -59,8 +59,11 @@ func NewBattleClient(conn *serverutil.LazyConn) battlev1rpc.BattleServiceClient 
 }
 
 // NewMatchmakerRuntime 装配撮合运行时（redis 后端 + 等级相近规则）。
-func NewMatchmakerRuntime(cfg *conf.Bootstrap, cli *pkredis.Client) (*matchredis.Runtime, error) {
-	rt, err := infra.NewMatchmakerRuntime(cli, durationOf(cfg.GetMatchmaker().GetRequestTimeoutMs()))
+// meter 一并注入引擎：tick 时长/每 tick 成局数/池深度/过期处置耗时由此导出（诊断口径）。
+func NewMatchmakerRuntime(cfg *conf.Bootstrap, cli *pkredis.Client, meter metrics.Collector) (*matchredis.Runtime, error) {
+	m := cfg.GetMatchmaker()
+	rt, err := infra.NewMatchmakerRuntime(cli,
+		durationOf(m.GetRequestTimeoutMs()), durationOf(m.GetTickIntervalMs()), meter)
 	if err != nil {
 		return nil, fmt.Errorf("app: 构造撮合运行时失败: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
 	"github.com/huangyuCN/atlas/contrib/edge/ticket"
 	"github.com/huangyuCN/atlas/namespace"
 	natsserver "github.com/nats-io/nats-server/v2/server"
@@ -196,5 +197,40 @@ func TestSinkCarriesBattleTicketsIntoStartedEvent(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("等待成局事件超时")
+	}
+}
+
+// TestMatchmakerRegistry_DefaultTickInterval 验证池扫描周期的缺省值：
+// 10ms（原 50ms 把成局速率钉死在 20 局/秒 = 200 玩家/秒），且等待阈值缺省不变。
+func TestMatchmakerRegistry_DefaultTickInterval(t *testing.T) {
+	if DefaultTickInterval != 10*time.Millisecond {
+		t.Fatalf("DefaultTickInterval = %v, 期望 10ms", DefaultTickInterval)
+	}
+	mm, ok := MatchmakerRegistry(0, 0)[biz.DefaultMatchmakerName]
+	if !ok {
+		t.Fatal("注册表缺缺省规则集")
+	}
+	if mm.TickInterval != DefaultTickInterval {
+		t.Fatalf("缺省 TickInterval = %v, 期望 %v", mm.TickInterval, DefaultTickInterval)
+	}
+	if mm.RequestTimeout != DefaultRequestTimeout {
+		t.Fatalf("缺省 RequestTimeout = %v, 期望 %v", mm.RequestTimeout, DefaultRequestTimeout)
+	}
+	if err := mm.Validate(); err != nil {
+		t.Fatalf("缺省配置应合法: %v", err)
+	}
+}
+
+// TestMatchmakerRegistry_TickIntervalConfigurable 验证扫描周期可配置（显式值原样生效）。
+func TestMatchmakerRegistry_TickIntervalConfigurable(t *testing.T) {
+	mm := MatchmakerRegistry(90*time.Second, 5*time.Millisecond)[biz.DefaultMatchmakerName]
+	if mm.TickInterval != 5*time.Millisecond {
+		t.Fatalf("TickInterval = %v, 期望 5ms（可配置）", mm.TickInterval)
+	}
+	if mm.RequestTimeout != 90*time.Second {
+		t.Fatalf("RequestTimeout = %v, 期望 90s", mm.RequestTimeout)
+	}
+	if err := mm.Validate(); err != nil {
+		t.Fatalf("显式配置应合法: %v", err)
 	}
 }

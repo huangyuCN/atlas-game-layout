@@ -37,6 +37,7 @@ type report struct {
 	PerBattleWant  int     `json:"players_per_battle_requested"`
 	PlayersMatched int     `json:"players_matched"`
 	Battles        int     `json:"battles"`
+	PerBattleReal  float64 `json:"players_per_battle_actual"`
 	Connected      int     `json:"connections_established"`
 	ConnectFailed  int     `json:"connections_failed"`
 	DurationS      float64 `json:"duration_s"`
@@ -75,6 +76,8 @@ type loadRun struct {
 	perBattle      int
 	dialConc       int
 	connectTimeout time.Duration
+	matchTimeout   time.Duration
+	matchQuiet     time.Duration
 	totalTimeout   time.Duration
 	via            string
 	transport      string
@@ -106,7 +109,7 @@ func main() {
 // parseFlags 解析旗标并组装压测参数。
 func parseFlags() loadRun {
 	players := flag.Int("players", 50, "并发玩家数（= 帧连接数）")
-	perBattle := flag.Int("per-battle", 2, "每局人数（匹配在服务端；非 2 时仅作记录，模板匹配为 1v1）")
+	perBattle := flag.Int("per-battle", 2, "期望每局人数（仅记录：真实人数由成局通知的 match_id 统计）")
 	transport := flag.String("transport", "ws", "帧传输面：ws|udp")
 	via := flag.String("via", "edge", "驱动路径：edge（经接入层）| direct（直连 battle 帧端口）")
 	pps := flag.Int("pps", 20, "每连接每秒帧输入数（上行包速率）")
@@ -115,6 +118,8 @@ func parseFlags() loadRun {
 	steady := flag.Duration("steady-window", 5*time.Second, "稳态窗口长度")
 	probeJitter := flag.Bool("probe-jitter", false, "探针相位抖动（诊断用）")
 	connectTimeout := flag.Duration("connect-timeout", 120*time.Second, "建连与入局阶段的总超时")
+	matchTimeout := flag.Duration("match-timeout", 60*time.Second, "成局阶段的总超时（到点即用已匹配的玩家开打）")
+	matchQuiet := flag.Duration("match-quiet", 3*time.Second, "成局静默期：连续这么久无新成局即认为成局收尾，立刻开打")
 	conc := flag.Int("dial-concurrency", 64, "建连/注册的并发度")
 	gateway := flag.String("gateway", "10.10.1.23:9001", "远端网关业务面地址（host:port）")
 	edgeWS := flag.String("edge-ws", "10.10.1.23:7100", "远端接入层 WS 面地址")
@@ -131,10 +136,11 @@ func parseFlags() loadRun {
 		fatalf("未知 -via %q（edge|direct）", *via)
 	}
 	if *perBattle != 2 {
-		fmt.Fprintf(os.Stderr, "[提示] -per-battle=%d 仅记录：模板匹配器固定 1v1，实际按 2 人一局\n", *perBattle)
+		fmt.Fprintf(os.Stderr, "[提示] -per-battle=%d 仅记录：真实每局人数由成局通知的 match_id 统计\n", *perBattle)
 	}
 	return loadRun{
 		players: *players, perBattle: *perBattle, dialConc: *conc, connectTimeout: *connectTimeout,
+		matchTimeout: *matchTimeout, matchQuiet: *matchQuiet,
 		totalTimeout: *total, via: *via, transport: *transport, steady: *steady, rateEvery: *rateEvery,
 		gateway: *gateway, edgeWS: *edgeWS, edgeUDP: *edgeUDP, battleWS: *battleWS, battleUDP: *battleUDP,
 		pump: pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
@@ -150,15 +156,18 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 	defer closePlayers(ps)
 	fmt.Printf("[客户端] 已注册登录 %d 个压测账号\n", len(ps))
 
-	matched, battles, err := matchAll(ctx, ps, cfg.connectTimeout)
+	matched, battles, err := matchAll(ctx, ps, cfg.matchTimeout, cfg.matchQuiet)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("[匹配] 成局 %d 局（收到成局通知的玩家 %d/%d）\n", battles, matched, len(ps))
+	fmt.Printf("[匹配] 成局 %d 局（收到成局通知的玩家 %d/%d，约 %.1f 人/局）\n",
+		battles, matched, len(ps), perBattleActual(matched, battles))
 
 	active := matchedPlayers(ps)
 	dialStart := time.Now()
-	connected, failed := dialAndJoin(ctx, active, cfg)
+	dialCtx, dialCancel := context.WithTimeout(ctx, cfg.connectTimeout)
+	connected, failed := dialAndJoin(dialCtx, active, cfg)
+	dialCancel()
 	dialEnd := time.Now()
 	fmt.Printf("[直连] via=%s transport=%s 建连成功 %d / 失败 %d（建流窗口 %.1fs）\n",
 		cfg.via, cfg.transport, connected, failed, dialEnd.Sub(dialStart).Seconds())
@@ -256,51 +265,6 @@ func countNonNil(ps []*loadPlayer) int {
 	return n
 }
 
-// matchAll 让全部玩家入队并等待成局通知，返回已匹配玩家数与局数。
-func matchAll(ctx context.Context, ps []*loadPlayer, timeout time.Duration) (int, int, error) {
-	for _, p := range ps {
-		if err := p.enterQueue(ctx); err != nil {
-			return 0, 0, err
-		}
-	}
-	deadline := time.Now().Add(timeout)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	matched := 0
-	for _, p := range ps {
-		wg.Add(1)
-		go func(p *loadPlayer) {
-			defer wg.Done()
-			left := time.Until(deadline)
-			if left <= 0 {
-				left = time.Second
-			}
-			if err := p.waitStarted(ctx, left); err != nil {
-				return
-			}
-			mu.Lock()
-			matched++
-			mu.Unlock()
-		}(p)
-	}
-	wg.Wait()
-	if matched == 0 {
-		return 0, 0, fmt.Errorf("无任何玩家收到成局通知（入队未匹配 / 出票未接线）")
-	}
-	return matched, matched / 2, nil
-}
-
-// matchedPlayers 返回已拿到票据的玩家（未匹配者不参与帧面负载）。
-func matchedPlayers(ps []*loadPlayer) []*loadPlayer {
-	out := make([]*loadPlayer, 0, len(ps))
-	for _, p := range ps {
-		if p.battleID != "" && len(p.ticket) > 0 {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 // dialAndJoin 并发建帧连接并入局，返回成功与失败连接数。
 func dialAndJoin(ctx context.Context, ps []*loadPlayer, cfg loadRun) (int, int) {
 	o := dialOpts{
@@ -385,14 +349,15 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 	steadyFrom := win.pumpEnd.Add(-win.steady)
 	rep.SteadyProbe = summarize(pr.window(steadyFrom, win.pumpEnd))
 	rep.SteadyDown = summarize(dl.window(steadyFrom, win.pumpEnd))
+	rep.PerBattleReal = perBattleActual(rep.PlayersMatched, battles)
 	return rep
 }
 
 // printReport 打印人读表格与末尾一行 JSON 汇总。
 func printReport(r *report) {
 	fmt.Printf("\n=== 压测结果（via=%s transport=%s 远程网关=%s）===\n", r.Via, r.Transport, r.Gateway)
-	fmt.Printf("连接：请求 %d 玩家（每局 %d）→ 成局 %d 局，建连成功 %d，失败 %d；负载时长 %.1fs\n",
-		r.PlayersWant, r.PerBattleWant, r.Battles, r.Connected, r.ConnectFailed, r.DurationS)
+	fmt.Printf("连接：请求 %d 玩家 → 成局 %d 局（约 %.1f 人/局），建连成功 %d，失败 %d；负载时长 %.1fs\n",
+		r.PlayersWant, r.Battles, r.PerBattleReal, r.Connected, r.ConnectFailed, r.DurationS)
 	fmt.Printf("包速率：上行 %.0f pkt/s（共 %d），下行帧广播 %.0f pkt/s（共 %d）；帧面失败 %d，出局通知 %d\n",
 		r.InputPPS, r.Inputs, r.BroadcastPPS, r.Broadcasts, r.Failures, r.OutNotifies)
 	fmt.Printf("延迟：入局往返 p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
