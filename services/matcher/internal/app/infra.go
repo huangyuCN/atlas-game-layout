@@ -63,7 +63,7 @@ func NewBattleClient(conn *serverutil.LazyConn) battlev1rpc.BattleServiceClient 
 func NewMatchmakerRuntime(cfg *conf.Bootstrap, cli *pkredis.Client, meter metrics.Collector) (*matchredis.Runtime, error) {
 	m := cfg.GetMatchmaker()
 	rt, err := infra.NewMatchmakerRuntime(cli,
-		durationOf(m.GetRequestTimeoutMs()), durationOf(m.GetTickIntervalMs()), meter)
+		durationOf(m.GetRequestTimeoutMs()), durationOf(m.GetTickIntervalMs()), int(m.GetFetchSize()), meter)
 	if err != nil {
 		return nil, fmt.Errorf("app: 构造撮合运行时失败: %w", err)
 	}

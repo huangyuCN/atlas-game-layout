@@ -206,7 +206,7 @@ func TestMatchmakerRegistry_DefaultTickInterval(t *testing.T) {
 	if DefaultTickInterval != 10*time.Millisecond {
 		t.Fatalf("DefaultTickInterval = %v, 期望 10ms", DefaultTickInterval)
 	}
-	mm, ok := MatchmakerRegistry(0, 0)[biz.DefaultMatchmakerName]
+	mm, ok := MatchmakerRegistry(0, 0, 0)[biz.DefaultMatchmakerName]
 	if !ok {
 		t.Fatal("注册表缺缺省规则集")
 	}
@@ -223,7 +223,7 @@ func TestMatchmakerRegistry_DefaultTickInterval(t *testing.T) {
 
 // TestMatchmakerRegistry_TickIntervalConfigurable 验证扫描周期可配置（显式值原样生效）。
 func TestMatchmakerRegistry_TickIntervalConfigurable(t *testing.T) {
-	mm := MatchmakerRegistry(90*time.Second, 5*time.Millisecond)[biz.DefaultMatchmakerName]
+	mm := MatchmakerRegistry(90*time.Second, 5*time.Millisecond, 0)[biz.DefaultMatchmakerName]
 	if mm.TickInterval != 5*time.Millisecond {
 		t.Fatalf("TickInterval = %v, 期望 5ms（可配置）", mm.TickInterval)
 	}
@@ -232,5 +232,43 @@ func TestMatchmakerRegistry_TickIntervalConfigurable(t *testing.T) {
 	}
 	if err := mm.Validate(); err != nil {
 		t.Fatalf("显式配置应合法: %v", err)
+	}
+}
+
+// TestMatchmakerRegistry_DefaultFetchSize 验证认领批量的缺省值：
+// 100 张/轮——旧值 10 与「每轮只成 1 局」叠加时，每 tick 只认领 10 票 = 恰好 1 局，
+// 循环成型没有余量可用（实测 matches_per_tick 恒为 1.000）。
+func TestMatchmakerRegistry_DefaultFetchSize(t *testing.T) {
+	if DefaultFetchSize != 100 {
+		t.Fatalf("DefaultFetchSize = %d, 期望 100", DefaultFetchSize)
+	}
+	mm := MatchmakerRegistry(0, 0, 0)[biz.DefaultMatchmakerName]
+	if mm.FetchSize != DefaultFetchSize {
+		t.Fatalf("缺省 FetchSize = %d, 期望 %d", mm.FetchSize, DefaultFetchSize)
+	}
+	if err := mm.Validate(); err != nil {
+		t.Fatalf("缺省配置应合法: %v", err)
+	}
+}
+
+// TestMatchmakerRegistry_FetchSizeConfigurable 验证认领批量可配置（显式值原样生效）。
+func TestMatchmakerRegistry_FetchSizeConfigurable(t *testing.T) {
+	mm := MatchmakerRegistry(0, 0, 250)[biz.DefaultMatchmakerName]
+	if mm.FetchSize != 250 {
+		t.Fatalf("FetchSize = %d, 期望 250（可配置）", mm.FetchSize)
+	}
+	if err := mm.Validate(); err != nil {
+		t.Fatalf("显式配置应合法: %v", err)
+	}
+}
+
+// TestMatchmakerRegistry_FetchSizeClamped 验证认领批量的安全边界：
+// ≤0 取缺省 100，超过 MaxFetchSize 夹到上限（单 tick 的票数据量由此有上界）。
+func TestMatchmakerRegistry_FetchSizeClamped(t *testing.T) {
+	if got := MatchmakerRegistry(0, 0, -5)[biz.DefaultMatchmakerName].FetchSize; got != DefaultFetchSize {
+		t.Fatalf("负数 FetchSize = %d, 期望缺省 %d", got, DefaultFetchSize)
+	}
+	if got := MatchmakerRegistry(0, 0, MaxFetchSize+500)[biz.DefaultMatchmakerName].FetchSize; got != MaxFetchSize {
+		t.Fatalf("超上限 FetchSize = %d, 期望夹到 %d", got, MaxFetchSize)
 	}
 }

@@ -230,9 +230,34 @@ const DefaultRequestTimeout = 30 * time.Second
 // Redis 的 QPS 上——故本值可配（conf tick_interval_ms），按池深度与 Redis 余量调。
 const DefaultTickInterval = 10 * time.Millisecond
 
-// MatchmakerRegistry 返回 casual 规则集的撮合配置（等待阈值与扫描周期；≤0 取缺省）。
-// 单独导出以便装配前就能断言「跑的是什么周期」，不必启动 tick 循环去反推。
-func MatchmakerRegistry(requestTimeout, tickInterval time.Duration) matchmaker.Registry {
+// DefaultFetchSize 是每 tick 认领的候选上限（缺省 100 张）。
+// 旧值 10 与「每轮只成 1 局」叠加时，每 tick 只认领 10 票 = 恰好 1 局（12288 实测
+// matches_per_tick 恒 1.000，成局速率 43.6 局/秒 × 10 人 ≈ 445 玩家/秒）；放大到 100
+// 让循环成型一轮能成 10 局（5v5），上限随之 ≈4,000 玩家/秒。
+//
+// 上界口径：单 tick 的票数据量与 Lua 扫描量都由它决定（认领 ≤FetchSize 张、
+// 服务端 ≤4×FetchSize 次 GET），故本值可配（conf fetch_size）但夹在 MaxFetchSize 内。
+const DefaultFetchSize = 100
+
+// MaxFetchSize 是认领上限的安全边界：再大只会把单 tick 的内存与延迟线性推高，
+// 而成局吞吐已受 Redis 往返与后续 Admit 环节约束（100 张 ≈ 10 局/轮已够 4,000 人/秒）。
+const MaxFetchSize = 1000
+
+// fetchSizeOrDefault 把配置的认领上限夹到 [1, MaxFetchSize]（≤0 取缺省）。
+func fetchSizeOrDefault(n int) int {
+	if n <= 0 {
+		return DefaultFetchSize
+	}
+	if n > MaxFetchSize {
+		return MaxFetchSize
+	}
+	return n
+}
+
+// MatchmakerRegistry 返回 casual 规则集的撮合配置
+// （等待阈值、扫描周期与认领上限；时间 ≤0、fetchSize ≤0 取缺省）。
+// 单独导出以便装配前就能断言「跑的是什么周期/批量」，不必启动 tick 循环去反推。
+func MatchmakerRegistry(requestTimeout, tickInterval time.Duration, fetchSize int) matchmaker.Registry {
 	if requestTimeout <= 0 {
 		requestTimeout = DefaultRequestTimeout
 	}
@@ -247,7 +272,7 @@ func MatchmakerRegistry(requestTimeout, tickInterval time.Duration) matchmaker.R
 			RequeuePolicy:     matchmaker.RequeueAll,
 			MatchFunction:     matchfunc.FlexTeams{MaxGap: DefaultMaxLevelGap, MaxSide: DefaultMaxSide},
 			Placement:         LocalPlacement{},
-			FetchSize:         10,
+			FetchSize:         fetchSizeOrDefault(fetchSize),
 			TickInterval:      tickInterval,
 		},
 	}
@@ -255,11 +280,12 @@ func MatchmakerRegistry(requestTimeout, tickInterval time.Duration) matchmaker.R
 
 // NewMatchmakerRuntime 装配 matchmaker redis 运行时
 // （等级相近灵活组队规则集 + 本地 Placement）。
-// requestTimeout 是单张票的最长等待时间，tickInterval 是池扫描周期（均 ≤0 取缺省）。
+// requestTimeout 是单张票的最长等待时间，tickInterval 是池扫描周期，
+// fetchSize 是每 tick 认领上限（均取缺省当 ≤0）。
 // meter 用于导出 tick 级指标（matcher_tick_duration_seconds 等）；nil 时降级为 noop。
 func NewMatchmakerRuntime(cli *pkredis.Client, requestTimeout, tickInterval time.Duration,
-	meter metrics.Collector) (*matchredis.Runtime, error) {
-	reg := MatchmakerRegistry(requestTimeout, tickInterval)
+	fetchSize int, meter metrics.Collector) (*matchredis.Runtime, error) {
+	reg := MatchmakerRegistry(requestTimeout, tickInterval, fetchSize)
 	return matchredis.NewRuntime(cli.Raw(), matchredis.Registry(reg),
 		matchredis.WithPrefix(cli.Keys().MatchmakerPrefix()),
 		matchredis.WithMetrics(mmmetrics.New(meter)))

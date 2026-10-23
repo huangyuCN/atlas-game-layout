@@ -48,8 +48,15 @@ type Matchmaker struct {
 	// 4 次 Redis 扫描往返/秒 ×N（matcher 全轮实测仅 0.067 核，CPU 仍可忽略），
 	// 代价是共享 Redis 上的 QPS 上升——故本值可配，按池深度与 Redis 余量调。
 	TickIntervalMs int64 `protobuf:"varint,5,opt,name=tick_interval_ms,json=tickIntervalMs,proto3" json:"tick_interval_ms,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// fetch_size 是每 tick 认领的候选上限（缺省 100；≤0 取缺省、>1000 夹到安全上限）。
+	// 旧值 10 时每 tick 只认领 10 票 = 恰好 1 局（12288 实测 matches_per_tick 恒 1.000，
+	// 成局速率 43.6 局/秒 × 10 人 ≈ 445 玩家/秒）；放大到 100 让「一轮循环成型」能成
+	// 10 局（5v5）⟹ 上限 ≈4000 玩家/秒。上界口径：单 tick 认领 ≤fetch_size 张、
+	// 服务端扫描 ≤4×fetch_size 次 GET——这是单 tick 内存与延迟的直接上界，
+	// 故配冒进（>1000）会被夹到安全上限。
+	FetchSize     int32 `protobuf:"varint,6,opt,name=fetch_size,json=fetchSize,proto3" json:"fetch_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Matchmaker) Reset() {
@@ -113,6 +120,13 @@ func (x *Matchmaker) GetAdmitWaitMs() int64 {
 func (x *Matchmaker) GetTickIntervalMs() int64 {
 	if x != nil {
 		return x.TickIntervalMs
+	}
+	return 0
+}
+
+func (x *Matchmaker) GetFetchSize() int32 {
+	if x != nil {
+		return x.FetchSize
 	}
 	return 0
 }
@@ -215,14 +229,16 @@ var File_services_matcher_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_matcher_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	")services/matcher/internal/conf/conf.proto\x12\fmatcher.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xdf\x01\n" +
+	")services/matcher/internal/conf/conf.proto\x12\fmatcher.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xfe\x01\n" +
 	"\n" +
 	"Matchmaker\x12,\n" +
 	"\x12request_timeout_ms\x18\x01 \x01(\x03R\x10requestTimeoutMs\x12+\n" +
 	"\x11admit_concurrency\x18\x02 \x01(\x05R\x10admitConcurrency\x12(\n" +
 	"\x10admit_timeout_ms\x18\x03 \x01(\x03R\x0eadmitTimeoutMs\x12\"\n" +
 	"\radmit_wait_ms\x18\x04 \x01(\x03R\vadmitWaitMs\x12(\n" +
-	"\x10tick_interval_ms\x18\x05 \x01(\x03R\x0etickIntervalMs\"\xee\x02\n" +
+	"\x10tick_interval_ms\x18\x05 \x01(\x03R\x0etickIntervalMs\x12\x1d\n" +
+	"\n" +
+	"fetch_size\x18\x06 \x01(\x05R\tfetchSize\"\xee\x02\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +

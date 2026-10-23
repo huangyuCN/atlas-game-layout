@@ -35,6 +35,13 @@ message Matchmaker {
   // 4 次 Redis 扫描往返/秒 ×N（matcher 全轮实测仅 0.067 核，CPU 仍可忽略），
   // 代价是共享 Redis 上的 QPS 上升——故本值可配，按池深度与 Redis 余量调。
   int64 tick_interval_ms = 5;
+  // fetch_size 是每 tick 认领的候选上限（缺省 100；≤0 取缺省、>1000 夹到安全上限）。
+  // 旧值 10 时每 tick 只认领 10 票 = 恰好 1 局（12288 实测 matches_per_tick 恒 1.000，
+  // 成局速率 43.6 局/秒 × 10 人 ≈ 445 玩家/秒）；放大到 100 让「一轮循环成型」能成
+  // 10 局（5v5）⟹ 上限 ≈4000 玩家/秒。上界口径：单 tick 认领 ≤fetch_size 张、
+  // 服务端扫描 ≤4×fetch_size 次 GET——这是单 tick 内存与延迟的直接上界，
+  // 故配冒进（>1000）会被夹到安全上限。
+  int32 fetch_size = 6;
 }
 
 message Bootstrap {
