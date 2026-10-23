@@ -1,4 +1,4 @@
-// matcher 服务配置：引用公共配置消息（撮合队列配置 M6 追加）。
+// matcher 服务配置：引用公共配置消息（撮合队列配置 M6 追加；成局处置参数 M7 追加）。
 syntax = "proto3";
 
 package matcher.conf;
@@ -12,6 +12,25 @@ import "protobuf/configs/data.proto";
 import "protobuf/configs/log.proto";
 import "protobuf/configs/observability.proto";
 
+// Matchmaker 是撮合运行参数（等待阈值 + 成局处置的有界扇出）。
+// 所有字段的 0 / 缺省都表示「取代码缺省值」（见 internal/infra.DefaultRequestTimeout、
+// internal/biz.DefaultAdmit*）——这些参数不存在「0 有意义」的取值，
+// 尤其并发 0 **不是**无限并发（有界是硬约束）。
+message Matchmaker {
+  // request_timeout_ms 是单张票的最长等待时间（毫秒；缺省 30000）。
+  // 到点后引擎产出 TicketTimedOut，matcher 按既有语义发 MATCH_FAIL_REASON_TIMEOUT
+  // 失败事件——这是「超过阈值仍未成局」给玩家的确定性回执（不新增事件类型/协议字段）。
+  int64 request_timeout_ms = 1;
+  // admit_concurrency 是成局处置（开局+出票，一次跨进程 RPC）的并发上限（缺省 200）：
+  // 拿不到并发槽的成局在各自的 ticket 监听里等待（背压），不会无界并发打向 battle。
+  int32 admit_concurrency = 2;
+  // admit_timeout_ms 是单局「开局+出票」的超时（毫秒；缺省 3000）：
+  // 超时即按失败处置（发失败事件 + 回池），不无限挂住。
+  int64 admit_timeout_ms = 3;
+  // admit_wait_ms 是拿不到并发槽时的等槽预算（毫秒；缺省 5000）：超时同样按失败处置。
+  int64 admit_wait_ms = 4;
+}
+
 message Bootstrap {
   atlas.configs.Runtime runtime = 1;
   atlas.configs.Registry registry = 2;
@@ -20,4 +39,6 @@ message Bootstrap {
   atlas.configs.Log log = 5;
   // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
   atlas.configs.Observability observability = 6;
+  // matchmaker 是撮合运行参数（等待阈值与成局处置并发，见 Matchmaker 字段注释）。
+  Matchmaker matchmaker = 7;
 }

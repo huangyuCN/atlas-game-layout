@@ -14,6 +14,12 @@ export interface CreateBattleReply {
   battleId?: string; // battle.v1.CreateBattleReply.battle_id
 }
 
+export interface AdmitBattleReq {
+  matchId?: string; // battle.v1.AdmitBattleReq.match_id
+  playerIds?: string[]; // battle.v1.AdmitBattleReq.player_ids
+  battleId?: string; // battle.v1.AdmitBattleReq.battle_id
+}
+
 export interface GetBattleRequest {
   battleId?: string; // battle.v1.GetBattleRequest.battle_id
 }

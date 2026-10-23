@@ -123,6 +123,28 @@ var BattleServiceRouteTable = relay.Table{
 			return r.BattleId, r.BattleId != ""
 		},
 	},
+	"/battle.v1.BattleService/Admit": {
+		Operation:   "/battle.v1.BattleService/Admit",
+		Service:     "battle.v1.BattleService",
+		Method:      "Admit",
+		Actor:       "battle",
+		Access:      relay.AccessInternal,
+		UidSource:   relay.UidField,
+		IsTell:      false,
+		Idempotency: relay.IdempotencyNone,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+		NewRequest:  func() proto.Message { return new(AdmitBattleReq) },
+		NewReply:    func() proto.Message { return new(IssueEntryTicketReply) },
+		UidOf: func(req any) (string, bool) {
+			r, ok := req.(*AdmitBattleReq)
+			if !ok {
+				return "", false
+			}
+			return r.BattleId, r.BattleId != ""
+		},
+	},
 	"/battle.v1.BattleService/GetState": {
 		Operation:   "/battle.v1.BattleService/GetState",
 		Service:     "battle.v1.BattleService",
@@ -211,6 +233,15 @@ var BattleServiceLifecycleTable = relay.LifecycleTable{
 		Operation:   "/battle.v1.BattleService/Create",
 		Service:     "battle.v1.BattleService",
 		Method:      "Create",
+		Access:      relay.AccessInternal,
+		Since:       "",
+		Deprecated:  "",
+		Replacement: "",
+	},
+	"/battle.v1.BattleService/Admit": {
+		Operation:   "/battle.v1.BattleService/Admit",
+		Service:     "battle.v1.BattleService",
+		Method:      "Admit",
 		Access:      relay.AccessInternal,
 		Since:       "",
 		Deprecated:  "",

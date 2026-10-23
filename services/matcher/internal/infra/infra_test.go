@@ -17,16 +17,18 @@ import (
 )
 
 // stubBattleClient 是 battle internal 面类型化客户端的桩：不开 gRPC，
-// 记录调用请求并回放预置出票回执（"可用桩 client"的取票链路用例）。
+// 记录入场调用请求并回放预置回执（「一次调用即出票」的用例）。
 type stubBattleClient struct {
-	createReq *battlev1.CreateBattleRequest
-	issueReq  *battlev1.IssueEntryTicketReq
-	reply     *battlev1.IssueEntryTicketReply
-	err       error
+	admitReq *battlev1.AdmitBattleReq
+	// admitCalls/issueCalls 统计两条路径的调用次数：入场链路只能调 Admit（每局 1 次），
+	// 旧的两跳出票方法 IssueEntryTicket 必须零调用。
+	admitCalls int
+	issueCalls int
+	reply      *battlev1.IssueEntryTicketReply
+	err        error
 }
 
 func (s *stubBattleClient) Create(_ context.Context, req *battlev1.CreateBattleRequest) (*battlev1.CreateBattleReply, error) {
-	s.createReq = req
 	return &battlev1.CreateBattleReply{BattleId: req.GetBattleId()}, nil
 }
 
@@ -34,11 +36,19 @@ func (s *stubBattleClient) GetState(context.Context, *battlev1.GetStateReq) (*ba
 	return &battlev1.GetStateReply{}, nil
 }
 
-func (s *stubBattleClient) IssueEntryTicket(_ context.Context, req *battlev1.IssueEntryTicketReq) (*battlev1.IssueEntryTicketReply, error) {
-	s.issueReq = req
+// Admit 实现入场（开局+出票合并）调用桩。
+func (s *stubBattleClient) Admit(_ context.Context, req *battlev1.AdmitBattleReq) (*battlev1.IssueEntryTicketReply, error) {
+	s.admitReq = req
+	s.admitCalls++
 	if s.err != nil {
 		return nil, s.err
 	}
+	return s.reply, nil
+}
+
+// IssueEntryTicket 保留为「旧两跳路径」的计数桩（入场链路不得再调它）。
+func (s *stubBattleClient) IssueEntryTicket(_ context.Context, _ *battlev1.IssueEntryTicketReq) (*battlev1.IssueEntryTicketReply, error) {
+	s.issueCalls++
 	return s.reply, nil
 }
 
@@ -109,9 +119,10 @@ func testTopics(t *testing.T) consts.Topics {
 	return topics
 }
 
-// TestSinkCarriesBattleTicketsIntoStartedEvent 验证 matcher 取票链路：
-// 按 battle_id 调 IssueEntryTicket（桩 client）→ 成局事件带上 battle 回执的
+// TestSinkCarriesBattleTicketsIntoStartedEvent 验证 matcher 入场链路：
+// 按 battle_id 调**一次** Admit（开局+出票合并，桩 client）→ 回执原样进成局事件的
 // endpoint 与逐人票据，且每张票都能解出对应玩家与本局 battle_id。
+// 附「2 跳 → 1 跳」的计数证明：Admit 恰 1 次、IssueEntryTicket 0 次。
 func TestSinkCarriesBattleTicketsIntoStartedEvent(t *testing.T) {
 	nc, err := pkgnats.Connect(pkgnats.Options{URL: newTestServer(t), Name: "matcher-infra-test"})
 	if err != nil {
@@ -131,23 +142,27 @@ func TestSinkCarriesBattleTicketsIntoStartedEvent(t *testing.T) {
 	sink := NewSink(pkgnats.NewPublisher(nc, topics), stub)
 	ctx := context.Background()
 	playerIDs := []string{"p-1", "p-2"}
-	if err := sink.Start(ctx, "b-1", "m-1", playerIDs); err != nil {
-		t.Fatalf("开局: %v", err)
-	}
-	if got := stub.createReq.GetBattleId(); got != "b-1" {
-		t.Fatalf("开局目标 battle_id = %q, 期望 b-1", got)
-	}
-	issued, err := sink.IssueEntryTicket(ctx, "b-1")
+	tickets, err := sink.Admit(ctx, "b-1", "m-1", playerIDs)
 	if err != nil {
-		t.Fatalf("取票: %v", err)
+		t.Fatalf("入场（开局+出票）: %v", err)
 	}
-	if got := stub.issueReq.GetBattleId(); got != "b-1" {
-		t.Fatalf("取票目标 battle_id = %q, 期望 b-1（客体寻址）", got)
+	// 每局 RPC 跳数 2 → 1：只调 Admit 一次，旧的两跳方法零调用。
+	if stub.admitCalls != 1 {
+		t.Fatalf("battle 调用次数 = %d, 期望 1（开局+出票合并）", stub.admitCalls)
 	}
-	if !proto.Equal(issued, stub.reply) {
-		t.Fatalf("取票回执 = %v, 期望原样透传 %v", issued, stub.reply)
+	if stub.issueCalls != 0 {
+		t.Fatalf("入场链路仍调用了 IssueEntryTicket %d 次（应为 0）", stub.issueCalls)
 	}
-	if err := sink.PublishStarted(ctx, "b-1", "m-1", playerIDs, issued); err != nil {
+	if got := stub.admitReq.GetBattleId(); got != "b-1" {
+		t.Fatalf("入场目标 battle_id = %q, 期望 b-1（客体寻址）", got)
+	}
+	if got := stub.admitReq.GetMatchId(); got != "m-1" {
+		t.Fatalf("入场 match_id = %q, 期望 m-1", got)
+	}
+	if !proto.Equal(tickets, stub.reply) {
+		t.Fatalf("入场回执 = %v, 期望原样透传 %v", tickets, stub.reply)
+	}
+	if err := sink.PublishStarted(ctx, "b-1", "m-1", playerIDs, tickets); err != nil {
 		t.Fatalf("发布成局事件: %v", err)
 	}
 

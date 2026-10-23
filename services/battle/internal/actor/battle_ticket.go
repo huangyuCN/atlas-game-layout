@@ -27,11 +27,23 @@ const ticketKID uint8 = 1
 // IssueEntryTicket 实现 battlev1actor.BattleService：按参战名单逐人签票
 // （每人恰好一张，票绑本人 player_id + 本局 battle_id），并回填接入层各面地址与统一过期时刻。
 // 名单为空（未开局/对局不存在）返回 BATTLE_NOT_FOUND；签票失败返回 INTERNAL。
+//
+// 幂等：入场已走 Admit（开局+出票一次完成），本方法对其返回**首次签发的那一份**——
+// 不重签、不刷新过期时刻（否则「同一局重复调用不重复出票」在重取票路径上失效）。
 func (b *BattleActor) IssueEntryTicket(_ core.ActorContext, _ *battlev1.IssueEntryTicketReq) (*battlev1.IssueEntryTicketReply, error) {
+	if b.admission != nil {
+		return b.admission, nil
+	}
 	players := b.roster()
 	if len(players) == 0 {
 		return nil, errorv1.ErrBattleNotFound("战斗 %s 参战名单为空，无法出票", b.battleID)
 	}
+	return b.signTickets(players)
+}
+
+// signTickets 按给定名单逐人签票（纯计算：不改 actor 状态，失败即无副作用），
+// 回执带接入层各面地址与统一的过期时刻。名单顺序即回执顺序（调用方已排序）。
+func (b *BattleActor) signTickets(players []string) (*battlev1.IssueEntryTicketReply, error) {
 	now := time.Now()
 	expiresAt := now.Add(b.cfg.TicketTTL)
 	tickets := make([]*battlev1.BattleTicketEntry, 0, len(players))

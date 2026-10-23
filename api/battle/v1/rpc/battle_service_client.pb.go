@@ -15,6 +15,7 @@ import (
 // BattleServiceClient 是 BattleService 服务面的类型化 gRPC 客户端（跨服务调用）。
 type BattleServiceClient interface {
 	Create(ctx context.Context, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
+	Admit(ctx context.Context, req *v1.AdmitBattleReq) (*v1.IssueEntryTicketReply, error)
 	GetState(ctx context.Context, req *v1.GetStateReq) (*v1.GetStateReply, error)
 	IssueEntryTicket(ctx context.Context, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error)
 }
@@ -33,6 +34,15 @@ func NewBattleServiceClient(cc grpc.ClientConnInterface) BattleServiceClient {
 func (c *battleServiceClient) Create(ctx context.Context, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error) {
 	out := new(v1.CreateBattleReply)
 	if err := c.cc.Invoke(ctx, "/battle.v1.BattleService/Create", req, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Admit 发起一次一元调用。
+func (c *battleServiceClient) Admit(ctx context.Context, req *v1.AdmitBattleReq) (*v1.IssueEntryTicketReply, error) {
+	out := new(v1.IssueEntryTicketReply)
+	if err := c.cc.Invoke(ctx, "/battle.v1.BattleService/Admit", req, out); err != nil {
 		return nil, err
 	}
 	return out, nil

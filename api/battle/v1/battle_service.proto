@@ -120,11 +120,19 @@ service BattleService {
   rpc Create (CreateBattleRequest) returns (CreateBattleReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
   }
+  // Admit 开局+出票（INTERNAL）：matcher 成局后的**唯一**入场入口。
+  // 一次调用内登记参战名单并按名单逐人签票，回执即逐人票据 + 接入层各面地址。
+  // 为什么合并：每局两次跨进程 RPC 的尾延迟在万级并发下叠加（懒激活 + 出票），
+  // 任一超时即「既无票也无成局事件」；合并后两件事在同一次 actor 调用里原子完成
+  //（签票失败即不登记名单），且按 battle_id 幂等（重复调用不重复出票）。
+  rpc Admit (AdmitBattleReq) returns (IssueEntryTicketReply) {
+    option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
+  }
   rpc GetState (GetStateReq) returns (GetStateReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
   }
-  // IssueEntryTicket 出票（matcher 成局后调用，INTERNAL）：按本局参战名单逐人签票
-  //（票绑 player_id + battle_id），并回填接入层各面地址——接入层地址只有这一个来源。
+  // IssueEntryTicket 按已登记名单重新取票（INTERNAL）：入场走 Admit；
+  // 本方法保留给「票过期/重登恢复」场景——幂等回执首次签发结果（不重签、不刷新过期时刻）。
   rpc IssueEntryTicket (IssueEntryTicketReq) returns (IssueEntryTicketReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
   }

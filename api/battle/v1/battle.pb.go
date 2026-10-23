@@ -25,7 +25,8 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// CreateBattleRequest 开局：matcher 成局后调用。
+// CreateBattleRequest 开局登记参战名单（管理面/测试与既有契约保留；
+// matcher 成局后的入场走 Admit——开局与出票合并，见下）。
 type CreateBattleRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	MatchId   string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
@@ -133,6 +134,75 @@ func (x *CreateBattleReply) GetBattleId() string {
 	return ""
 }
 
+// AdmitBattleReq 开局+出票请求：matcher 成局后的**唯一**入场调用
+// （把原来「懒激活 battle actor 的 CreateBattle → 再 IssueEntryTicket」两跳合并成一跳）。
+//
+// 原子性：参战名单与票在**同一次** actor 调用里产生——签票失败即不登记任何玩家，
+// 故不会留下「有名单无票」；票只随成功回执下发，故不会留下「有票无名单」。
+// 幂等：同一 battle_id 重复调用原样回执首次结果（名单不翻倍、票不重签、过期时刻不变），
+// 调用方超时重试安全。
+type AdmitBattleReq struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MatchId   string                 `protobuf:"bytes,1,opt,name=match_id,json=matchId,proto3" json:"match_id,omitempty"`
+	PlayerIds []string               `protobuf:"bytes,2,rep,name=player_ids,json=playerIds,proto3" json:"player_ids,omitempty"`
+	// battle_id 是目标战斗标识（actor key）：rpc 面按 service 的 uid_field 寻址
+	// battle:<battle_id>，属主节点内由该 actor 处理本次开局与出票。
+	BattleId      string `protobuf:"bytes,3,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdmitBattleReq) Reset() {
+	*x = AdmitBattleReq{}
+	mi := &file_api_battle_v1_battle_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdmitBattleReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdmitBattleReq) ProtoMessage() {}
+
+func (x *AdmitBattleReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_battle_v1_battle_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdmitBattleReq.ProtoReflect.Descriptor instead.
+func (*AdmitBattleReq) Descriptor() ([]byte, []int) {
+	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AdmitBattleReq) GetMatchId() string {
+	if x != nil {
+		return x.MatchId
+	}
+	return ""
+}
+
+func (x *AdmitBattleReq) GetPlayerIds() []string {
+	if x != nil {
+		return x.PlayerIds
+	}
+	return nil
+}
+
+func (x *AdmitBattleReq) GetBattleId() string {
+	if x != nil {
+		return x.BattleId
+	}
+	return ""
+}
+
 // GetBattleRequest/Reply 战斗状态查询。
 type GetBattleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -143,7 +213,7 @@ type GetBattleRequest struct {
 
 func (x *GetBattleRequest) Reset() {
 	*x = GetBattleRequest{}
-	mi := &file_api_battle_v1_battle_proto_msgTypes[2]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -155,7 +225,7 @@ func (x *GetBattleRequest) String() string {
 func (*GetBattleRequest) ProtoMessage() {}
 
 func (x *GetBattleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_proto_msgTypes[2]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -168,7 +238,7 @@ func (x *GetBattleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBattleRequest.ProtoReflect.Descriptor instead.
 func (*GetBattleRequest) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{2}
+	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetBattleRequest) GetBattleId() string {
@@ -187,7 +257,7 @@ type GetBattleReply struct {
 
 func (x *GetBattleReply) Reset() {
 	*x = GetBattleReply{}
-	mi := &file_api_battle_v1_battle_proto_msgTypes[3]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -199,7 +269,7 @@ func (x *GetBattleReply) String() string {
 func (*GetBattleReply) ProtoMessage() {}
 
 func (x *GetBattleReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_proto_msgTypes[3]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -212,7 +282,7 @@ func (x *GetBattleReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBattleReply.ProtoReflect.Descriptor instead.
 func (*GetBattleReply) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{3}
+	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetBattleReply) GetState() string {
@@ -234,7 +304,7 @@ type PlayerResult struct {
 
 func (x *PlayerResult) Reset() {
 	*x = PlayerResult{}
-	mi := &file_api_battle_v1_battle_proto_msgTypes[4]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -246,7 +316,7 @@ func (x *PlayerResult) String() string {
 func (*PlayerResult) ProtoMessage() {}
 
 func (x *PlayerResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_proto_msgTypes[4]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -259,7 +329,7 @@ func (x *PlayerResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlayerResult.ProtoReflect.Descriptor instead.
 func (*PlayerResult) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{4}
+	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PlayerResult) GetPlayerId() string {
@@ -295,7 +365,7 @@ type BattleSettledEvent struct {
 
 func (x *BattleSettledEvent) Reset() {
 	*x = BattleSettledEvent{}
-	mi := &file_api_battle_v1_battle_proto_msgTypes[5]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -307,7 +377,7 @@ func (x *BattleSettledEvent) String() string {
 func (*BattleSettledEvent) ProtoMessage() {}
 
 func (x *BattleSettledEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_proto_msgTypes[5]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -320,7 +390,7 @@ func (x *BattleSettledEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BattleSettledEvent.ProtoReflect.Descriptor instead.
 func (*BattleSettledEvent) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{5}
+	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *BattleSettledEvent) GetBattleId() string {
@@ -355,7 +425,7 @@ type GetStateReq struct {
 
 func (x *GetStateReq) Reset() {
 	*x = GetStateReq{}
-	mi := &file_api_battle_v1_battle_proto_msgTypes[6]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +437,7 @@ func (x *GetStateReq) String() string {
 func (*GetStateReq) ProtoMessage() {}
 
 func (x *GetStateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_proto_msgTypes[6]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +450,7 @@ func (x *GetStateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateReq.ProtoReflect.Descriptor instead.
 func (*GetStateReq) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{6}
+	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetStateReq) GetBattleId() string {
@@ -401,7 +471,7 @@ type GetStateReply struct {
 
 func (x *GetStateReply) Reset() {
 	*x = GetStateReply{}
-	mi := &file_api_battle_v1_battle_proto_msgTypes[7]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -413,7 +483,7 @@ func (x *GetStateReply) String() string {
 func (*GetStateReply) ProtoMessage() {}
 
 func (x *GetStateReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_proto_msgTypes[7]
+	mi := &file_api_battle_v1_battle_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -426,7 +496,7 @@ func (x *GetStateReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateReply.ProtoReflect.Descriptor instead.
 func (*GetStateReply) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{7}
+	return file_api_battle_v1_battle_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetStateReply) GetState() string {
@@ -461,7 +531,12 @@ const file_api_battle_v1_battle_proto_rawDesc = "" +
 	"player_ids\x18\x02 \x03(\tR\tplayerIds\x12\x1b\n" +
 	"\tbattle_id\x18\x03 \x01(\tR\bbattleId\"0\n" +
 	"\x11CreateBattleReply\x12\x1b\n" +
-	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"/\n" +
+	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"g\n" +
+	"\x0eAdmitBattleReq\x12\x19\n" +
+	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1d\n" +
+	"\n" +
+	"player_ids\x18\x02 \x03(\tR\tplayerIds\x12\x1b\n" +
+	"\tbattle_id\x18\x03 \x01(\tR\bbattleId\"/\n" +
 	"\x10GetBattleRequest\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"&\n" +
 	"\x0eGetBattleReply\x12\x14\n" +
@@ -493,19 +568,20 @@ func file_api_battle_v1_battle_proto_rawDescGZIP() []byte {
 	return file_api_battle_v1_battle_proto_rawDescData
 }
 
-var file_api_battle_v1_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_api_battle_v1_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_api_battle_v1_battle_proto_goTypes = []any{
 	(*CreateBattleRequest)(nil), // 0: battle.v1.CreateBattleRequest
 	(*CreateBattleReply)(nil),   // 1: battle.v1.CreateBattleReply
-	(*GetBattleRequest)(nil),    // 2: battle.v1.GetBattleRequest
-	(*GetBattleReply)(nil),      // 3: battle.v1.GetBattleReply
-	(*PlayerResult)(nil),        // 4: battle.v1.PlayerResult
-	(*BattleSettledEvent)(nil),  // 5: battle.v1.BattleSettledEvent
-	(*GetStateReq)(nil),         // 6: battle.v1.GetStateReq
-	(*GetStateReply)(nil),       // 7: battle.v1.GetStateReply
+	(*AdmitBattleReq)(nil),      // 2: battle.v1.AdmitBattleReq
+	(*GetBattleRequest)(nil),    // 3: battle.v1.GetBattleRequest
+	(*GetBattleReply)(nil),      // 4: battle.v1.GetBattleReply
+	(*PlayerResult)(nil),        // 5: battle.v1.PlayerResult
+	(*BattleSettledEvent)(nil),  // 6: battle.v1.BattleSettledEvent
+	(*GetStateReq)(nil),         // 7: battle.v1.GetStateReq
+	(*GetStateReply)(nil),       // 8: battle.v1.GetStateReply
 }
 var file_api_battle_v1_battle_proto_depIdxs = []int32{
-	4, // 0: battle.v1.BattleSettledEvent.players:type_name -> battle.v1.PlayerResult
+	5, // 0: battle.v1.BattleSettledEvent.players:type_name -> battle.v1.PlayerResult
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -524,7 +600,7 @@ func file_api_battle_v1_battle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_battle_v1_battle_proto_rawDesc), len(file_api_battle_v1_battle_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

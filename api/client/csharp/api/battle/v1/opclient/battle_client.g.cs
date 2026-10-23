@@ -33,6 +33,20 @@ public sealed class CreateBattleReply
 
 }
 
+/// <summary>AdmitBattleReq DTO（protojson JSON 语义）。</summary>
+public sealed class AdmitBattleReq
+{
+    [JsonPropertyName("matchId")]
+    public string? MatchId { get; set; }
+
+    [JsonPropertyName("playerIds")]
+    public List<string>? PlayerIds { get; set; }
+
+    [JsonPropertyName("battleId")]
+    public string? BattleId { get; set; }
+
+}
+
 /// <summary>GetBattleRequest DTO（protojson JSON 语义）。</summary>
 public sealed class GetBattleRequest
 {

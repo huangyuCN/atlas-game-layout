@@ -23,8 +23,7 @@ type recordSink struct {
 
 	mu        sync.Mutex
 	published []startedCall
-	started   []startedCall
-	issued    []string
+	admitted  []startedCall
 }
 
 type startedCall struct {
@@ -54,19 +53,12 @@ func (s *recordSink) PublishFailed(context.Context, string, []string, matcherv1.
 	return nil
 }
 
-func (s *recordSink) Start(_ context.Context, battleID, matchID string, playerIDs []string) error {
+// Admit 实现 biz.BattleAdmitter：e2e 用固定桩回执（真开局+出票链路在 battle 侧单测覆盖；
+// 此处只关心「每局一次入场调用」与成局事件/会话链路）。
+func (s *recordSink) Admit(_ context.Context, battleID, matchID string, playerIDs []string) (*battlev1.IssueEntryTicketReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.started = append(s.started, startedCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
-	return nil
-}
-
-// IssueEntryTicket 实现 biz.BattleTicketIssuer：e2e 用固定桩回执
-// （真出票链路在 battle 侧单测覆盖；此处只关心成局事件与会话链路）。
-func (s *recordSink) IssueEntryTicket(_ context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.issued = append(s.issued, battleID)
+	s.admitted = append(s.admitted, startedCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
 	return &battlev1.IssueEntryTicketReply{Endpoints: itEdgeEndpoints}, nil
 }
 
@@ -143,31 +135,31 @@ func TestE2EMatcherQueue(t *testing.T) {
 		t.Fatal("未收到成局事件")
 	}
 
-	// 断言开局调用可观测且恰好一次（成局去重：同局双 ticket 只触发一次）。
+	// 断言入场调用（开局+出票合并）可观测且恰好一次（成局去重：同局双 ticket 只触发一次）。
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		sink.mu.Lock()
-		n := len(sink.started)
+		n := len(sink.admitted)
 		sink.mu.Unlock()
 		if n >= 1 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("开局调用未触发")
+			t.Fatal("入场调用未触发")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	// 留出第二个 ticket 事件的处理窗口，断言无重复。
 	time.Sleep(300 * time.Millisecond)
 	sink.mu.Lock()
-	startedN, publishedN := len(sink.started), len(sink.published)
-	call := sink.started[0]
+	admittedN, publishedN := len(sink.admitted), len(sink.published)
+	call := sink.admitted[0]
 	sink.mu.Unlock()
-	if startedN != 1 || publishedN != 1 {
-		t.Fatalf("成局应恰好一次：开局 %d 次、发布 %d 次（去重失效）", startedN, publishedN)
+	if admittedN != 1 || publishedN != 1 {
+		t.Fatalf("成局应恰好一次：入场 %d 次、发布 %d 次（去重失效）", admittedN, publishedN)
 	}
 	if call.matchID == "" || len(call.playerIDs) != 2 {
-		t.Fatalf("开局调用不符: %+v", call)
+		t.Fatalf("入场调用不符: %+v", call)
 	}
 	// 事件总线同样只收到一条。
 	select {

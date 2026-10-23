@@ -8,7 +8,8 @@ package battle.v1;
 option go_package = "github.com/huangyuCN/atlas-game-layout/api/battle/v1;battlev1";
 
 
-// CreateBattleRequest 开局：matcher 成局后调用。
+// CreateBattleRequest 开局登记参战名单（管理面/测试与既有契约保留；
+// matcher 成局后的入场走 Admit——开局与出票合并，见下）。
 message CreateBattleRequest {
   string match_id = 1;
   repeated string player_ids = 2;
@@ -20,6 +21,21 @@ message CreateBattleRequest {
 
 message CreateBattleReply {
   string battle_id = 1;
+}
+
+// AdmitBattleReq 开局+出票请求：matcher 成局后的**唯一**入场调用
+//（把原来「懒激活 battle actor 的 CreateBattle → 再 IssueEntryTicket」两跳合并成一跳）。
+//
+// 原子性：参战名单与票在**同一次** actor 调用里产生——签票失败即不登记任何玩家，
+// 故不会留下「有名单无票」；票只随成功回执下发，故不会留下「有票无名单」。
+// 幂等：同一 battle_id 重复调用原样回执首次结果（名单不翻倍、票不重签、过期时刻不变），
+// 调用方超时重试安全。
+message AdmitBattleReq {
+  string match_id = 1;
+  repeated string player_ids = 2;
+  // battle_id 是目标战斗标识（actor key）：rpc 面按 service 的 uid_field 寻址
+  // battle:<battle_id>，属主节点内由该 actor 处理本次开局与出票。
+  string battle_id = 3;
 }
 
 // GetBattleRequest/Reply 战斗状态查询。

@@ -20,38 +20,59 @@ type MatcherService interface {
 	QueryMatch(ctx context.Context, req *matcherv1.QueryMatchRequest) (*matcherv1.QueryMatchReply, error)
 }
 
-// BattleStarter 是对局开局接口：成局后懒激活战斗 actor（battle:<battleID>）。
-// matcher 只发起调用与可观测（M7 battle 服务接入后由真实 actor 承接）。
-type BattleStarter interface {
-	// Start 开局：向战斗 actor 发起开局请求（失败不阻断出票尝试——
-	// 未开局时按空名单出票会失败，成局事件随之不下发）。
-	Start(ctx context.Context, battleID, matchID string, playerIDs []string) error
-}
-
-// BattleTicketIssuer 是入场票据签发接口：开局后按对局取票（battle 侧逐人签票）。
-// 票据是直连的身份凭据，只能随成局推送先于连接到达客户端（规格 §5）。
-type BattleTicketIssuer interface {
-	// IssueEntryTicket 取票：回执含接入层地址与 {player_id → ticket} 名单；
-	// 失败时不发成局事件（避免下发一张连不上的局）。
-	IssueEntryTicket(ctx context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error)
+// BattleAdmitter 是入场合并接口：**一次**跨进程 RPC 内完成「开局（懒激活对局 actor +
+// 登记参战名单）」与「出票」。
+//
+// 为什么合并（12288 入场崩塌的根因）：过去每局串行发两次跨进程 RPC（CreateBattle →
+// IssueEntryTicket），万级并发下尾延迟叠加，任一超时即「既无票也无成局事件」，玩家只能空等；
+// 合并后名单与票在同一次调用里原子产生，每局只付一次跨进程往返。
+type BattleAdmitter interface {
+	// Admit 开局+出票：回执含接入层地址与 {player_id → ticket} 名单。
+	// 原子性：失败时名单与票都不产生（battle 侧签票失败不登记名单）；
+	// 幂等：同一局重复调用不重复出票（回执与首次一致）。
+	Admit(ctx context.Context, battleID, matchID string, playerIDs []string) (*battlev1.IssueEntryTicketReply, error)
 }
 
 // MatchEventPublisher 是成局/失败事件发布接口（nats 总线）。
 type MatchEventPublisher interface {
-	// PublishStarted 发布成局事件（battle 已创建且票据已签发）。
-	// tickets 是 battle 的出票回执（接入层地址 + 逐人票据），原样进事件。
+	// PublishStarted 发布成局事件（battle 已开局且票据已签发）。
+	// tickets 是 battle 的入场回执（接入层地址 + 逐人票据），原样进事件。
 	PublishStarted(ctx context.Context, battleID, matchID string, playerIDs []string, tickets *battlev1.IssueEntryTicketReply) error
 	// PublishFailed 发布失败事件（超时/取消/处置失败）。
 	// ticketID 是失败的票据 ID（未成局故无对局 ID，事件 match_id 为空）。
 	PublishFailed(ctx context.Context, ticketID string, playerIDs []string, reason matcherv1.MatchFailReason) error
 }
 
-// MatchEventSink 是成局观察方接口（事件发布、开局调用与取票的组合，runtime 监听用）。
+// MatchEventSink 是成局观察方接口（事件发布 + 入场合并调用的组合，runtime 监听用）。
 type MatchEventSink interface {
 	MatchEventPublisher
-	BattleStarter
-	BattleTicketIssuer
+	BattleAdmitter
 }
+
+// Admission 是成局处置策略：有界并发扇出 + 单局超时 + 等槽预算。
+// 三者的零值由 handler 取缺省（见 DefaultAdmit* 常量）——**0 不得解释为无限并发**。
+type Admission struct {
+	// Concurrency 是同时进行的「开局+出票」上限（跨进程 RPC 的扇出上限，背压来源）。
+	Concurrency int
+	// Timeout 是单局「开局+出票」的预算（含 RPC 往返，超时即失败处置）。
+	Timeout time.Duration
+	// Wait 是拿不到并发槽时的等槽预算：超时按失败处置（回池 + 失败事件），不无限排队。
+	Wait time.Duration
+}
+
+// 成局处置的缺省参数。
+//
+// 并发 200 的依据：单局成功路径是两次状态查询之外的**一次**单程 RPC（毫秒级），
+// 4.3k 局在 200 并发下 ≈ 单局 p99 的 20 余倍即可排空，同时把 battle 侧激活/登记压力
+// 限制在可承载范围内（12288 入场时曾因无界并发把 battle 队列压到 30s 超时）。
+const (
+	// DefaultAdmitConcurrency 是同时进行的成局处置数上限。
+	DefaultAdmitConcurrency = 200
+	// DefaultAdmitTimeout 是单局开局+出票的超时。
+	DefaultAdmitTimeout = 3 * time.Second
+	// DefaultAdmitWait 是等并发槽的预算。
+	DefaultAdmitWait = 5 * time.Second
+)
 
 // MatchSettleDeduper 是成局结算去重接口：
 // matchmaker 对同局每张 ticket 各发一次 TicketCompleted，
@@ -95,8 +116,12 @@ type PlayerTicketMapper interface {
 	SetMatch(ctx context.Context, playerID, matchID string, ttl time.Duration) error
 	// GetMatch 读取玩家对局关联（不存在返回空串）。
 	GetMatch(ctx context.Context, playerID string) (string, error)
+	// DelMatch 删除玩家对局关联（入场失败时撤掉未成立的关联）。
+	DelMatch(ctx context.Context, playerID string) error
 	// SetBattle 关联玩家已成局的战斗（开局推送丢失后重登恢复加入用）。
 	SetBattle(ctx context.Context, playerID, battleID string, ttl time.Duration) error
 	// GetBattle 读取玩家战斗关联（不存在返回空串）。
 	GetBattle(ctx context.Context, playerID string) (string, error)
+	// DelBattle 删除玩家战斗关联（入场失败时撤掉未成立的关联）。
+	DelBattle(ctx context.Context, playerID string) error
 }

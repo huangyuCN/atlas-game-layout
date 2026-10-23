@@ -239,6 +239,9 @@ type BattleActor struct {
 	players    map[string]struct{} // 参战玩家
 	sessionPID types.PID           // lockstep 会话 PID（每局唯一 type 保证 sim 隔离）
 	settled    bool
+	// admission 是**开局即出票**的首次回执（Admit 写入一次后只读）：
+	// 重复调用与重取票都原样返回它，保证「同一局不重复出票」（票密文/过期时刻不漂移）。
+	admission *battlev1.IssueEntryTicketReply
 
 	offline   map[string]core.CancelFunc // 参战者 → 掉线计时取消句柄（nil = 已打点但无计时，规格 §9.2）
 	migration bool                       // 迁移窗口：暂停掉线计时（规格 §9.6）

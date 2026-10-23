@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	battlev1rpc "github.com/huangyuCN/atlas-game-layout/api/battle/v1/rpc"
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
@@ -16,6 +17,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
 	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
 	"github.com/huangyuCN/atlas/matchmaker"
+	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/registry"
 	natsgo "github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
@@ -57,8 +59,8 @@ func NewBattleClient(conn *serverutil.LazyConn) battlev1rpc.BattleServiceClient 
 }
 
 // NewMatchmakerRuntime 装配撮合运行时（redis 后端 + 等级相近规则）。
-func NewMatchmakerRuntime(cli *pkredis.Client) (*matchredis.Runtime, error) {
-	rt, err := infra.NewMatchmakerRuntime(cli)
+func NewMatchmakerRuntime(cfg *conf.Bootstrap, cli *pkredis.Client) (*matchredis.Runtime, error) {
+	rt, err := infra.NewMatchmakerRuntime(cli, durationOf(cfg.GetMatchmaker().GetRequestTimeoutMs()))
 	if err != nil {
 		return nil, fmt.Errorf("app: 构造撮合运行时失败: %w", err)
 	}
@@ -68,7 +70,7 @@ func NewMatchmakerRuntime(cli *pkredis.Client) (*matchredis.Runtime, error) {
 // serviceOf 暴露撮合运行时对外 API（grpc handler 依赖接口形态）。
 func serviceOf(rt *matchredis.Runtime) matchmaker.Service { return rt.Service }
 
-// newSink 装配成局观察方默认组合（nats 发布 + 开局调用）；
+// newSink 装配成局观察方默认组合（nats 发布 + 入场调用）；
 // 测试注入经 fx.Decorate 覆盖本提供器输出（见 assemble）。
 func newSink(pub *pkgnats.Publisher, cli battlev1rpc.BattleServiceClient) biz.MatchEventSink {
 	return infra.NewSink(pub, cli)
@@ -83,9 +85,10 @@ func NewMatchmakerParty(svc matchmaker.Service, cli *pkredis.Client) matchmaker.
 }
 
 // newMatcherDeps 聚合撮合 handler 依赖（fx 装配）。
-func newMatcherDeps(svc matchmaker.Service, party matchmaker.Party,
+func newMatcherDeps(cfg *conf.Bootstrap, meter metrics.Collector, svc matchmaker.Service, party matchmaker.Party,
 	mapper biz.PlayerTicketMapper, partyMapper biz.PartyQueueMapper,
 	sink biz.MatchEventSink, deduper biz.MatchSettleDeduper, roster biz.PartyRosterPublisher) handler.MatcherDeps {
+	m := cfg.GetMatchmaker()
 	return handler.MatcherDeps{
 		Svc:         svc,
 		Party:       party,
@@ -94,5 +97,20 @@ func newMatcherDeps(svc matchmaker.Service, party matchmaker.Party,
 		Sink:        sink,
 		Deduper:     deduper,
 		Roster:      roster,
+		Metrics:     meter,
+		// 0 值一律由 handler 取缺省（见 biz.DefaultAdmit*），配置层不重复写死缺省值。
+		Admission: biz.Admission{
+			Concurrency: int(m.GetAdmitConcurrency()),
+			Timeout:     durationOf(m.GetAdmitTimeoutMs()),
+			Wait:        durationOf(m.GetAdmitWaitMs()),
+		},
 	}
+}
+
+// durationOf 把配置里的毫秒整数转成时长；≤0 返回 0，交由消费方取缺省。
+func durationOf(ms int64) time.Duration {
+	if ms <= 0 {
+		return 0
+	}
+	return time.Duration(ms) * time.Millisecond
 }

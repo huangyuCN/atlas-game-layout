@@ -13,11 +13,15 @@ import (
 	"github.com/huangyuCN/atlas/lockstep"
 )
 
-// Create 实现 battlev1actor.BattleService：开局登记参战玩家（matcher 成局后调用）。
-func (b *BattleActor) Create(ctx core.ActorContext, req *battlev1.CreateBattleRequest) (*battlev1.CreateBattleReply, error) {
+// Create 实现 battlev1actor.BattleService：仅登记参战名单（管理面/测试与既有契约保留）。
+// matcher 成局后的入场走 Admit（开局+出票合并为一次调用，见 battle_admit.go）；
+// 本方法不签票、不改已签发的票面——重复登记幂等（集合语义）。
+func (b *BattleActor) Create(_ core.ActorContext, req *battlev1.CreateBattleRequest) (*battlev1.CreateBattleReply, error) {
 	b.matchID = req.GetMatchId()
 	for _, p := range req.GetPlayerIds() {
-		b.players[p] = struct{}{}
+		if p != "" {
+			b.players[p] = struct{}{}
+		}
 	}
 	return &battlev1.CreateBattleReply{BattleId: b.battleID}, nil
 }

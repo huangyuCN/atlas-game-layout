@@ -17,6 +17,7 @@ import (
 // BattleServiceInternal 是 BattleService 的服务面（access=INTERNAL，服务间经 gRPC 调用）。
 type BattleServiceInternal interface {
 	Create(ctx context.Context, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
+	Admit(ctx context.Context, req *v1.AdmitBattleReq) (*v1.IssueEntryTicketReply, error)
 	GetState(ctx context.Context, req *v1.GetStateReq) (*v1.GetStateReply, error)
 	IssueEntryTicket(ctx context.Context, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error)
 }
@@ -33,6 +34,7 @@ var battleServiceInternalDesc = grpc.ServiceDesc{
 	HandlerType: (*BattleServiceInternal)(nil),
 	Methods: []grpc.MethodDesc{
 		{MethodName: "Create", Handler: handleBattleServiceInternalCreate},
+		{MethodName: "Admit", Handler: handleBattleServiceInternalAdmit},
 		{MethodName: "GetState", Handler: handleBattleServiceInternalGetState},
 		{MethodName: "IssueEntryTicket", Handler: handleBattleServiceInternalIssueEntryTicket},
 	},
@@ -51,6 +53,21 @@ func handleBattleServiceInternalCreate(srv any, ctx context.Context, dec func(an
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/battle.v1.BattleService/Create"}
 	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
 		return srv.(BattleServiceInternal).Create(ctx, req.(*v1.CreateBattleRequest))
+	})
+}
+
+// handleBattleServiceInternalAdmit 解包请求并经拦截器调用本面实现。
+func handleBattleServiceInternalAdmit(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(v1.AdmitBattleReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BattleServiceInternal).Admit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/battle.v1.BattleService/Admit"}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(BattleServiceInternal).Admit(ctx, req.(*v1.AdmitBattleReq))
 	})
 }
 
@@ -105,6 +122,16 @@ func (a *battleServiceInternal) Create(ctx context.Context, req *v1.CreateBattle
 		return nil, err
 	}
 	return opcall.Reply[*v1.CreateBattleReply](entry, rep)
+}
+
+// Admit 投递到目标 actor 并归一化回执。
+func (a *battleServiceInternal) Admit(ctx context.Context, req *v1.AdmitBattleReq) (*v1.IssueEntryTicketReply, error) {
+	entry := v1.BattleServiceRouteTable["/battle.v1.BattleService/Admit"]
+	rep, err := opcall.CallFromContext(ctx, a.rt, entry, req, a.opts.SendOptions...)
+	if err != nil {
+		return nil, err
+	}
+	return opcall.Reply[*v1.IssueEntryTicketReply](entry, rep)
 }
 
 // GetState 投递到目标 actor 并归一化回执。

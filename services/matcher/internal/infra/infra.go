@@ -91,6 +91,16 @@ func (m *RedisPlayerTicketMapper) GetBattle(ctx context.Context, playerID string
 	return v, err
 }
 
+// DelMatch 实现 biz.PlayerTicketMapper（入场失败时撤掉未成立的对局关联）。
+func (m *RedisPlayerTicketMapper) DelMatch(ctx context.Context, playerID string) error {
+	return m.cli.Raw().Del(ctx, m.cli.Keys().MatchResult(playerID)).Err()
+}
+
+// DelBattle 实现 biz.PlayerTicketMapper（入场失败时撤掉未成立的战斗关联）。
+func (m *RedisPlayerTicketMapper) DelBattle(ctx context.Context, playerID string) error {
+	return m.cli.Raw().Del(ctx, m.cli.Keys().MatchBattle(playerID)).Err()
+}
+
 // RedisPartyQueueMapper 是队伍→整队票映射的 redis 实现。
 type RedisPartyQueueMapper struct {
 	cli *pkredis.Client
@@ -174,48 +184,52 @@ func (p *NatsEventPublisher) PublishRoster(ctx context.Context, partyID, leaderI
 	return p.pub.Publish(ctx, p.pub.Topics().PartyRoster(), payload)
 }
 
-// BattleGRPCStarter 是 biz.BattleStarter 的实现：
-// 经 battle 的 internal 面 gRPC 客户端发起开局调用（目标 battle actor 由 battle 侧
-// 按请求里的 battle_id 解析并懒激活——matcher 不再持有 actor 集群运行时）。
-type BattleGRPCStarter struct {
+// BattleGRPCAdmitter 是 biz.BattleAdmitter 的实现：经 battle 的 internal 面 gRPC 客户端
+// 发起**一次**入场调用（开局+出票合并）。目标 battle actor 由 battle 侧按请求里的
+// battle_id 解析并懒激活——matcher 不持有 actor 集群运行时、也不持票据密钥。
+type BattleGRPCAdmitter struct {
 	cli battlev1rpc.BattleServiceClient
 }
 
-// NewBattleGRPCStarter 构造开局调用器。
-func NewBattleGRPCStarter(cli battlev1rpc.BattleServiceClient) *BattleGRPCStarter {
-	return &BattleGRPCStarter{cli: cli}
+// NewBattleGRPCAdmitter 构造入场调用器。
+func NewBattleGRPCAdmitter(cli battlev1rpc.BattleServiceClient) *BattleGRPCAdmitter {
+	return &BattleGRPCAdmitter{cli: cli}
 }
 
-// Start 实现 biz.BattleStarter：经类型化 gRPC 客户端开局（CreateBattleRequest.BattleId 即寻址字段）。
+// Admit 实现 biz.BattleAdmitter：一次 RPC 内完成开局与出票（AdmitBattleReq.BattleId 即寻址字段）。
 // 业务错误原样透传（远端 status 已在客户端拦截器还原为结构化错误，reason 可判定）。
-func (s *BattleGRPCStarter) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
-	if _, err := s.cli.Create(ctx, &battlev1.CreateBattleRequest{
+func (a *BattleGRPCAdmitter) Admit(ctx context.Context, battleID, matchID string, playerIDs []string) (*battlev1.IssueEntryTicketReply, error) {
+	reply, err := a.cli.Admit(ctx, &battlev1.AdmitBattleReq{
 		MatchId:   matchID,
 		PlayerIds: playerIDs,
 		BattleId:  battleID, // 目标身份随请求携带：rpc 面按 uid_field 寻址
-	}); err != nil {
-		return fmt.Errorf("infra: 开局调用失败: %w", err)
-	}
-	return nil
-}
-
-// IssueEntryTicket 实现 biz.BattleTicketIssuer：经类型化 gRPC 客户端按对局取票
-// （IssueEntryTicketReq.BattleId 即寻址字段；出票在 battle actor 内完成，matcher 不持密钥）。
-func (s *BattleGRPCStarter) IssueEntryTicket(ctx context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
-	reply, err := s.cli.IssueEntryTicket(ctx, &battlev1.IssueEntryTicketReq{BattleId: battleID})
+	})
 	if err != nil {
-		return nil, fmt.Errorf("infra: 取票调用失败: %w", err)
+		return nil, fmt.Errorf("infra: 入场调用失败（开局+出票）: %w", err)
 	}
 	return reply, nil
 }
 
+// DefaultRequestTimeout 是单张票的最长等待时间（缺省 30s）：到点即按既有语义给出
+// 确定性失败回执（引擎 TicketTimedOut → matcher 发 MATCH_FAIL_REASON_TIMEOUT 失败事件）。
+//
+// 取 30s 的理由（诊断 §5 建议 4「匹配尾快速回执」）：本轮 12288 入场有 3608 人未成局，
+// 旧值 2min 大于客户端耐心（142s 时 12288 人已全部 CancelMatch）——等于没有回执；
+// 30s 让「超过阈值仍在池中」的玩家在放弃之前拿到终态，客户端据此自行重排。
+// 复用既有回执语义是关键取舍：不新增事件类型、不加协议字段、不改客户端 SDK。
+const DefaultRequestTimeout = 30 * time.Second
+
 // NewMatchmakerRuntime 装配 matchmaker redis 运行时
 // （等级相近灵活组队规则集 + 本地 Placement）。
-func NewMatchmakerRuntime(cli *pkredis.Client) (*matchredis.Runtime, error) {
+// requestTimeout 是单张票的最长等待时间（≤0 取 DefaultRequestTimeout）。
+func NewMatchmakerRuntime(cli *pkredis.Client, requestTimeout time.Duration) (*matchredis.Runtime, error) {
+	if requestTimeout <= 0 {
+		requestTimeout = DefaultRequestTimeout
+	}
 	reg := matchmaker.Registry{
 		biz.DefaultMatchmakerName: {
 			Name:              biz.DefaultMatchmakerName,
-			RequestTimeout:    2 * time.Minute,
+			RequestTimeout:    requestTimeout,
 			AcceptanceTimeout: 0, // 跳过确认阶段
 			RequeuePolicy:     matchmaker.RequeueAll,
 			MatchFunction:     matchfunc.FlexTeams{MaxGap: DefaultMaxLevelGap, MaxSide: DefaultMaxSide},
@@ -234,8 +248,8 @@ func NewMatchmakerParty(svc matchmaker.Service, cli *pkredis.Client) matchmaker.
 		matchredis.WithPrefix(cli.Keys().MatchmakerPrefix()))
 }
 
-// LocalPlacement 是占位 Placement：对局实例的分配由开局调用
-// （BattleStarter 经 actor Ask 懒激活战斗 actor）承担，此处直接回执分配结果。
+// LocalPlacement 是占位 Placement：对局实例的分配由入场调用
+// （Admit：battle 侧按 battle_id 懒激活战斗 actor）承担，此处直接回执分配结果。
 type LocalPlacement struct{}
 
 // Place 实现 matchmaker.PlacementQueue。
@@ -254,21 +268,18 @@ func (LocalPlacement) Place(_ context.Context, m matchmaker.Match) (matchmaker.A
 	}, nil
 }
 
-// Sink 是成局观察方的默认组合（nats 发布 + battle 开局调用与取票）。
+// Sink 是成局观察方的默认组合（nats 发布 + battle 入场调用）。
 // server 装配与可编程装配共用同一实现。
 type Sink struct {
 	publisher biz.MatchEventPublisher
-	starter   biz.BattleStarter
-	issuer    biz.BattleTicketIssuer
+	admitter  biz.BattleAdmitter
 }
 
-// NewSink 构造默认成局观察方（开局与取票都由 battle internal 面客户端承担）。
+// NewSink 构造默认成局观察方（入场调用由 battle internal 面客户端承担）。
 func NewSink(pub *pkgnats.Publisher, cli battlev1rpc.BattleServiceClient) *Sink {
-	battle := NewBattleGRPCStarter(cli)
 	return &Sink{
 		publisher: NewNatsEventPublisher(pub),
-		starter:   battle,
-		issuer:    battle,
+		admitter:  NewBattleGRPCAdmitter(cli),
 	}
 }
 
@@ -282,14 +293,9 @@ func (s *Sink) PublishFailed(ctx context.Context, ticketID string, playerIDs []s
 	return s.publisher.PublishFailed(ctx, ticketID, playerIDs, reason)
 }
 
-// Start 实现 biz.BattleStarter：转发开局调用到内部 starter。
-func (s *Sink) Start(ctx context.Context, battleID, matchID string, playerIDs []string) error {
-	return s.starter.Start(ctx, battleID, matchID, playerIDs)
-}
-
-// IssueEntryTicket 实现 biz.BattleTicketIssuer：转发取票调用到内部取票端口。
-func (s *Sink) IssueEntryTicket(ctx context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
-	return s.issuer.IssueEntryTicket(ctx, battleID)
+// Admit 实现 biz.BattleAdmitter：转发入场调用（开局+出票，一次 RPC）到 battle internal 面。
+func (s *Sink) Admit(ctx context.Context, battleID, matchID string, playerIDs []string) (*battlev1.IssueEntryTicketReply, error) {
+	return s.admitter.Admit(ctx, battleID, matchID, playerIDs)
 }
 
 // RedisSettleDeduper 是成局结算去重的 redis 实现（SETNX 幂等，跨实例安全）。
@@ -315,8 +321,7 @@ func (d *RedisSettleDeduper) TrySettle(ctx context.Context, matchID string, ttl 
 var (
 	_ biz.PlayerTicketMapper    = (*RedisPlayerTicketMapper)(nil)
 	_ biz.MatchEventPublisher   = (*NatsEventPublisher)(nil)
-	_ biz.BattleStarter         = (*BattleGRPCStarter)(nil)
-	_ biz.BattleTicketIssuer    = (*BattleGRPCStarter)(nil)
+	_ biz.BattleAdmitter        = (*BattleGRPCAdmitter)(nil)
 	_ biz.MatchEventSink        = (*Sink)(nil)
 	_ biz.MatchSettleDeduper    = (*RedisSettleDeduper)(nil)
 	_ matchmaker.PlacementQueue = LocalPlacement{}

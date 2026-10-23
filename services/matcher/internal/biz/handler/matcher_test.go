@@ -13,6 +13,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/matchmaker/memory"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/matchmaker"
+	"github.com/huangyuCN/atlas/metrics"
 )
 
 // fakeService 是撮合运行时 API 的假实现。
@@ -22,6 +23,8 @@ type fakeService struct {
 	nextID  int
 	events  map[string]chan matchmaker.TicketEvent
 	cancels []string
+	// starts 记录入队请求（回池用例断言「玩家被重新入池」）。
+	starts []matchmaker.StartRequest
 }
 
 func newFakeService() *fakeService {
@@ -36,7 +39,11 @@ func (s *fakeService) StartMatchmaking(_ context.Context, req matchmaker.StartRe
 	defer s.mu.Unlock()
 	s.nextID++
 	id := fmtID(s.nextID)
-	s.tickets[id] = matchmaker.Ticket{ID: id, Players: req.Players, Matchmaker: req.Matchmaker}
+	s.starts = append(s.starts, req)
+	s.tickets[id] = matchmaker.Ticket{
+		ID: id, Players: req.Players, Matchmaker: req.Matchmaker,
+		PartyID: req.PartyID, Extensions: req.Extensions,
+	}
 	s.events[id] = make(chan matchmaker.TicketEvent, 4)
 	return id, nil
 }
@@ -144,6 +151,13 @@ func (m *fakeMapper) GetMatch(_ context.Context, playerID string) (string, error
 	return m.matches[playerID], nil
 }
 
+func (m *fakeMapper) DelMatch(_ context.Context, playerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.matches, playerID)
+	return nil
+}
+
 func (m *fakeMapper) SetBattle(_ context.Context, playerID, battleID string, _ time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -160,18 +174,29 @@ func (m *fakeMapper) GetBattle(_ context.Context, playerID string) (string, erro
 	return m.battles[playerID], nil
 }
 
-// fakeSink 是成局观察方的记录实现（发布/开局调用/取票分开记录，seq 记录调用顺序）。
+func (m *fakeMapper) DelBattle(_ context.Context, playerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.battles, playerID)
+	return nil
+}
+
+// fakeSink 是成局观察方的记录实现（入场调用/成局事件/失败事件分开记录，seq 记录调用顺序；
+// 同时统计入场调用的并发峰值，供有界扇出用例断言）。
 type fakeSink struct {
 	mu        sync.Mutex
 	seq       []string
 	published []startCall
-	started   []startCall
+	admitted  []startCall
 	failed    []failCall
 	rosters   []rosterCall
-	issued    []string
-	// tickets 是取票回执桩（nil 用最小回执）；issueErr 非空时取票失败。
+	// tickets 是入场回执桩（nil 用最小回执）；admitErr 非空时入场失败。
 	tickets  *battlev1.IssueEntryTicketReply
-	issueErr error
+	admitErr error
+	// block 非空时入场调用阻塞到通道关闭（有界并发与背压用例用）。
+	block chan struct{}
+	// cur/max 是入场调用的当前并发数与峰值（有界断言：峰值 ≤ 并发上限）。
+	cur, max int
 }
 
 type startCall struct {
@@ -200,29 +225,49 @@ func (s *fakeSink) PublishFailed(_ context.Context, ticketID string, _ []string,
 	return nil
 }
 
-func (s *fakeSink) Start(_ context.Context, battleID, matchID string, playerIDs []string) error {
+// Admit 实现 biz.BattleAdmitter：记录入场调用并回放桩回执（同时统计并发峰值）。
+// 每局只调 1 次——「2 跳变 1 跳」在计数维度就是 admitted 的长度。
+func (s *fakeSink) Admit(_ context.Context, battleID, matchID string, playerIDs []string) (*battlev1.IssueEntryTicketReply, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.seq = append(s.seq, "start")
-	s.started = append(s.started, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
-	return nil
+	s.seq = append(s.seq, "admit")
+	s.admitted = append(s.admitted, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
+	s.cur++
+	if s.cur > s.max {
+		s.max = s.cur
+	}
+	err, block, tickets := s.admitErr, s.block, s.tickets
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.cur--
+		s.mu.Unlock()
+	}()
+	if block != nil {
+		<-block
+	}
+	if err != nil {
+		return nil, err
+	}
+	if tickets != nil {
+		return tickets, nil
+	}
+	// 最小回执：按名单逐人给一张不透明票（matcher 不解析票内容，只搬运）。
+	reply := &battlev1.IssueEntryTicketReply{Endpoints: []*battlev1.EdgeEndpoint{
+		{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_WS, Address: "edge.test:7100"},
+	}}
+	for _, playerID := range playerIDs {
+		reply.Tickets = append(reply.Tickets, &battlev1.BattleTicketEntry{
+			PlayerId: playerID, Ticket: []byte("cipher-" + playerID),
+		})
+	}
+	return reply, nil
 }
 
-// IssueEntryTicket 实现 biz.BattleTicketIssuer：记录取票调用并回放桩回执。
-func (s *fakeSink) IssueEntryTicket(_ context.Context, battleID string) (*battlev1.IssueEntryTicketReply, error) {
+// peak 返回入场调用的并发峰值（有界扇出断言用）。
+func (s *fakeSink) peak() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.seq = append(s.seq, "issue")
-	s.issued = append(s.issued, battleID)
-	if s.issueErr != nil {
-		return nil, s.issueErr
-	}
-	if s.tickets != nil {
-		return s.tickets, nil
-	}
-	return &battlev1.IssueEntryTicketReply{Endpoints: []*battlev1.EdgeEndpoint{
-		{Transport: battlev1.EdgeTransport_EDGE_TRANSPORT_WS, Address: "edge.test:7100"},
-	}}, nil
+	return s.max
 }
 
 // PublishRoster 实现 biz.PartyRosterPublisher：名册变更事件记录（party 域测试断言用）。
@@ -281,8 +326,19 @@ func (m *fakePartyMapper) DelPartyTicket(_ context.Context, partyID string) erro
 	return nil
 }
 
+// testHandlerOpts 是测试装配的可选项（有界并发与打点断言用；零值即默认装配）。
+type testHandlerOpts struct {
+	admission biz.Admission
+	meter     metrics.Collector
+}
+
 // newTestHandler 构造测试用 handler（party 用 memory 引擎真实实现）。
 func newTestHandler() (*MatcherHandler, *fakeService, *fakeMapper, *fakeSink) {
+	return newTestHandlerWith(testHandlerOpts{})
+}
+
+// newTestHandlerWith 以给定选项构造测试用 handler。
+func newTestHandlerWith(o testHandlerOpts) (*MatcherHandler, *fakeService, *fakeMapper, *fakeSink) {
 	svc := newFakeService()
 	mapper := newFakeMapper()
 	sink := &fakeSink{}
@@ -295,6 +351,8 @@ func newTestHandler() (*MatcherHandler, *fakeService, *fakeMapper, *fakeSink) {
 		Sink:        sink,
 		Deduper:     newFakeDeduper(),
 		Roster:      sink,
+		Admission:   o.admission,
+		Metrics:     o.meter,
 	})
 	return h, svc, mapper, sink
 }
@@ -410,7 +468,7 @@ func TestWatchCompleted(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		sink.mu.Lock()
-		n := len(sink.started)
+		n := len(sink.admitted)
 		sink.mu.Unlock()
 		if n >= 1 {
 			break
@@ -426,12 +484,12 @@ func TestWatchCompleted(t *testing.T) {
 	if len(sink.published) != 1 {
 		t.Fatalf("成局事件发布次数 = %d, want 1（去重失效）", len(sink.published))
 	}
-	if len(sink.started) != 1 {
-		t.Fatalf("开局调用次数 = %d, want 1（去重失效）", len(sink.started))
+	if len(sink.admitted) != 1 {
+		t.Fatalf("入场调用次数 = %d, want 1（每局 1 跳 + 同局去重）", len(sink.admitted))
 	}
-	call := sink.started[0]
+	call := sink.admitted[0]
 	if call.matchID != "m-1" || len(call.playerIDs) != 2 {
-		t.Fatalf("开局调用不符: %+v", call)
+		t.Fatalf("入场调用不符: %+v", call)
 	}
 	if got, _ := mapper.GetMatch(ctx, "p-1"); got != "m-1" {
 		t.Fatalf("对局关联 = %q, want m-1", got)

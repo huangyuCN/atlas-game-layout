@@ -27,6 +27,7 @@ type BattleService interface {
 	SyncFrames(ctx core.ActorContext, req *v1.SyncFramesReq) (*v1.SyncFramesReply, error)
 	Ping(ctx core.ActorContext, msg *v1.PingReq) error
 	Create(ctx core.ActorContext, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
+	Admit(ctx core.ActorContext, req *v1.AdmitBattleReq) (*v1.IssueEntryTicketReply, error)
 	GetState(ctx core.ActorContext, req *v1.GetStateReq) (*v1.GetStateReply, error)
 	IssueEntryTicket(ctx core.ActorContext, req *v1.IssueEntryTicketReq) (*v1.IssueEntryTicketReply, error)
 }
@@ -48,6 +49,9 @@ func (UnimplementedBattleService) Ping(core.ActorContext, *v1.PingReq) error {
 }
 func (UnimplementedBattleService) Create(core.ActorContext, *v1.CreateBattleRequest) (*v1.CreateBattleReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.Create")
+}
+func (UnimplementedBattleService) Admit(core.ActorContext, *v1.AdmitBattleReq) (*v1.IssueEntryTicketReply, error) {
+	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.Admit")
 }
 func (UnimplementedBattleService) GetState(core.ActorContext, *v1.GetStateReq) (*v1.GetStateReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.GetState")
@@ -76,6 +80,10 @@ var battleServiceDecodeTable = map[string]func([]byte) (proto.Message, error){
 	},
 	"battle.v1.CreateBattleRequest": func(b []byte) (proto.Message, error) {
 		m := new(v1.CreateBattleRequest)
+		return m, proto.Unmarshal(b, m)
+	},
+	"battle.v1.AdmitBattleReq": func(b []byte) (proto.Message, error) {
+		m := new(v1.AdmitBattleReq)
 		return m, proto.Unmarshal(b, m)
 	},
 	"battle.v1.GetStateReq": func(b []byte) (proto.Message, error) {
@@ -119,6 +127,8 @@ func (d *battleServiceDispatch) OnAsk(ctx core.ActorContext, req any) (any, erro
 		return d.impl.SyncFrames(ctx, r)
 	case *v1.CreateBattleRequest:
 		return d.impl.Create(ctx, r)
+	case *v1.AdmitBattleReq:
+		return d.impl.Admit(ctx, r)
 	case *v1.GetStateReq:
 		return d.impl.GetState(ctx, r)
 	case *v1.IssueEntryTicketReq:
@@ -226,6 +236,27 @@ func (c *BattleServiceClusterClient) Create(ctx context.Context, pid types.PID, 
 		return v, nil
 	case []byte:
 		out := new(v1.CreateBattleReply)
+		if err := proto.Unmarshal(v, out); err != nil {
+			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("actor: 不支持的响应类型 %T", rep)
+	}
+}
+
+// Admit 同步请求 Ask；业务错误以 Go error 返回（code/reason 经集群往返保留；
+// 变参透传投递选项——sender/观测头等由调用方按需注入）。
+func (c *BattleServiceClusterClient) Admit(ctx context.Context, pid types.PID, req *v1.AdmitBattleReq, opts ...core.SendOption) (*v1.IssueEntryTicketReply, error) {
+	rep, err := c.inv.Ask(ctx, pid, req, opts...)
+	if err != nil {
+		return nil, err
+	}
+	switch v := rep.(type) {
+	case *v1.IssueEntryTicketReply:
+		return v, nil
+	case []byte:
+		out := new(v1.IssueEntryTicketReply)
 		if err := proto.Unmarshal(v, out); err != nil {
 			return nil, fmt.Errorf("actor: 响应解码失败: %w", err)
 		}
