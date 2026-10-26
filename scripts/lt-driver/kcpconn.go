@@ -49,7 +49,8 @@ type edgeKCPAdapter struct {
 }
 
 // Dial 拨接入层 KCP 面：同一 UDP socket 上先 hello 换 flow-id，再在其上建 KCP 会话。
-// hello 的重试与超时策略与 UDP 面共用（dialHello）：被限流时同样只能靠读超时发现。
+// hello 的重试与超时策略与 UDP 面共用（dialHello）：被限流/票类拒绝时同样只能靠读超时发现；
+// 后端类失败则有 1 字节「暂不可用」回执，走百毫秒级快速重试（见 edgeconn.go 的 udpHello）。
 func (a edgeKCPAdapter) Dial(ctx context.Context) (*edgeKCPConn, error) {
 	udpConn, flowID, err := dialHello(ctx, a.addr, a.ticket, a.hello)
 	if err != nil {

@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -39,21 +40,40 @@ type edgeUDPAdapter struct {
 
 // 数据报面 hello 的缺省重试参数（诊断 §6.6）。
 //
-// 为什么要重试：接入层在限流/拒绝时**不回任何错误**（L4 无应用层回执），客户端只能靠读超时
-// 发现；hello 也只有一发、没有重传。旧参数（3s 超时、不重试）下，1024 条流里被拒的那几百条
-// 各自干等 3s 再重拨，建流窗口因此从 0.015s 膨胀到 30s。改成「300ms 超时 + 150ms 退避重试
-// 3 次」后，一次拒绝的代价降到百毫秒级，建流窗口回到秒级。
+// 为什么要重试：接入层在限流/拒绝时**不回任何错误**，客户端只能靠读超时发现；hello 也只有一发、
+// 没有重传。旧参数（3s 超时、不重试）下，1024 条流里被拒的那几百条各自干等 3s 再重拨，
+// 建流窗口因此从 0.015s 膨胀到 30s。改成「300ms 超时 + 150ms 退避重试 3 次」后，
+// 一次拒绝的代价降到百毫秒级，建流窗口回到秒级。
+//
+// 回执路径（诊断 §6 修法 2）：接入层对「解析失败 / 后端拨号失败」的 hello 会回 1 个字节 0x00
+// （框架 edge.HelloRejectUnavailable），此时**不必**等单次超时，直接按 unavailableBackoff
+// （100–200ms 夹取，缺省 150ms）重试——这把一次瞬时失败从「3s 惩罚 + 重拨」压到百毫秒级，
+// 129 次真实失败就不会再被放大成 4907 次拒绝。
 const (
-	defaultHelloTimeout  = 300 * time.Millisecond
+	// defaultHelloTimeout 是单次 hello 的缺省读超时（旧值 3s 会把一次拒绝放大成秒级等待）。
+	defaultHelloTimeout = 300 * time.Millisecond
+	// defaultHelloAttempts 是缺省的最大尝试次数（含首次）。
 	defaultHelloAttempts = 3
-	defaultHelloBackoff  = 150 * time.Millisecond
+	// defaultHelloBackoff 是普通失败（读超时/网络错误）后的缺省退避。
+	defaultHelloBackoff = 150 * time.Millisecond
+	// defaultHelloUnavailableBackoff 是收到「暂不可用」回执后的缺省重试间隔。
+	defaultHelloUnavailableBackoff = 150 * time.Millisecond
+	// minHelloUnavailableBackoff 是回执重试间隔的下限（夹取窗口下界）：间隔过小等于热循环重试。
+	minHelloUnavailableBackoff = 100 * time.Millisecond
+	// maxHelloUnavailableBackoff 是回执重试间隔的上限（夹取窗口上界）：再大就退化成「等超时」。
+	maxHelloUnavailableBackoff = 200 * time.Millisecond
 )
+
+// errHelloUnavailable 表示本次 hello 收到「暂不可用」回执（后端解析/拨号失败，不是票的问题）。
+var errHelloUnavailable = errors.New("edge: 接入层回了「暂不可用」回执")
 
 // helloPolicy 是数据报面 hello 的重试策略；零值表示全部取缺省。
 type helloPolicy struct {
 	timeout  time.Duration // 单次 hello 的读超时
 	attempts int           // 最多尝试次数（含首次）
 	backoff  time.Duration // 两次尝试之间的退避
+	// unavailableBackoff 是收到「暂不可用」回执后的重试间隔：<= 0 取缺省，超出 [100,200ms] 夹到边界。
+	unavailableBackoff time.Duration
 }
 
 // normalized 回填缺省值并夹住非法值（负数退避按 0 处理）。
@@ -67,7 +87,17 @@ func (h helloPolicy) normalized() helloPolicy {
 	if h.backoff < 0 {
 		h.backoff = 0
 	}
+	h.unavailableBackoff = clampUnavailableBackoff(h.unavailableBackoff)
 	return h
+}
+
+// clampUnavailableBackoff 把回执重试间隔夹进 [100ms, 200ms]（0 取缺省 150ms）：
+// 太短等于热循环重试，太长就退化成「干等超时」，两条都不是回执路径要的效果。
+func clampUnavailableBackoff(d time.Duration) time.Duration {
+	if d <= 0 {
+		return defaultHelloUnavailableBackoff
+	}
+	return min(max(d, minHelloUnavailableBackoff), maxHelloUnavailableBackoff)
 }
 
 // dialHello 拨接入层数据报面并完成 hello 握手，失败按策略重试；返回已换到 flow-id 的 socket。
@@ -91,16 +121,29 @@ func dialHello(ctx context.Context, addr string, ticket []byte, h helloPolicy) (
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, 0, ctxErr
 		}
-		if attempt == h.attempts || h.backoff == 0 {
+		if attempt == h.attempts {
+			break
+		}
+		wait := helloWait(h, err)
+		if wait == 0 {
 			continue
 		}
 		select {
 		case <-ctx.Done():
 			return nil, 0, ctx.Err()
-		case <-time.After(h.backoff):
+		case <-time.After(wait):
 		}
 	}
 	return nil, 0, fmt.Errorf("hello 握手失败（尝试 %d 次，单次超时 %v）: %w", h.attempts, h.timeout, lastErr)
+}
+
+// helloWait 返回本次失败后应等多久再重试：收到「暂不可用」回执走百毫秒级快速重试，
+// 其余失败（读超时/网络错误）沿用常规退避。
+func helloWait(h helloPolicy, err error) time.Duration {
+	if errors.Is(err, errHelloUnavailable) {
+		return h.unavailableBackoff
+	}
+	return h.backoff
 }
 
 // helloOnce 用一条新 socket 做一次 hello（失败即关掉该 socket）。
@@ -135,7 +178,12 @@ func (a edgeUDPAdapter) Dial(ctx context.Context) (*edgeUDPConn, error) {
 	}, nil
 }
 
-// udpHello 在同一 socket 上发 hello 段并读回 flow-id（接入层不回执、只回 8 字节）。
+// udpHello 在同一 socket 上发 hello 段并读一个数据报作为应答：
+//   - 8 字节 → flow-id，握手成功；
+//   - 1 字节 0x00（框架 edge.HelloRejectUnavailable）→ 后端暂不可用，返回 errHelloUnavailable
+//     走百毫秒级快速重试，**不等**单次读超时（旧实现按 8 字节读，会把它当成 flow-id 的前半段
+//     一直等到超时，把一次瞬时失败放大成整段超时的惩罚）；
+//   - 其它长度 → 协议不符（接入层只回这两种）。
 func udpHello(conn *net.UDPConn, ticket []byte, timeout time.Duration) (uint64, error) {
 	if _, err := conn.Write(edge.EncodeHello(ticket)); err != nil {
 		return 0, fmt.Errorf("写 hello 段失败: %w", err)
@@ -143,12 +191,20 @@ func udpHello(conn *net.UDPConn, ticket []byte, timeout time.Duration) (uint64, 
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return 0, err
 	}
+	// 单次 Read 即一个数据报：回执与 flow-id 靠**数据报长度**区分，不能跨包拼读。
 	buf := make([]byte, edge.FlowIDLen)
-	if _, err := readFull(conn, buf); err != nil {
+	n, err := conn.Read(buf)
+	if err != nil {
 		return 0, fmt.Errorf("读 flow-id 失败（接入层可能已拒绝该票）: %w", err)
 	}
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		return 0, err
+	}
+	if edge.IsHelloRejectUnavailable(buf[:n]) {
+		return 0, errHelloUnavailable
+	}
+	if n != edge.FlowIDLen {
+		return 0, fmt.Errorf("hello 应答长度 %d 字节，期望 %d（flow-id）或 1（暂不可用回执）", n, edge.FlowIDLen)
 	}
 	return binary.BigEndian.Uint64(buf), nil
 }
@@ -243,16 +299,3 @@ func (e engineFrameClient) OnNotify(fn func(operation string, payload []byte)) {
 
 // Close 关闭连接（引擎会读循环退出并释放资源）。
 func (e engineFrameClient) Close() error { return e.cli.Close() }
-
-// readFull 读满 len(buf) 字节（io.ReadFull 的本地实现，避免为一处引入 io 依赖）。
-func readFull(conn net.Conn, buf []byte) (int, error) {
-	total := 0
-	for total < len(buf) {
-		n, err := conn.Read(buf[total:])
-		total += n
-		if err != nil {
-			return total, err
-		}
-	}
-	return total, nil
-}

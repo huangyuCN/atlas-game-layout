@@ -147,6 +147,8 @@ func parseFlags() loadRun {
 		"数据报面 hello 单次读超时（接入层拒绝时不回错误，只能靠超时发现；旧值 3s 会把建流窗口放大到几十秒）")
 	helloAttempts := flag.Int("hello-attempts", 3, "数据报面 hello 最大尝试次数（含首次，每次用新 socket）")
 	helloBackoff := flag.Duration("hello-backoff", 150*time.Millisecond, "数据报面 hello 两次尝试之间的退避")
+	helloUnavail := flag.Duration("hello-unavailable-backoff", 150*time.Millisecond,
+		"收到接入层「暂不可用」回执后的重试间隔（夹到 100–200ms；回执只表示后端暂不可用，不必等满单次超时）")
 	queueConc := flag.Int("queue-concurrency", 512, "入池（EnterMatchQueue）并发度：单票 RTT 110–200ms，靠并发盖出速率（上限 2048）")
 	prefill := flag.Int("prefill", 0, "预灌池票数：先以 -queue-concurrency 把 N 张票灌进池、再开匹配（0 = 不预灌）")
 	prefillSettle := flag.Duration("prefill-settle", 2*time.Second, "预灌后静默时长：让池子积起来再开匹配")
@@ -180,7 +182,10 @@ func parseFlags() loadRun {
 		battleWS: *battleWS, battleUDP: *battleUDP,
 		queue: qc,
 		pump:  pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
-		hello: helloPolicy{timeout: *helloTimeout, attempts: *helloAttempts, backoff: *helloBackoff},
+		hello: helloPolicy{
+			timeout: *helloTimeout, attempts: *helloAttempts, backoff: *helloBackoff,
+			unavailableBackoff: *helloUnavail,
+		},
 	}
 }
 
