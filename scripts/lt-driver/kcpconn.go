@@ -43,28 +43,16 @@ type edgeKCPConn struct {
 
 // edgeKCPAdapter 实现 engine.ClientAdapter[*edgeKCPConn]：拨号 = 接入层 hello + 建 KCP 会话。
 type edgeKCPAdapter struct {
-	addr   string        // 接入层 KCP 面地址（host:port）
-	ticket []byte        // 票据密文（hello 段载荷）
-	hello  time.Duration // hello 握手读超时
+	addr   string      // 接入层 KCP 面地址（host:port）
+	ticket []byte      // 票据密文（hello 段载荷）
+	hello  helloPolicy // hello 握手重试策略（单次超时 / 尝试次数 / 退避，见 edgeconn.go）
 }
 
 // Dial 拨接入层 KCP 面：同一 UDP socket 上先 hello 换 flow-id，再在其上建 KCP 会话。
+// hello 的重试与超时策略与 UDP 面共用（dialHello）：被限流时同样只能靠读超时发现。
 func (a edgeKCPAdapter) Dial(ctx context.Context) (*edgeKCPConn, error) {
-	raddr, err := net.ResolveUDPAddr("udp", a.addr)
+	udpConn, flowID, err := dialHello(ctx, a.addr, a.ticket, a.hello)
 	if err != nil {
-		return nil, fmt.Errorf("解析接入层 KCP 地址 %s 失败: %w", a.addr, err)
-	}
-	udpConn, err := net.DialUDP("udp", nil, raddr)
-	if err != nil {
-		return nil, fmt.Errorf("拨接入层 KCP %s 失败: %w", a.addr, err)
-	}
-	if err := ctx.Err(); err != nil {
-		_ = udpConn.Close()
-		return nil, err
-	}
-	flowID, err := udpHello(udpConn, a.ticket, a.hello)
-	if err != nil {
-		_ = udpConn.Close()
 		return nil, err
 	}
 	pc := &flowPacketConn{PacketConn: datagramConn{conn: udpConn}, flowID: flowID}
@@ -133,9 +121,9 @@ func (a edgeKCPAdapter) RemoteAddr(c *edgeKCPConn) string {
 }
 
 // dialEdgeKCP 建立一条经接入层 KCP 面的帧连接（票据同时进 hello 段与逐帧会话槽）。
-func dialEdgeKCP(ctx context.Context, addr, slot string, ticket []byte) (frameClient, error) {
+func dialEdgeKCP(ctx context.Context, addr, slot string, ticket []byte, hello helloPolicy) (frameClient, error) {
 	cli, err := engine.NewStreamClient[*edgeKCPConn](
-		edgeKCPAdapter{addr: addr, ticket: ticket, hello: 3 * time.Second},
+		edgeKCPAdapter{addr: addr, ticket: ticket, hello: hello},
 		engine.WithClientCodec[*edgeKCPConn](encoding.GetCodec("json")),
 		engine.WithClientKind[*edgeKCPConn](transport.KindKCP),
 		engine.WithClientSessionProvider[*edgeKCPConn](func() string { return slot }),

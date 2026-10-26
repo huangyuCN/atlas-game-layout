@@ -29,6 +29,9 @@
 | `-steady-window` | `5s` | 稳态窗口长度（报表里「稳态末 N 秒」用） |
 | `-rate-every` | `5s` | 上行包速率采样间隔（压测端 pps 时间线） |
 | `-dial-concurrency` | `64` | 建连 / 注册的并发度（建流窗口的主要耗时来源） |
+| `-hello-timeout` | `300ms` | 数据报面 hello 单次读超时：接入层限流/拒绝时不回错误，只能靠超时发现（旧值 `3s` 会把建流窗口放大到几十秒） |
+| `-hello-attempts` | `3` | 数据报面 hello 最大尝试次数（含首次；每次重试都换新 socket，避免迟到的旧 flow-id 被误当答案） |
+| `-hello-backoff` | `150ms` | 数据报面 hello 两次尝试之间的退避 |
 | `-connect-timeout` | `120s` | 建连与入局阶段的总超时 |
 | `-total-timeout` | `10m` | 整轮压测的兜底超时（到点必退，避免挂死） |
 | `-gateway` | `10.10.1.23:9001` | 远端网关业务面地址（host:port） |

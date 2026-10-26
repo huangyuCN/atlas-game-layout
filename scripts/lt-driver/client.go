@@ -58,13 +58,14 @@ func (w wsFrameClient) Close() error { return w.cli.Close() }
 
 // dialOpts 是帧连接的装配参数（形态与地址由 main 按旗标算出）。
 type dialOpts struct {
-	via       string // edge（经接入层）| direct（直连 battle 帧端口）
-	transport string // ws | udp
-	edgeWS    string // 接入层 WS 面地址（host:port）
-	edgeUDP   string // 接入层 UDP 面地址（host:port）
-	edgeKCP   string // 接入层 KCP 面地址（host:port，后端为 battle 的 KCP 帧端口）
-	battleWS  string // battle WS 帧端口（直连对照用）
-	battleUDP string // battle UDP 帧端口（直连对照用）
+	via       string      // edge（经接入层）| direct（直连 battle 帧端口）
+	transport string      // ws | udp
+	edgeWS    string      // 接入层 WS 面地址（host:port）
+	edgeUDP   string      // 接入层 UDP 面地址（host:port）
+	edgeKCP   string      // 接入层 KCP 面地址（host:port，后端为 battle 的 KCP 帧端口）
+	battleWS  string      // battle WS 帧端口（直连对照用）
+	battleUDP string      // battle UDP 帧端口（直连对照用）
+	hello     helloPolicy // 数据报面 hello 的重试策略（经接入层的 udp/kcp 面用）
 }
 
 // loadPlayer 是一个压测客户端：业务会话 + 直连帧连接 + 样本采集。
@@ -218,9 +219,9 @@ func dialFrameByOpts(ctx context.Context, o dialOpts, slot string, ticket []byte
 		}
 		return wsFrameClient{cli: cli}, nil
 	case o.via == "edge" && o.transport == "udp":
-		return dialEdgeUDP(ctx, o.edgeUDP, slot, ticket)
+		return dialEdgeUDP(ctx, o.edgeUDP, slot, ticket, o.hello)
 	case o.via == "edge" && o.transport == "kcp":
-		return dialEdgeKCP(ctx, o.edgeKCP, slot, ticket)
+		return dialEdgeKCP(ctx, o.edgeKCP, slot, ticket, o.hello)
 	case o.via == "direct" && o.transport == "ws":
 		cli, err := wst.NewClient(ctx, "ws://"+o.battleWS+"/",
 			wst.WithClientSessionProvider(func() string { return slot }))

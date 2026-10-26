@@ -110,6 +110,7 @@ type loadRun struct {
 	battleUDP      string
 	queue          queueCfg
 	pump           pumpCfg
+	hello          helloPolicy
 }
 
 func main() {
@@ -142,6 +143,10 @@ func parseFlags() loadRun {
 	matchTimeout := flag.Duration("match-timeout", 60*time.Second, "成局阶段的总超时（到点即用已匹配的玩家开打）")
 	matchQuiet := flag.Duration("match-quiet", 3*time.Second, "成局静默期：连续这么久无新成局即认为成局收尾，立刻开打")
 	conc := flag.Int("dial-concurrency", 64, "建连/注册的并发度")
+	helloTimeout := flag.Duration("hello-timeout", 300*time.Millisecond,
+		"数据报面 hello 单次读超时（接入层拒绝时不回错误，只能靠超时发现；旧值 3s 会把建流窗口放大到几十秒）")
+	helloAttempts := flag.Int("hello-attempts", 3, "数据报面 hello 最大尝试次数（含首次，每次用新 socket）")
+	helloBackoff := flag.Duration("hello-backoff", 150*time.Millisecond, "数据报面 hello 两次尝试之间的退避")
 	queueConc := flag.Int("queue-concurrency", 512, "入池（EnterMatchQueue）并发度：单票 RTT 110–200ms，靠并发盖出速率（上限 2048）")
 	prefill := flag.Int("prefill", 0, "预灌池票数：先以 -queue-concurrency 把 N 张票灌进池、再开匹配（0 = 不预灌）")
 	prefillSettle := flag.Duration("prefill-settle", 2*time.Second, "预灌后静默时长：让池子积起来再开匹配")
@@ -175,6 +180,7 @@ func parseFlags() loadRun {
 		battleWS: *battleWS, battleUDP: *battleUDP,
 		queue: qc,
 		pump:  pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
+		hello: helloPolicy{timeout: *helloTimeout, attempts: *helloAttempts, backoff: *helloBackoff},
 	}
 }
 
@@ -305,6 +311,7 @@ func dialAndJoin(ctx context.Context, ps []*loadPlayer, cfg loadRun) (int, int) 
 		via: cfg.via, transport: cfg.transport,
 		edgeWS: cfg.edgeWS, edgeUDP: cfg.edgeUDP, edgeKCP: cfg.edgeKCP,
 		battleWS: cfg.battleWS, battleUDP: cfg.battleUDP,
+		hello: cfg.hello,
 	}
 	var mu sync.Mutex
 	ok, bad := 0, 0

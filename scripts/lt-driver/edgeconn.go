@@ -32,28 +32,99 @@ type edgeUDPConn struct {
 
 // edgeUDPAdapter 实现 engine.ClientAdapter[*edgeUDPConn]：拨号即完成接入层 hello 握手。
 type edgeUDPAdapter struct {
-	addr   string        // 接入层 UDP 面地址（host:port）
-	ticket []byte        // 票据密文（hello 段载荷）
-	hello  time.Duration // hello 握手读超时
+	addr   string      // 接入层 UDP 面地址（host:port）
+	ticket []byte      // 票据密文（hello 段载荷）
+	hello  helloPolicy // hello 握手重试策略（单次超时 / 尝试次数 / 退避）
+}
+
+// 数据报面 hello 的缺省重试参数（诊断 §6.6）。
+//
+// 为什么要重试：接入层在限流/拒绝时**不回任何错误**（L4 无应用层回执），客户端只能靠读超时
+// 发现；hello 也只有一发、没有重传。旧参数（3s 超时、不重试）下，1024 条流里被拒的那几百条
+// 各自干等 3s 再重拨，建流窗口因此从 0.015s 膨胀到 30s。改成「300ms 超时 + 150ms 退避重试
+// 3 次」后，一次拒绝的代价降到百毫秒级，建流窗口回到秒级。
+const (
+	defaultHelloTimeout  = 300 * time.Millisecond
+	defaultHelloAttempts = 3
+	defaultHelloBackoff  = 150 * time.Millisecond
+)
+
+// helloPolicy 是数据报面 hello 的重试策略；零值表示全部取缺省。
+type helloPolicy struct {
+	timeout  time.Duration // 单次 hello 的读超时
+	attempts int           // 最多尝试次数（含首次）
+	backoff  time.Duration // 两次尝试之间的退避
+}
+
+// normalized 回填缺省值并夹住非法值（负数退避按 0 处理）。
+func (h helloPolicy) normalized() helloPolicy {
+	if h.timeout <= 0 {
+		h.timeout = defaultHelloTimeout
+	}
+	if h.attempts <= 0 {
+		h.attempts = defaultHelloAttempts
+	}
+	if h.backoff < 0 {
+		h.backoff = 0
+	}
+	return h
+}
+
+// dialHello 拨接入层数据报面并完成 hello 握手，失败按策略重试；返回已换到 flow-id 的 socket。
+//
+// 每次重试都用**新 socket**：同一 socket 重发 hello 会让接入层按身份接管旧流并换发新 flow-id，
+// 迟到的旧回执仍留在收包队列里，会被误当成本次的答案——随后上行全部被「flow-id + 远端」双键
+// 失配丢弃，表现为连上了却收不到帧。换 socket 后旧回执随旧 socket 一起丢弃。
+func dialHello(ctx context.Context, addr string, ticket []byte, h helloPolicy) (*net.UDPConn, uint64, error) {
+	h = h.normalized()
+	raddr, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil, 0, fmt.Errorf("解析接入层地址 %s 失败: %w", addr, err)
+	}
+	var lastErr error
+	for attempt := 1; attempt <= h.attempts; attempt++ {
+		conn, flowID, err := helloOnce(ctx, raddr, ticket, h.timeout)
+		if err == nil {
+			return conn, flowID, nil
+		}
+		lastErr = err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, 0, ctxErr
+		}
+		if attempt == h.attempts || h.backoff == 0 {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case <-time.After(h.backoff):
+		}
+	}
+	return nil, 0, fmt.Errorf("hello 握手失败（尝试 %d 次，单次超时 %v）: %w", h.attempts, h.timeout, lastErr)
+}
+
+// helloOnce 用一条新 socket 做一次 hello（失败即关掉该 socket）。
+func helloOnce(ctx context.Context, raddr *net.UDPAddr, ticket []byte, timeout time.Duration) (*net.UDPConn, uint64, error) {
+	conn, err := net.DialUDP("udp", nil, raddr)
+	if err != nil {
+		return nil, 0, fmt.Errorf("拨接入层 %s 失败: %w", raddr, err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = conn.Close()
+		return nil, 0, err
+	}
+	flowID, err := udpHello(conn, ticket, timeout)
+	if err != nil {
+		_ = conn.Close()
+		return nil, 0, err
+	}
+	return conn, flowID, nil
 }
 
 // Dial 拨接入层 UDP 面并完成 hello 握手，返回已带 flow-id 的连接。
 func (a edgeUDPAdapter) Dial(ctx context.Context) (*edgeUDPConn, error) {
-	raddr, err := net.ResolveUDPAddr("udp", a.addr)
+	conn, flowID, err := dialHello(ctx, a.addr, a.ticket, a.hello)
 	if err != nil {
-		return nil, fmt.Errorf("解析接入层地址 %s 失败: %w", a.addr, err)
-	}
-	conn, err := net.DialUDP("udp", nil, raddr)
-	if err != nil {
-		return nil, fmt.Errorf("拨接入层 %s 失败: %w", a.addr, err)
-	}
-	if err := ctx.Err(); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	flowID, err := udpHello(conn, a.ticket, a.hello)
-	if err != nil {
-		_ = conn.Close()
 		return nil, err
 	}
 	return &edgeUDPConn{
@@ -141,9 +212,9 @@ func (a edgeUDPAdapter) RemoteAddr(c *edgeUDPConn) string {
 }
 
 // dialEdgeUDP 建立一条经接入层 UDP 面的帧连接（票据同时进 hello 段与逐帧会话槽）。
-func dialEdgeUDP(ctx context.Context, addr, slot string, ticket []byte) (frameClient, error) {
+func dialEdgeUDP(ctx context.Context, addr, slot string, ticket []byte, hello helloPolicy) (frameClient, error) {
 	cli, err := engine.NewStreamClient[*edgeUDPConn](
-		edgeUDPAdapter{addr: addr, ticket: ticket, hello: 3 * time.Second},
+		edgeUDPAdapter{addr: addr, ticket: ticket, hello: hello},
 		engine.WithClientCodec[*edgeUDPConn](encoding.GetCodec("json")),
 		engine.WithClientKind[*edgeUDPConn](transport.KindUDP),
 		engine.WithClientSessionProvider[*edgeUDPConn](func() string { return slot }),
