@@ -12,8 +12,12 @@ import (
 
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/placement"
+	"github.com/huangyuCN/atlas/contrib/actor/types"
 	getlog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/matchmaker"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // metricAdmissionFailed 是入场失败计数（label stage 取 admit/publish/empty_ticket/gate_wait）。
@@ -107,10 +111,18 @@ func (h *MatcherHandler) warm(ctx context.Context, battleID, matchID string, pla
 }
 
 // admitAndPublish 在并发槽内完成一次入场：开局+出票（一次 RPC）→ 对局关联 → 成局事件。
+//
+// 入场失败分两类处置（见 retryTarget）：传输层失败（实例刚下线/端口不通）换一台候选
+// 重试**一次**；其余（业务判定、预算到期、没有其它候选）直接按失败路径处置。
 func (h *MatcherHandler) admitAndPublish(ctx context.Context, ev matchmaker.TicketEvent, battleID string, playerIDs []string) error {
 	rpcCtx, cancel := context.WithTimeout(ctx, h.admissionTimeout())
 	defer cancel()
 	tickets, err := h.sink.Admit(rpcCtx, battleID, ev.Match.ID, playerIDs)
+	if err != nil {
+		if retryCtx, ok := h.retryTarget(rpcCtx, err); ok {
+			tickets, err = h.sink.Admit(retryCtx, battleID, ev.Match.ID, playerIDs)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -125,6 +137,49 @@ func (h *MatcherHandler) admitAndPublish(ctx context.Context, ev matchmaker.Tick
 		return fmt.Errorf("%w: %w", errPublishStarted, err)
 	}
 	return nil
+}
+
+// retryTarget 判定「是否值得换点重试」，值得时返回携带新目标的 ctx（复用同一笔入场预算）。
+//
+// 三条不重试的口径：
+//   - 业务错误（reason 不是传输类）：换一台业务判定也不会变，重试只是白跑一跳；
+//   - 预算已耗尽（ctx 到期/取消）：没有时间给第二跳，换点只会把失败拖长；
+//   - 没有其它候选（BattlePlacer.Retarget 返回 false）：换到同一台等于原样重试。
+//
+// 只换点一次是硬约束：换点解决的是「钉到刚下线/端口不通的实例」，不是容量问题；
+// 连续换点会与并发闸门互相挤压，把一次失败放大成一场重试风暴。
+func (h *MatcherHandler) retryTarget(ctx context.Context, cause error) (context.Context, bool) {
+	if h.placer == nil || ctx.Err() != nil || !retryableAdmitError(cause) {
+		return ctx, false
+	}
+	retryCtx, ok := h.placer.Retarget(ctx)
+	if !ok {
+		return ctx, false
+	}
+	from, _ := placement.Target(ctx)
+	to, _ := placement.Target(retryCtx)
+	getlog.GetLogger().Warn("matcher: 入场调用传输层失败，换一台 battle 重试一次",
+		"from", from, "to", to, "err", cause)
+	return retryCtx, true
+}
+
+// retryableAdmitError 报告该失败是否属「换一台可能就好」的传输层失败。
+//
+// 判据口径：最终各项失败在 opgrpc 客户端边界已被归口成稳定 reason（见 contrib/actor/opgrpc/
+// classify.go），故按 reason 判定而不是按错误文本——传输不可用（ACTOR_TRANSPORT_UNAVAILABLE）
+// 换点有意义，取消/到期/业务 reason 都没有。未经归口的裸 gRPC 状态按 Unavailable 兜底。
+func retryableAdmitError(err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case types.IsReason(err, types.ReasonTransportUnavailable):
+		return true
+	case types.IsTransportFailure(err):
+		// 到期/取消/无响应方：都不是「换一台就好」，且预算多半已耗尽。
+		return false
+	default:
+		return status.Code(err) == codes.Unavailable
+	}
 }
 
 // onAdmissionFailed 处置入场失败（显式，不静默）：

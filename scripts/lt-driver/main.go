@@ -136,7 +136,7 @@ func parseFlags() loadRun {
 	via := flag.String("via", "edge", "驱动路径：edge（经接入层）| direct（直连 battle 帧端口）")
 	pps := flag.Int("pps", 20, "每连接每秒帧输入数（上行包速率）")
 	probe := flag.Duration("probe", time.Second, "每连接 SyncFrames 探针间隔（往返延迟样本来源）")
-	duration := flag.Duration("duration", 20*time.Second, "稳定负载时长")
+	duration := flag.Duration("duration", 20*time.Second, "稳定负载时长（到点自动停止发送并打印 SUMMARY，无需人工 kill）")
 	steady := flag.Duration("steady-window", 5*time.Second, "稳态窗口长度")
 	probeJitter := flag.Bool("probe-jitter", false, "探针相位抖动（诊断用）")
 	connectTimeout := flag.Duration("connect-timeout", 120*time.Second, "建连与入局阶段的总超时")
@@ -219,7 +219,11 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 
 	start := time.Now()
 	rates := startRateSampler(active, cfg.rateEvery, start)
-	pumpAll(ctx, active, cfg.pump)
+	// 负载阶段自己的取消边界：-duration 到点即取消在途调用（泵另有自己的到点判断），
+	// 于是「停止发送」不必等某条卡住的调用自然返回。
+	pumpCtx, pumpCancel := context.WithTimeout(ctx, cfg.pump.duration)
+	pumpAll(pumpCtx, active, cfg.pump)
+	pumpCancel()
 	elapsed := time.Since(start)
 	win := windows{dialStart: dialStart, dialEnd: dialEnd, pumpEnd: time.Now(), steady: cfg.steady}
 	rep := collect(active, cfg, out.battles, failed, elapsed, win)
@@ -342,22 +346,6 @@ func dialAndJoin(ctx context.Context, ps []*loadPlayer, cfg loadRun) (int, int) 
 		return nil
 	})
 	return ok, bad
-}
-
-// pumpAll 对已入局的连接施加稳定负载，直到 duration 到点。
-func pumpAll(ctx context.Context, ps []*loadPlayer, cfg pumpCfg) {
-	var wg sync.WaitGroup
-	for _, p := range ps {
-		if p.frame == nil {
-			continue
-		}
-		wg.Add(1)
-		go func(p *loadPlayer) {
-			defer wg.Done()
-			p.pump(ctx, cfg)
-		}(p)
-	}
-	wg.Wait()
 }
 
 // collect 汇总全部连接的样本与计数，并把探针/下行样本切成「建流窗口 vs 稳态窗口」两段。

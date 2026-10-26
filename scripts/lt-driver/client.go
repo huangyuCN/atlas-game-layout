@@ -280,12 +280,20 @@ func (p *loadPlayer) onNotify(operation string, payload []byte) {
 	}
 }
 
+// DefaultFrameCallTimeout 是单次帧调用的缺省预算（pumpCfg.callTimeout 未配置时用）。
+//
+// 取 2s 的依据：现场探针 p99 在 10ms 量级，2s ≈ 200 倍余量——正常排队不会被误杀；
+// 而对端半死/回执丢失时，调用会在这里失败返回并计入 frame_failures（SUMMARY 可判），
+// 不再无限等待（-duration 到点也收不了尾）。
+const DefaultFrameCallTimeout = 2 * time.Second
+
 // pumpCfg 是压测负载参数。
 type pumpCfg struct {
-	pps      int           // 每连接每秒帧输入数（上行包速率）
-	probe    time.Duration // SyncFrames 探针间隔（RTT 样本来源）
-	duration time.Duration // 稳定负载时长
-	jitter   bool          // 探针相位抖动开关（诊断：错开各连接的探针相位）
+	pps         int           // 每连接每秒帧输入数（上行包速率）
+	probe       time.Duration // SyncFrames 探针间隔（RTT 样本来源）
+	duration    time.Duration // 稳定负载时长
+	jitter      bool          // 探针相位抖动开关（诊断：错开各连接的探针相位）
+	callTimeout time.Duration // 单次帧调用的预算（≤0 取 DefaultFrameCallTimeout；对端不回执时到点即失败返回）
 }
 
 // pump 在 duration 内按目标包速率发帧输入（Tell 无回执），并按 probe 间隔打 RTT 探针。
@@ -302,6 +310,7 @@ func (p *loadPlayer) pump(ctx context.Context, cfg pumpCfg) {
 	probeTick := time.NewTicker(cfg.probe)
 	defer probeTick.Stop()
 	deadline := time.After(cfg.duration)
+	budget := callBudget(cfg)
 	seq := uint64(0)
 	for {
 		select {
@@ -311,11 +320,34 @@ func (p *loadPlayer) pump(ctx context.Context, cfg pumpCfg) {
 			return
 		case <-inputTick.C:
 			seq++
-			p.sendInput(ctx, seq)
+			callCtx, cancel := callContext(ctx, budget)
+			p.sendInput(callCtx, seq)
+			cancel()
 		case <-probeTick.C:
-			_ = p.probeOnce(ctx)
+			callCtx, cancel := callContext(ctx, budget)
+			_ = p.probeOnce(callCtx)
+			cancel()
 		}
 	}
+}
+
+// callBudget 返回生效的单次调用预算（未配置时取 DefaultFrameCallTimeout）。
+func callBudget(cfg pumpCfg) time.Duration {
+	if cfg.callTimeout > 0 {
+		return cfg.callTimeout
+	}
+	return DefaultFrameCallTimeout
+}
+
+// callContext 返回一次帧调用的 ctx 与释放函数；budget ≤0 时原样返回 ctx（不设预算）。
+//
+// 为什么每次调用都要独立预算：一元调用在「对端不回执 / 连接半死」时不会自己返回，
+// 一条连接就足以让整轮压测停在 0 pps 上收不了尾（现场症状，见诊断 §6）。
+func callContext(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+	if budget <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, budget)
 }
 
 // sendInput 发一帧输入：载荷步进 0（原地），避免压测中冲线结算提前结束对局。

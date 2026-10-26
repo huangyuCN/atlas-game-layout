@@ -20,9 +20,9 @@ import (
 // 而现场 /metrics 只有 go_* / process_*（client_golang 的运行时与进程采集器）——那是采集器
 // 一路退化成 noop 的典型形态，不是「没有拒绝」。
 //
-// 另一条必须记住的口径：指标序列是**懒创建**的（OTel SDK 只在第一次观测后建序列），
-// 空闲实例上 edge_* 一条都没有。故本文件的断言一律「先触发事件再抓」，
-// 绝不用空集当证据（空集只能证明没触发过事件）。
+// 另一条必须记住的口径（2026-10-27 修正）：指标序列在**装配期预注册**（框架先建序列再记 0），
+// 故「装配完成、零事件」时五个家族就已经在 /metrics 上（值为 0，见
+// TestEmbeddedMetricsPreRegisteredBeforeAnyEvent）；事件发生只改变**值**，不再决定序列是否存在。
 
 // 指标家族名一律取自框架常量：名字漂移会让面板与告警静默失效。
 var metricsFamilies = []string{
@@ -103,6 +103,51 @@ func TestEmbeddedMetricsExposeEdgeFamily(t *testing.T) {
 	}
 }
 
+// TestEmbeddedMetricsPreRegisteredBeforeAnyEvent 断言「装配完成、一个事件都还没发生」时抓取端点：
+// 五个 edge_* 家族**已经存在且为 0**。
+//
+// 为什么必须这样守：指标序列是 OTel 懒创建的（见本文件头部口径），空闲实例上家族一条都没有；
+// 排障时「抓不到」被反复读成「计数为 0 = 没发生」。接入层在装配期把全部已知序列预注册
+// （见 contrib/edge 的 newMetricSink），本用例是这条链路的端到端证据。
+func TestEmbeddedMetricsPreRegisteredBeforeAnyEvent(t *testing.T) {
+	e := startEmbeddedWithMetrics(t, map[string]string{"b-1": echoTCPBackend(t)})
+	if e.MetricsURL == "" {
+		t.Fatal("配了 MetricsAddr 却没给出抓取端点地址")
+	}
+
+	// 不触发任何事件，直接抓：五个家族必须已经在，且样本值全为 0。
+	body := scrape(t, e.MetricsURL)
+	for _, name := range metricsFamilies {
+		if !hasFamily(body, name) {
+			t.Fatalf("装配后（零事件）抓不到指标家族 %s——它要等第一次事件才出现（抓取全文，共 %d 字节）:\n%s",
+				name, len(body), body)
+		}
+	}
+	for _, want := range []struct{ family, label string }{
+		{edge.MetricTicketRejectedTotal, `reason="` + string(edge.ReasonTicketInvalid) + `"`},
+		{edge.MetricStreamsTearedDownTotal, `reason="` + string(edge.TeardownClientClosed) + `"`},
+		{edge.MetricBackendDialErrorsTotal, `reason="` + string(edge.DialErrorOther) + `"`},
+		{edge.MetricResolveCacheTotal, `result="` + edge.ResolveCacheHit + `"`},
+		{edge.MetricStreamsActive, ""},
+	} {
+		requireZeroSample(t, body, want.family, want.label)
+	}
+}
+
+// requireZeroSample 断言该家族带该标签片段的序列存在且恰好为 0（零事件态）。
+func requireZeroSample(t *testing.T, body, name, label string) {
+	t.Helper()
+	for _, line := range familyLines(body, name) {
+		if label == "" || strings.Contains(line, label) {
+			if got := sampleValueOf(line); got != 0 {
+				t.Fatalf("%s%s 在零事件时应为 0，实际 %v（样本：%s）", name, label, got, line)
+			}
+			return
+		}
+	}
+	t.Fatalf("%s 里没有 %s%s 的序列（全文：\n%s", t.Name(), name, label, body)
+}
+
 // triggerBadTicket 用坏票发起一次 WS 升级请求：接入层断开并记 edge_ticket_rejected_total。
 func triggerBadTicket(t *testing.T, addr string) {
 	t.Helper()
@@ -175,7 +220,7 @@ func expectFaceClosed(t *testing.T, conn net.Conn) {
 }
 
 // waitFamilies 轮询抓取端点直到五个家族全部出现，返回最后一次抓取全文。
-// 轮询而非一次性抓取：指标落地与序列懒创建都不是同步的。
+// 轮询而非一次性抓取：指标取值的落地不是同步的。
 func waitFamilies(t *testing.T, url string) string {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

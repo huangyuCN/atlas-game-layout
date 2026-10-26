@@ -192,8 +192,11 @@ type fakeSink struct {
 	failed    []failCall
 	rosters   []rosterCall
 	// tickets 是入场回执桩（nil 用最小回执）；admitErr 非空时入场失败。
-	tickets  *battlev1.IssueEntryTicketReply
-	admitErr error
+	tickets *battlev1.IssueEntryTicketReply
+	// admitErr 是「每次调用都失败」的固定错误；admitErrs 是按调用顺序消费的错误序列
+	// （序列用尽后回落到 admitErr）。换点重试用例靠它区分首次与重试两次的结果。
+	admitErr  error
+	admitErrs []error
 	// block 非空时入场调用阻塞到通道关闭（有界并发与背压用例用）。
 	block chan struct{}
 	// cur/max 是入场调用的当前并发数与峰值（有界断言：峰值 ≤ 并发上限）。
@@ -241,6 +244,9 @@ func (s *fakeSink) Admit(ctx context.Context, battleID, matchID string, playerID
 		s.max = s.cur
 	}
 	err, block, tickets := s.admitErr, s.block, s.tickets
+	if len(s.admitErrs) > 0 {
+		err, s.admitErrs = s.admitErrs[0], s.admitErrs[1:]
+	}
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -348,6 +354,7 @@ type testHandlerOpts struct {
 	warmer    biz.BattleWarmer
 	warmup    biz.Warmup
 	placer    biz.BattlePlacer
+	sink      *fakeSink // 预置的成局观察方（nil = 新建；换点重试用例靠它注入失败序列）
 }
 
 // newTestHandler 构造测试用 handler（party 用 memory 引擎真实实现）。
@@ -359,7 +366,10 @@ func newTestHandler() (*MatcherHandler, *fakeService, *fakeMapper, *fakeSink) {
 func newTestHandlerWith(o testHandlerOpts) (*MatcherHandler, *fakeService, *fakeMapper, *fakeSink) {
 	svc := newFakeService()
 	mapper := newFakeMapper()
-	sink := &fakeSink{}
+	sink := o.sink
+	if sink == nil {
+		sink = &fakeSink{}
+	}
 	partyMapper := newFakePartyMapper()
 	h := NewMatcherHandler(MatcherDeps{
 		Svc:         svc,

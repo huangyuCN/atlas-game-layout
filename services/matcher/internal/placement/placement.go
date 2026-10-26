@@ -40,17 +40,21 @@ type Options struct {
 	Local selector.NodeFilter
 	// CacheTTL 是候选快照复用窗口（≤0 取 DefaultCacheTTL）。
 	CacheTTL time.Duration
+	// FrameService 是 battle 帧面实例的注册中心服务名（空 = consts.ServiceBattleFrame；
+	// 选点据此排除「没有帧面端点」的实例，见 frames.go）。
+	FrameService string
 	// Now 是时钟（测试可注入；nil = time.Now）。
 	Now func() time.Time
 }
 
 // Planner 按「本机优先 + 轮询」为每局选一台 battle。
 type Planner struct {
-	disc     registry.Discovery
-	service  string
-	local    selector.NodeFilter
-	cacheTTL time.Duration
-	now      func() time.Time
+	disc         registry.Discovery
+	service      string
+	frameService string
+	local        selector.NodeFilter
+	cacheTTL     time.Duration
+	now          func() time.Time
 
 	mu     sync.Mutex
 	nodes  []selector.Node // 候选快照（本机优先过滤后的结果）
@@ -62,14 +66,18 @@ type Planner struct {
 // New 构造选点器；disc 为空时 Place 恒返回空串（等于不钉选点，不 panic）。
 func New(disc registry.Discovery, o Options) *Planner {
 	p := &Planner{
-		disc:     disc,
-		service:  o.Service,
-		local:    o.Local,
-		cacheTTL: o.CacheTTL,
-		now:      o.Now,
+		disc:         disc,
+		service:      o.Service,
+		frameService: o.FrameService,
+		local:        o.Local,
+		cacheTTL:     o.CacheTTL,
+		now:          o.Now,
 	}
 	if p.service == "" {
 		p.service = consts.ServiceBattle
+	}
+	if p.frameService == "" {
+		p.frameService = consts.ServiceBattleFrame
 	}
 	if p.cacheTTL <= 0 {
 		p.cacheTTL = DefaultCacheTTL
@@ -88,6 +96,38 @@ func (p *Planner) Pin(ctx context.Context) context.Context {
 		return ctx
 	}
 	return WithTarget(ctx, addr)
+}
+
+// Retarget 为本局换一个候选端点并挂回 ctx；没有其它候选时返回原 ctx 与 false。
+//
+// 语义：Admit 的传输层失败（实例刚下线、端口不通）换一台可能成功；只有一台候选时换点
+// 等于原样重试，没有价值——宁可把失败按既有路径处置，也不制造一次无意义的重试。
+func (p *Planner) Retarget(ctx context.Context) (context.Context, bool) {
+	if p == nil {
+		return ctx, false
+	}
+	cur, _ := Target(ctx)
+	addr := p.placeExcept(ctx, cur)
+	if addr == "" || addr == cur {
+		return ctx, false
+	}
+	return WithTarget(ctx, addr), true
+}
+
+// placeExcept 返回一个与 exclude 不同的候选端点（无其它候选时返回空串）。
+func (p *Planner) placeExcept(ctx context.Context, exclude string) string {
+	nodes := p.candidates(ctx)
+	if len(nodes) < 2 {
+		return ""
+	}
+	idx := 0
+	for i, n := range nodes {
+		if n.Address() == exclude {
+			idx = i
+			break
+		}
+	}
+	return nodes[(idx+1)%len(nodes)].Address()
 }
 
 // Place 返回本局目标 battle 的端点地址（host:port）；无候选或发现失败返回空串。
@@ -124,7 +164,12 @@ func (p *Planner) candidates(ctx context.Context) []selector.Node {
 	if err != nil {
 		return nodes // 发现失败：沿用上次快照（可能为空），不把错误甩给成局路径
 	}
-	nodes = localFirst(ctx, p.local, nodesOf(list))
+	ready := p.frameReady(ctx)
+	nodes = localFirst(ctx, p.local, nodesOf(list, ready))
+	if len(nodes) == 0 && ready != nil {
+		// 过滤后无候选：退回不过滤（选点不得因帧面过滤而整体失效）。
+		nodes = localFirst(ctx, p.local, nodesOf(list, nil))
+	}
 	p.mu.Lock()
 	p.nodes, p.loaded = nodes, p.now()
 	p.mu.Unlock()
@@ -132,12 +177,18 @@ func (p *Planner) candidates(ctx context.Context) []selector.Node {
 }
 
 // nodesOf 把注册实例映射为选点节点：地址取 grpc 面端点主机（host:port），
-// 没有该面端点的实例（只注册 edge 面/帧面端口）直接跳过。
-func nodesOf(list []*registry.ServiceInstance) []selector.Node {
+// 没有该面端点的实例（只注册 edge 面/帧面端口）直接跳过；
+// ready 非空时再要求实例 ID 在「有帧面端点」集合里（nil = 不做帧面过滤）。
+func nodesOf(list []*registry.ServiceInstance, ready map[string]struct{}) []selector.Node {
 	out := make([]selector.Node, 0, len(list))
 	for _, si := range list {
 		if si == nil {
 			continue
+		}
+		if ready != nil {
+			if _, ok := ready[si.ID]; !ok {
+				continue
+			}
 		}
 		addr, ok := grpcAddr(si.Endpoints)
 		if !ok {

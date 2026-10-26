@@ -234,11 +234,12 @@ go build -o /tmp/loadtest ./scripts/loadtest
 - Prometheus 告警规则：`deploy/observability/rules/atlas-alerts.yml`（`promtool check rules` 可校验）；
 - Grafana 面板：`deploy/observability/grafana/provisioning/dashboards/json/atlas-stage3.json`。
 
-> **口径前提（序列懒创建）**：`edge_*` 序列由 OTel SDK 在**第一次观测**时才创建，空闲实例上
-> `/metrics` 里一条 `edge_*` 都没有（只有 `go_*` / `process_*`）。因此「抓不到」**不能**读成
-> 「计数为 0」——验收指标接线必须**先触发一次该事件**（打一次坏票 / 建一条流 / 拨一次失败后端）
-> 再抓；空集只能证明没触发过事件。这条踩过：2026-10-26 诊断里多轮「拒绝计数=0」的推断，
-> 其证据链正是「抓不到 `edge_*`」。
+> **口径前提（装配期预注册）**：`edge_*` 序列在**装配期**预注册（框架先建序列再记 0），
+> 故接入层一启动，`/metrics` 上就有全部 `edge_*` 家族（值为 0）。这条在 2026-10-27 修正过：
+> 旧行为是「OTel 只在第一次观测后建序列」，空闲实例上一条 `edge_*` 都没有（只有 `go_*` /
+> `process_*`），于是「抓不到」被多轮推断读成「计数为 0 = 没发生」。
+> 现在「抓不到」只说明采集器没注入；验收接线仍建议**触发一次事件**确认值会动
+> （打一次坏票 / 建一条流 / 拨一次失败后端）——「为 0」与「没接线」是两回事。
 
 ### 7.6 局时长可配（`battle.max_frames` / `battle.tick_interval_ms`）
 

@@ -109,6 +109,10 @@ type BattlePlacer interface {
 	// Pin 为本局选点并返回携带目标的 ctx；无候选/发现失败时原样返回 ctx
 	// （选点失效不得让成局失败，落点退回既有每 RPC 负载均衡）。
 	Pin(ctx context.Context) context.Context
+	// Retarget 为本局换一个候选端点（排除当前目标）并返回携带新目标的 ctx。
+	// 没有当前目标或没有其它候选时 ok=false：入场失败据此走既有失败路径，
+	// 不做「换到同一台」的原样重试（见 handler.admitAndPublish 的重试口径）。
+	Retarget(ctx context.Context) (context.Context, bool)
 }
 
 // MatchSettleDeduper 是成局结算去重接口：

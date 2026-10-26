@@ -17,19 +17,23 @@ import (
 // errNoWatch 表示测试桩不支持 Watch（选点只走 GetService，无需监听）。
 var errNoWatch = errors.New("placement: 测试桩不支持 Watch")
 
-// fakeDiscovery 是注册发现的测试桩：固定实例列表 + 可注入错误 + 调用计数。
+// fakeDiscovery 是注册发现的测试桩：固定实例列表 + 可注入错误 + **按服务名**的调用计数
+// （选点器会同时查 battle 与 battle-frame，单一计数会把两种查询混在一起）。
 type fakeDiscovery struct {
 	mu    sync.Mutex
 	ins   []*registry.ServiceInstance
 	err   error
-	calls int
+	calls map[string]int
 }
 
 // GetService 返回固定实例列表（计数用于断言候选快照复用）。
-func (d *fakeDiscovery) GetService(context.Context, string) ([]*registry.ServiceInstance, error) {
+func (d *fakeDiscovery) GetService(_ context.Context, service string) ([]*registry.ServiceInstance, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.calls++
+	if d.calls == nil {
+		d.calls = make(map[string]int)
+	}
+	d.calls[service]++
 	if d.err != nil {
 		return nil, d.err
 	}
@@ -41,11 +45,11 @@ func (d *fakeDiscovery) Watch(context.Context, string) (registry.Watcher, error)
 	return nil, errNoWatch
 }
 
-// callCount 返回 GetService 被调用次数。
+// callCount 返回 battle 服务被查询的次数（快照复用断言的口径：帧面查询另计）。
 func (d *fakeDiscovery) callCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.calls
+	return d.calls[consts.ServiceBattle]
 }
 
 // setErr 注入/清除发现错误。
