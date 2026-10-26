@@ -15,6 +15,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz/handler"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/infra"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/placement"
 	matchredis "github.com/huangyuCN/atlas/contrib/matchmaker/redis"
 	"github.com/huangyuCN/atlas/matchmaker"
 	"github.com/huangyuCN/atlas/metrics"
@@ -68,9 +69,13 @@ func NewBattleConn(cfg *conf.Bootstrap, discovery registry.Discovery, mws server
 }
 
 // battleNodeFilters 把 battle.placement 配置翻译成选点过滤器：
-//   - LOCAL_FIRST（缺省）：本机优先，本机无候选时回落跨机；
+//   - LOCAL_FIRST（缺省）：本机优先（本机无候选时回落跨机）+ 钉住**本局选点**；
 //   - ANY：不挂过滤器（旧行为，负载均衡在全部候选里挑）；
 //   - 其余（含 UNSPECIFIED 之外的新值）：**启动期报错**，不静默按缺省处置。
+//
+// 两个过滤器的顺序有语义：先按主机收窄（PreferLocal），再钉住本局目标（TargetFilter）。
+// 钉住这一步修的是「一局两次 battle 调用（预热 Create + 入场 Admit）各选各的」：旧实现下
+// 两台等权本机 battle 的两跳必然劈到不同进程，落点变成两跳竞态而不是一次决定。
 func battleNodeFilters(cfg *conf.Bootstrap) ([]selector.NodeFilter, error) {
 	b := cfg.GetBattle()
 	switch b.GetPlacement() {
@@ -80,13 +85,30 @@ func battleNodeFilters(cfg *conf.Bootstrap) ([]selector.NodeFilter, error) {
 			// 未显式配置时以本进程所在主机为「本机」（主机名 + 各网卡 IP + 回环）。
 			hosts = filter.LocalHosts()
 		}
-		return []selector.NodeFilter{filter.PreferLocal(hosts...)}, nil
+		return []selector.NodeFilter{filter.PreferLocal(hosts...), placement.TargetFilter()}, nil
 	case conf.BattlePlacement_BATTLE_PLACEMENT_ANY:
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("app: battle.placement 取值非法: %v", b.GetPlacement())
 	}
 }
+
+// newPlacer 装配「每局一次选点」的选点器：候选集口径与过滤器一致（LOCAL_FIRST 下本机优先）。
+// 发现失败/无候选时选点为空 ⇒ 不钉，落点退回既有每 RPC 负载均衡（不新增失败路径）。
+func newPlacer(cfg *conf.Bootstrap, discovery registry.Discovery) *placement.Planner {
+	o := placement.Options{}
+	if cfg.GetBattle().GetPlacement() != conf.BattlePlacement_BATTLE_PLACEMENT_ANY {
+		hosts := cfg.GetBattle().GetLocalHosts()
+		if len(hosts) == 0 {
+			hosts = filter.LocalHosts()
+		}
+		o.Local = filter.PreferLocal(hosts...)
+	}
+	return placement.New(discovery, o)
+}
+
+// placerOf 把选点器绑定为 handler 依赖的接口形态（供 fx 按接口注入）。
+func placerOf(p *placement.Planner) biz.BattlePlacer { return p }
 
 // warmupEnabled 报告是否启用入场前预热：battle.warmup 未配置（nil）时**缺省打开**
 // （proto3 optional 的 presence 就是为「未配置 ≠ 显式关闭」准备的）。
@@ -152,7 +174,8 @@ func NewMatchmakerParty(svc matchmaker.Service, cli *pkredis.Client) matchmaker.
 // newMatcherDeps 聚合撮合 handler 依赖（fx 装配）。
 func newMatcherDeps(cfg *conf.Bootstrap, meter metrics.Collector, svc matchmaker.Service, party matchmaker.Party,
 	mapper biz.PlayerTicketMapper, partyMapper biz.PartyQueueMapper,
-	sink biz.MatchEventSink, warmer biz.BattleWarmer, deduper biz.MatchSettleDeduper, roster biz.PartyRosterPublisher) handler.MatcherDeps {
+	sink biz.MatchEventSink, warmer biz.BattleWarmer, deduper biz.MatchSettleDeduper, roster biz.PartyRosterPublisher,
+	placer biz.BattlePlacer) handler.MatcherDeps {
 	m := cfg.GetMatchmaker()
 	return handler.MatcherDeps{
 		Svc:         svc,
@@ -163,6 +186,7 @@ func newMatcherDeps(cfg *conf.Bootstrap, meter metrics.Collector, svc matchmaker
 		Warmer:      warmer,
 		Deduper:     deduper,
 		Roster:      roster,
+		Placer:      placer,
 		Metrics:     meter,
 		Warmup: biz.Warmup{
 			Disabled: !warmupEnabled(cfg),

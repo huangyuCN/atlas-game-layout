@@ -33,6 +33,7 @@ type report struct {
 	Transport      string  `json:"transport"`
 	Gateway        string  `json:"gateway"`
 	EdgeWS         string  `json:"edge_ws"`
+	EdgeKCP        string  `json:"edge_kcp"`
 	PlayersWant    int     `json:"players_requested"`
 	PerBattleWant  int     `json:"players_per_battle_requested"`
 	PlayersMatched int     `json:"players_matched"`
@@ -104,6 +105,7 @@ type loadRun struct {
 	gateway        string
 	edgeWS         string
 	edgeUDP        string
+	edgeKCP        string
 	battleWS       string
 	battleUDP      string
 	queue          queueCfg
@@ -117,7 +119,7 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.totalTimeout)
 	defer cancel()
-	fmt.Printf("[环境] 远程驱动：网关业务面 tcp=%s；接入层 ws=%s udp=%s\n", cfg.gateway, cfg.edgeWS, cfg.edgeUDP)
+	fmt.Printf("[环境] 远程驱动：网关业务面 tcp=%s；接入层 ws=%s udp=%s kcp=%s\n", cfg.gateway, cfg.edgeWS, cfg.edgeUDP, cfg.edgeKCP)
 	rep, err := runLoad(ctx, cfg)
 	if err != nil {
 		fatalf("%v", err)
@@ -129,7 +131,7 @@ func main() {
 func parseFlags() loadRun {
 	players := flag.Int("players", 50, "并发玩家数（= 帧连接数）")
 	perBattle := flag.Int("per-battle", 2, "期望每局人数（仅记录：真实人数由成局通知的 match_id 统计）")
-	transport := flag.String("transport", "ws", "帧传输面：ws|udp")
+	transport := flag.String("transport", "ws", "帧传输面：ws|udp|kcp")
 	via := flag.String("via", "edge", "驱动路径：edge（经接入层）| direct（直连 battle 帧端口）")
 	pps := flag.Int("pps", 20, "每连接每秒帧输入数（上行包速率）")
 	probe := flag.Duration("probe", time.Second, "每连接 SyncFrames 探针间隔（往返延迟样本来源）")
@@ -146,13 +148,14 @@ func parseFlags() loadRun {
 	gateway := flag.String("gateway", "10.10.1.23:9001", "远端网关业务面地址（host:port）")
 	edgeWS := flag.String("edge-ws", "10.10.1.23:7100", "远端接入层 WS 面地址")
 	edgeUDP := flag.String("edge-udp", "10.10.1.23:7102", "远端接入层 UDP 面地址")
+	edgeKCP := flag.String("edge-kcp", "10.10.1.23:7101", "远端接入层 KCP 面地址（后端指向 battle 的 KCP 帧端口）")
 	battleWS := flag.String("battle-ws", "", "battle WS 帧端口（-via direct 用）")
 	battleUDP := flag.String("battle-udp", "", "battle UDP 帧端口（-via direct 用）")
 	rateEvery := flag.Duration("rate-every", 5*time.Second, "上行包速率采样间隔（压测端 pps 时间线）")
 	total := flag.Duration("total-timeout", 10*time.Minute, "整轮压测的兜底超时")
 	flag.Parse()
-	if *transport != "ws" && *transport != "udp" {
-		fatalf("未知 -transport %q（ws|udp）", *transport)
+	if *transport != "ws" && *transport != "udp" && *transport != "kcp" {
+		fatalf("未知 -transport %q（ws|udp|kcp）", *transport)
 	}
 	if *via != "edge" && *via != "direct" {
 		fatalf("未知 -via %q（edge|direct）", *via)
@@ -168,7 +171,8 @@ func parseFlags() loadRun {
 		players: *players, perBattle: *perBattle, dialConc: *conc, connectTimeout: *connectTimeout,
 		matchTimeout: *matchTimeout, matchQuiet: *matchQuiet,
 		totalTimeout: *total, via: *via, transport: *transport, steady: *steady, rateEvery: *rateEvery,
-		gateway: *gateway, edgeWS: *edgeWS, edgeUDP: *edgeUDP, battleWS: *battleWS, battleUDP: *battleUDP,
+		gateway: *gateway, edgeWS: *edgeWS, edgeUDP: *edgeUDP, edgeKCP: *edgeKCP,
+		battleWS: *battleWS, battleUDP: *battleUDP,
 		queue: qc,
 		pump:  pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
 	}
@@ -299,7 +303,8 @@ func countNonNil(ps []*loadPlayer) int {
 func dialAndJoin(ctx context.Context, ps []*loadPlayer, cfg loadRun) (int, int) {
 	o := dialOpts{
 		via: cfg.via, transport: cfg.transport,
-		edgeWS: cfg.edgeWS, edgeUDP: cfg.edgeUDP, battleWS: cfg.battleWS, battleUDP: cfg.battleUDP,
+		edgeWS: cfg.edgeWS, edgeUDP: cfg.edgeUDP, edgeKCP: cfg.edgeKCP,
+		battleWS: cfg.battleWS, battleUDP: cfg.battleUDP,
 	}
 	var mu sync.Mutex
 	ok, bad := 0, 0
@@ -346,7 +351,7 @@ func pumpAll(ctx context.Context, ps []*loadPlayer, cfg pumpCfg) {
 // collect 汇总全部连接的样本与计数，并把探针/下行样本切成「建流窗口 vs 稳态窗口」两段。
 func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Duration, win windows) *report {
 	rep := &report{
-		Via: cfg.via, Transport: cfg.transport, Gateway: cfg.gateway, EdgeWS: cfg.edgeWS,
+		Via: cfg.via, Transport: cfg.transport, Gateway: cfg.gateway, EdgeWS: cfg.edgeWS, EdgeKCP: cfg.edgeKCP,
 		PlayersWant: cfg.players, PerBattleWant: cfg.perBattle, Battles: battles, ConnectFailed: failed,
 		DurationS: elapsed.Seconds(),
 	}

@@ -41,6 +41,8 @@ var Module = fx.Module("matcher",
 		NewNatsConn,
 		NewBattleConn,
 		NewBattleClient,
+		newPlacer, // 每局一次选点（本机优先 + 轮询）
+		placerOf,  // → biz.BattlePlacer（handler 把本局目标钉进 ctx）
 		NewMatchmakerRuntime,
 		NewMatchmakerParty,
 		infra.NewNatsEventPublisher,

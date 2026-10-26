@@ -99,6 +99,18 @@ type BattleWarmer interface {
 	Warm(ctx context.Context, battleID, matchID string, playerIDs []string) error
 }
 
+// BattlePlacer 为**每一局**选一台 battle 落点，并把该选点挂到 ctx 上。
+//
+// 为什么必须是「每局一次决定」：一场成局处置要发**两次** battle 调用（预热 Create +
+// 入场 Admit）。若两跳各自负载均衡，两台等权 battle 下必然劈到不同进程（预热白做），
+// 对局的真实落点变成两跳之间的竞态——竞态一旦系统性偏向一侧，所有对局就挤在同一台。
+// 故由 handler 在处置开头调用一次 Pin，随后两跳共用同一 ctx（WithoutCancel 保留值）。
+type BattlePlacer interface {
+	// Pin 为本局选点并返回携带目标的 ctx；无候选/发现失败时原样返回 ctx
+	// （选点失效不得让成局失败，落点退回既有每 RPC 负载均衡）。
+	Pin(ctx context.Context) context.Context
+}
+
 // MatchSettleDeduper 是成局结算去重接口：
 // matchmaker 对同局每张 ticket 各发一次 TicketCompleted，
 // 发布事件与开局调用必须按 matchID 幂等（仅首个处理者执行）。

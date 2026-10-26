@@ -10,6 +10,7 @@ import (
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/metricstest"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/placement"
 	"github.com/huangyuCN/atlas/matchmaker"
 )
 
@@ -17,14 +18,18 @@ import (
 type fakeWarmer struct {
 	mu    sync.Mutex
 	calls []startCall
-	err   error
-	block chan struct{}
-	done  chan struct{}
+	// targets 是每次预热时 ctx 上的选点目标（每局一次选点的断言用）。
+	targets []string
+	err     error
+	block   chan struct{}
+	done    chan struct{}
 }
 
 // Warm 实现 biz.BattleWarmer。
-func (w *fakeWarmer) Warm(_ context.Context, battleID, matchID string, playerIDs []string) error {
+func (w *fakeWarmer) Warm(ctx context.Context, battleID, matchID string, playerIDs []string) error {
+	target, _ := placement.Target(ctx)
 	w.mu.Lock()
+	w.targets = append(w.targets, target)
 	w.calls = append(w.calls, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
 	block := w.block
 	err := w.err
@@ -43,6 +48,23 @@ func (w *fakeWarmer) called() []startCall {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return append([]startCall(nil), w.calls...)
+}
+
+// waitTargets 等待第 n 次预热被记录，返回截至当前的全部选点目标（异步触发，最多等 1s）。
+func (w *fakeWarmer) waitTargets(t *testing.T, n int) []string {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		w.mu.Lock()
+		got := append([]string(nil), w.targets...)
+		w.mu.Unlock()
+		if len(got) >= n {
+			return got
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("预热未被触发到第 %d 次", n)
+	return nil
 }
 
 // waitCalled 等待预热被触发（异步触发，最多等 1s）。

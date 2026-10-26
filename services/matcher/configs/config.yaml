@@ -118,6 +118,12 @@ battle:
   #   BATTLE_PLACEMENT_LOCAL_FIRST（缺省）同主机候选优先，本机无候选才跨机；
   #   BATTLE_PLACEMENT_ANY 不区分主机（旧行为）。
   # 依据：同主机 ≈ 同故障域 + 最低时延；跨节点懒激活冷启动（实测 p50≈2s）会摊到每次首调用上。
+  #
+  # 两种策略都按**每局一次**选点：LOCAL_FIRST 先按主机收窄候选，再在剩余候选里轮询
+  # （观测到「同机两台 battle 时对局全挤一台」的根因就是旧的「每 RPC 各选各的」——
+  # 一局的预热与入场两跳必然劈到不同进程）。轮询而不是按在途加权：选点粒度是一局，
+  # 一局持续数分钟，而在途 RPC 只是毫秒级一元调用，计数不代表负载；真正的负载信号
+  # （各 battle 在跑对局数）不在 matcher 手里。
   placement: BATTLE_PLACEMENT_LOCAL_FIRST
   # local_hosts 留空 = 由本进程网卡/主机名推导「本机」（selector/filter.LocalHosts）；
   # 跨机部署或想让「本机」指向特定地址时显式列出（主机名或 IP）。

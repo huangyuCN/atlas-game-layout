@@ -48,6 +48,9 @@ var (
 // admitMatch 处置一局成局：有界并发内完成开局+出票与成局事件发布。
 // 失败返回 false，并已由 onAdmissionFailed 完成回池、失败事件与打点。
 func (h *MatcherHandler) admitMatch(ctx context.Context, ev matchmaker.TicketEvent, battleID string, playerIDs []string) bool {
+	// 每局一次选点：本局目标 battle 钉进 ctx，预热与入场共用同一台。不先钉就发两跳的话，
+	// 两台等权 battle 下两跳必然劈到不同进程——预热白做、落点由两跳竞态决定（偏载即全挤一台）。
+	ctx = h.pinBattle(ctx)
 	// 预热先于并发槽：懒激活的冷启动在排队等槽期间就能被消费掉，等槽结束后入场落在热态 actor 上。
 	// 预热失败/超时只记日志与打点（见 warm），本局处置照旧。
 	h.warm(ctx, battleID, ev.Match.ID, playerIDs)
@@ -59,6 +62,15 @@ func (h *MatcherHandler) admitMatch(ctx context.Context, ev matchmaker.TicketEve
 		return false
 	}
 	return true
+}
+
+// pinBattle 为本局选点并把目标挂到 ctx 上；未装配选点或选点失败（无候选/发现不可用）时
+// 原样返回 ctx——选点只是分摊手段，绝不成新的失败源。
+func (h *MatcherHandler) pinBattle(ctx context.Context) context.Context {
+	if h.placer == nil {
+		return ctx
+	}
+	return h.placer.Pin(ctx)
 }
 
 // warm 异步预热目标对局的 battle actor（成局后、入场前，独立 goroutine）。

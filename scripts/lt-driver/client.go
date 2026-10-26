@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,9 @@ import (
 	wst "github.com/huangyuCN/atlas/transport/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+// frameErrCount 是帧面错误打印计数（临时诊断用）。
+var frameErrCount atomic.Int64
 
 // frameClient 是一条直连帧连接的统一接缝：WS 面与 UDP 面、经接入层与直连 battle 都在此收口。
 type frameClient interface {
@@ -58,6 +62,7 @@ type dialOpts struct {
 	transport string // ws | udp
 	edgeWS    string // 接入层 WS 面地址（host:port）
 	edgeUDP   string // 接入层 UDP 面地址（host:port）
+	edgeKCP   string // 接入层 KCP 面地址（host:port，后端为 battle 的 KCP 帧端口）
 	battleWS  string // battle WS 帧端口（直连对照用）
 	battleUDP string // battle UDP 帧端口（直连对照用）
 }
@@ -214,6 +219,8 @@ func dialFrameByOpts(ctx context.Context, o dialOpts, slot string, ticket []byte
 		return wsFrameClient{cli: cli}, nil
 	case o.via == "edge" && o.transport == "udp":
 		return dialEdgeUDP(ctx, o.edgeUDP, slot, ticket)
+	case o.via == "edge" && o.transport == "kcp":
+		return dialEdgeKCP(ctx, o.edgeKCP, slot, ticket)
 	case o.via == "direct" && o.transport == "ws":
 		cli, err := wst.NewClient(ctx, "ws://"+o.battleWS+"/",
 			wst.WithClientSessionProvider(func() string { return slot }))
@@ -257,6 +264,13 @@ func (p *loadPlayer) onNotify(operation string, payload []byte) {
 			return
 		}
 		p.broadcasts.Add(1)
+		// 用广播帧号推进「已见到的最新帧」：否则探针的 last_seen_frame 停滞，
+		// 回执会携带大量历史帧（数据报面 >16KiB 即被拒），探针被误计为帧失败。
+		if f := fb.GetFrame(); f != nil {
+			if cur := f.GetFrameId(); cur > p.lastFrame.Load() {
+				p.lastFrame.Store(cur)
+			}
+		}
 		if st := fb.GetFrame().GetServerTime(); st != nil {
 			p.downlink.add(time.Since(st.AsTime()))
 		}
@@ -313,6 +327,7 @@ func (p *loadPlayer) sendInput(ctx context.Context, seq uint64) {
 		}, nil)
 	if err != nil {
 		p.failures.Add(1)
+		frameErrLog(p.tag, "send", err)
 	}
 }
 
@@ -329,6 +344,7 @@ func (p *loadPlayer) probeOnce(ctx context.Context) error {
 		&battlev1.SyncFramesReq{BattleId: p.battleID, LastSeenFrame: p.lastFrame.Load()}, &sync)
 	if err != nil {
 		p.failures.Add(1)
+		frameErrLog(p.tag, "probe", err)
 		return err
 	}
 	if cur := sync.GetCurrentFrame(); cur > p.lastFrame.Load() {
@@ -345,5 +361,12 @@ func (p *loadPlayer) close() {
 	}
 	if p.biz != nil {
 		_ = p.biz.Close()
+	}
+}
+
+// frameErrLog 打印前若干条帧面错误（临时诊断用）。
+func frameErrLog(tag, kind string, err error) {
+	if n := frameErrCount.Add(1); n <= 10 {
+		fmt.Fprintf(os.Stderr, "[帧错#%d] %s %s: %v\n", n, tag, kind, err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	commonv1 "github.com/huangyuCN/atlas-game-layout/api/common/v1"
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/biz"
+	"github.com/huangyuCN/atlas-game-layout/services/matcher/internal/placement"
 	"github.com/huangyuCN/atlas/contrib/matchmaker/memory"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
 	"github.com/huangyuCN/atlas/matchmaker"
@@ -197,6 +198,8 @@ type fakeSink struct {
 	block chan struct{}
 	// cur/max 是入场调用的当前并发数与峰值（有界断言：峰值 ≤ 并发上限）。
 	cur, max int
+	// targets 是每次入场时 ctx 上的选点目标（每局一次选点的断言用）。
+	targets []string
 }
 
 type startCall struct {
@@ -227,9 +230,11 @@ func (s *fakeSink) PublishFailed(_ context.Context, ticketID string, _ []string,
 
 // Admit 实现 biz.BattleAdmitter：记录入场调用并回放桩回执（同时统计并发峰值）。
 // 每局只调 1 次——「2 跳变 1 跳」在计数维度就是 admitted 的长度。
-func (s *fakeSink) Admit(_ context.Context, battleID, matchID string, playerIDs []string) (*battlev1.IssueEntryTicketReply, error) {
+func (s *fakeSink) Admit(ctx context.Context, battleID, matchID string, playerIDs []string) (*battlev1.IssueEntryTicketReply, error) {
+	target, _ := placement.Target(ctx)
 	s.mu.Lock()
 	s.seq = append(s.seq, "admit")
+	s.targets = append(s.targets, target)
 	s.admitted = append(s.admitted, startCall{battleID: battleID, matchID: matchID, playerIDs: playerIDs})
 	s.cur++
 	if s.cur > s.max {
@@ -261,6 +266,16 @@ func (s *fakeSink) Admit(_ context.Context, battleID, matchID string, playerIDs 
 		})
 	}
 	return reply, nil
+}
+
+// admitted 的最后一次选点目标（每局一次选点断言用）。
+func (s *fakeSink) lastTarget() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.targets) == 0 {
+		return ""
+	}
+	return s.targets[len(s.targets)-1]
 }
 
 // peak 返回入场调用的并发峰值（有界扇出断言用）。
@@ -332,6 +347,7 @@ type testHandlerOpts struct {
 	meter     metrics.Collector
 	warmer    biz.BattleWarmer
 	warmup    biz.Warmup
+	placer    biz.BattlePlacer
 }
 
 // newTestHandler 构造测试用 handler（party 用 memory 引擎真实实现）。
@@ -352,6 +368,7 @@ func newTestHandlerWith(o testHandlerOpts) (*MatcherHandler, *fakeService, *fake
 		PartyMapper: partyMapper,
 		Sink:        sink,
 		Warmer:      o.warmer,
+		Placer:      o.placer,
 		Warmup:      o.warmup,
 		Deduper:     newFakeDeduper(),
 		Roster:      sink,
