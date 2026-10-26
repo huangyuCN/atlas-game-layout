@@ -19,6 +19,15 @@ import (
 // metricAdmissionFailed 是入场失败计数（label stage 取 admit/publish/empty_ticket/gate_wait）。
 const metricAdmissionFailed = "matcher_admission_failures_total"
 
+// 预热口径的指标：失败次数与耗时（耗时按结果分 label，便于热/冷对比与回归观测）。
+//
+// 为什么耗时也要导出：预热的价值就是「把懒激活冷启动挪出关键路径」，
+// 只有把预热自身的耗时与入场是否命中热态分开看，才能判断它是否真的省下了时间。
+const (
+	metricWarmupFailed = "matcher_battle_warmup_failures_total"
+	metricWarmupMillis = "matcher_battle_warmup_millis"
+)
+
 // requeueExtKey 是「已回池次数」在票据扩展里的键：引擎把 StartRequest.Extensions 原样带进
 // 新票，故同一票血统的重排次数可跨轮累计（无需新增存储）。
 const requeueExtKey = "matcher_requeue"
@@ -39,6 +48,9 @@ var (
 // admitMatch 处置一局成局：有界并发内完成开局+出票与成局事件发布。
 // 失败返回 false，并已由 onAdmissionFailed 完成回池、失败事件与打点。
 func (h *MatcherHandler) admitMatch(ctx context.Context, ev matchmaker.TicketEvent, battleID string, playerIDs []string) bool {
+	// 预热先于并发槽：懒激活的冷启动在排队等槽期间就能被消费掉，等槽结束后入场落在热态 actor 上。
+	// 预热失败/超时只记日志与打点（见 warm），本局处置照旧。
+	h.warm(ctx, battleID, ev.Match.ID, playerIDs)
 	err := h.gate.do(ctx, func(ctx context.Context) error {
 		return h.admitAndPublish(ctx, ev, battleID, playerIDs)
 	})
@@ -47,6 +59,39 @@ func (h *MatcherHandler) admitMatch(ctx context.Context, ev matchmaker.TicketEve
 		return false
 	}
 	return true
+}
+
+// warm 异步预热目标对局的 battle actor（成局后、入场前，独立 goroutine）。
+//
+// 三条约束（缺一即成为新的故障源）：
+//   - **不阻塞**：调用方不等待预热结果，入场不因预热慢/失败而延后或失败；
+//   - **不继承取消**：成局处置的 ctx 会随 tick/请求结束被取消，预热用 WithoutCancel 续命，
+//     再套自己的预算（缺省 biz.DefaultWarmupTimeout），避免「预热刚开始就被上游取消」；
+//   - **可观测**：失败记日志 + 计数，耗时进直方图（按 result 分 label）。
+func (h *MatcherHandler) warm(ctx context.Context, battleID, matchID string, playerIDs []string) {
+	if h.warmer == nil || h.warmup.Disabled {
+		return
+	}
+	budget := h.warmup.Timeout
+	if budget <= 0 {
+		budget = biz.DefaultWarmupTimeout
+	}
+	roster := append([]string(nil), playerIDs...)
+	go func() {
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+		defer cancel()
+		begin := time.Now()
+		err := h.warmer.Warm(wctx, battleID, matchID, roster)
+		elapsed := time.Since(begin)
+		result := "ok"
+		if err != nil {
+			result = "error"
+			h.meter.Counter(metricWarmupFailed).Add(1)
+			getlog.GetLogger().Warn("matcher: 预热 battle actor 失败（不影响入场）",
+				"battle", battleID, "match", matchID, "cost", elapsed.String(), "err", err)
+		}
+		h.meter.Histogram(metricWarmupMillis, "result", result).Observe(float64(elapsed.Milliseconds()))
+	}()
 }
 
 // admitAndPublish 在并发槽内完成一次入场：开局+出票（一次 RPC）→ 对局关联 → 成局事件。

@@ -330,6 +330,8 @@ func (m *fakePartyMapper) DelPartyTicket(_ context.Context, partyID string) erro
 type testHandlerOpts struct {
 	admission biz.Admission
 	meter     metrics.Collector
+	warmer    biz.BattleWarmer
+	warmup    biz.Warmup
 }
 
 // newTestHandler 构造测试用 handler（party 用 memory 引擎真实实现）。
@@ -349,6 +351,8 @@ func newTestHandlerWith(o testHandlerOpts) (*MatcherHandler, *fakeService, *fake
 		Mapper:      mapper,
 		PartyMapper: partyMapper,
 		Sink:        sink,
+		Warmer:      o.warmer,
+		Warmup:      o.warmup,
 		Deduper:     newFakeDeduper(),
 		Roster:      sink,
 		Admission:   o.admission,

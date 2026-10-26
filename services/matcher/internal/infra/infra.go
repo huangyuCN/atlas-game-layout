@@ -317,6 +317,31 @@ func (LocalPlacement) Place(_ context.Context, m matchmaker.Match) (matchmaker.A
 	}, nil
 }
 
+// BattleGRPCWarmer 是 biz.BattleWarmer 的实现：经 battle internal 面的 Create
+// 触达 battle:{battle_id}，把懒激活的冷启动提前消费掉。
+//
+// 为什么用 Create 而不是 Admit：预热必须**无票务副作用**——Create 只登记 match_id
+// 与参战名单（与随后 Admit 写入的是同一份数据，且幂等），不出票、不开入座窗口；
+// Admit 仍是唯一入场入口。预热与入场用同一 battle_id/名单，命中同一 actor。
+type BattleGRPCWarmer struct {
+	cli battlev1rpc.BattleServiceClient
+}
+
+// NewBattleGRPCWarmer 构造预热端口。
+func NewBattleGRPCWarmer(cli battlev1rpc.BattleServiceClient) *BattleGRPCWarmer {
+	return &BattleGRPCWarmer{cli: cli}
+}
+
+// Warm 实现 biz.BattleWarmer：一次 Create 调用即触达目标 actor（懒激活在 battle 侧完成）。
+func (w *BattleGRPCWarmer) Warm(ctx context.Context, battleID, matchID string, playerIDs []string) error {
+	_, err := w.cli.Create(ctx, &battlev1.CreateBattleRequest{
+		BattleId:  battleID,
+		MatchId:   matchID,
+		PlayerIds: playerIDs,
+	})
+	return err
+}
+
 // Sink 是成局观察方的默认组合（nats 发布 + battle 入场调用）。
 // server 装配与可编程装配共用同一实现。
 type Sink struct {

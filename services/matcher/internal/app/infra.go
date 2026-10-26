@@ -19,6 +19,8 @@ import (
 	"github.com/huangyuCN/atlas/matchmaker"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/registry"
+	"github.com/huangyuCN/atlas/selector"
+	"github.com/huangyuCN/atlas/selector/filter"
 	natsgo "github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
 )
@@ -43,14 +45,74 @@ func NewNatsConn(cfg *conf.Bootstrap) (*natsgo.Conn, error) {
 // NewBattleConn 拨号 battle 的 **internal 面**（可信区）：成局后的开局调用走
 // 类型化客户端（BattleService/Create），matcher 不再自建 actor 集群运行时，
 // 也不需要「只发不接」的懒激活副本——目标 PID 的解析与懒激活在 battle 侧完成。
-func NewBattleConn(discovery registry.Discovery, mws serverutil.ClientMiddlewares) *serverutil.LazyConn {
+//
+// 选点（placement）：按 battle.placement 挂载节点过滤器——缺省「本机优先」，
+// 让这一跳尽量落到同主机的 battle 进程（避免跨节点懒激活与跨节点帧流量）；
+// 本机没有候选时过滤器原样返回全部候选（跨机兜底，不降级为不可用）。
+func NewBattleConn(cfg *conf.Bootstrap, discovery registry.Discovery, mws serverutil.ClientMiddlewares) (*serverutil.LazyConn, error) {
+	filters, err := battleNodeFilters(cfg)
+	if err != nil {
+		return nil, err
+	}
+	dialOpts := make([]serverutil.DialOption, 0, 1)
+	if len(filters) > 0 {
+		dialOpts = append(dialOpts, serverutil.WithNodeFilters(filters...))
+	}
 	return serverutil.NewLazyConn(func(ctx context.Context) (grpc.ClientConnInterface, error) {
-		conn, err := serverutil.DialDomain(ctx, discovery, consts.ServiceBattle, serverutil.SchemeGRPC, mws)
+		conn, err := serverutil.DialDomain(ctx, discovery, consts.ServiceBattle, serverutil.SchemeGRPC, mws, dialOpts...)
 		if err != nil {
 			return nil, err
 		}
 		return conn, nil
-	})
+	}), nil
+}
+
+// battleNodeFilters 把 battle.placement 配置翻译成选点过滤器：
+//   - LOCAL_FIRST（缺省）：本机优先，本机无候选时回落跨机；
+//   - ANY：不挂过滤器（旧行为，负载均衡在全部候选里挑）；
+//   - 其余（含 UNSPECIFIED 之外的新值）：**启动期报错**，不静默按缺省处置。
+func battleNodeFilters(cfg *conf.Bootstrap) ([]selector.NodeFilter, error) {
+	b := cfg.GetBattle()
+	switch b.GetPlacement() {
+	case conf.BattlePlacement_BATTLE_PLACEMENT_UNSPECIFIED, conf.BattlePlacement_BATTLE_PLACEMENT_LOCAL_FIRST:
+		hosts := b.GetLocalHosts()
+		if len(hosts) == 0 {
+			// 未显式配置时以本进程所在主机为「本机」（主机名 + 各网卡 IP + 回环）。
+			hosts = filter.LocalHosts()
+		}
+		return []selector.NodeFilter{filter.PreferLocal(hosts...)}, nil
+	case conf.BattlePlacement_BATTLE_PLACEMENT_ANY:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("app: battle.placement 取值非法: %v", b.GetPlacement())
+	}
+}
+
+// warmupEnabled 报告是否启用入场前预热：battle.warmup 未配置（nil）时**缺省打开**
+// （proto3 optional 的 presence 就是为「未配置 ≠ 显式关闭」准备的）。
+func warmupEnabled(cfg *conf.Bootstrap) bool {
+	b := cfg.GetBattle()
+	if b == nil {
+		return true
+	}
+	if v := b.Warmup; v != nil {
+		return *v
+	}
+	return true
+}
+
+// warmupTimeout 返回单次预热预算：battle.warmup_timeout_ms 为 0 时取 biz.DefaultWarmupTimeout。
+func warmupTimeout(cfg *conf.Bootstrap) time.Duration {
+	ms := cfg.GetBattle().GetWarmupTimeoutMs()
+	if ms <= 0 {
+		return biz.DefaultWarmupTimeout
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// newWarmer 把 battle internal 面客户端绑定为预热端口（供 fx 按接口注入）。
+func newWarmer(cli battlev1rpc.BattleServiceClient) biz.BattleWarmer {
+	return infra.NewBattleGRPCWarmer(cli)
 }
 
 // NewBattleClient 基于 internal 面连接构造 BattleService 类型化客户端。
@@ -90,7 +152,7 @@ func NewMatchmakerParty(svc matchmaker.Service, cli *pkredis.Client) matchmaker.
 // newMatcherDeps 聚合撮合 handler 依赖（fx 装配）。
 func newMatcherDeps(cfg *conf.Bootstrap, meter metrics.Collector, svc matchmaker.Service, party matchmaker.Party,
 	mapper biz.PlayerTicketMapper, partyMapper biz.PartyQueueMapper,
-	sink biz.MatchEventSink, deduper biz.MatchSettleDeduper, roster biz.PartyRosterPublisher) handler.MatcherDeps {
+	sink biz.MatchEventSink, warmer biz.BattleWarmer, deduper biz.MatchSettleDeduper, roster biz.PartyRosterPublisher) handler.MatcherDeps {
 	m := cfg.GetMatchmaker()
 	return handler.MatcherDeps{
 		Svc:         svc,
@@ -98,9 +160,14 @@ func newMatcherDeps(cfg *conf.Bootstrap, meter metrics.Collector, svc matchmaker
 		Mapper:      mapper,
 		PartyMapper: partyMapper,
 		Sink:        sink,
+		Warmer:      warmer,
 		Deduper:     deduper,
 		Roster:      roster,
 		Metrics:     meter,
+		Warmup: biz.Warmup{
+			Disabled: !warmupEnabled(cfg),
+			Timeout:  warmupTimeout(cfg),
+		},
 		// 0 值一律由 handler 取缺省（见 biz.DefaultAdmit*），配置层不重复写死缺省值。
 		Admission: biz.Admission{
 			Concurrency: int(m.GetAdmitConcurrency()),

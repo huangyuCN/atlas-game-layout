@@ -132,3 +132,10 @@ observability:
   # 采样完立即关闭。同机起全栈的建议端口：gateway 6060 / game 6061 / matcher 6062
   # / battle 6063 / edge 6064（本服务 6060）。
   # pprof: 127.0.0.1:6060
+
+# link 是**会话联动**（网关 → game internal 面 Register/Login/Logout）的单次调用预算。
+# 为什么单列：这一跳要等 game 侧按账号懒激活玩家 actor（冷启动实测 p50≈2s、max≈2.13s），
+# 与 relay 的 redis 回调预算不是一回事；缺省 5s（与 relay.timeout 同口径）。
+# 显式 ≤0 或非法字符串 ⇒ 启动失败（不静默回落）。
+link:
+  timeout: 5s

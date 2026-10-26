@@ -74,6 +74,31 @@ const (
 	DefaultAdmitWait = 5 * time.Second
 )
 
+// Warmup 是「成局后、入场前」预热 battle actor 的参数。
+//
+// 为什么默认打开：懒激活（首次触达 actor 时的创建 + OnStart 加载）的冷启动实测 p50≈2s，
+// 落在入场那一跳上就直接吃掉「成局 → 客户端连帧」之间的全部余量。预热把这段冷启动
+// 挪到入场之前、并在独立 goroutine 里跑——失败只记日志与打点，不阻塞、不改变本局处置。
+type Warmup struct {
+	// Disabled 为 true 时不预热（零值 false = 预热打开）。
+	Disabled bool
+	// Timeout 是单次预热预算；0 取 DefaultWarmupTimeout。
+	Timeout time.Duration
+}
+
+// DefaultWarmupTimeout 是单次预热的缺省预算：与冷启动实测 p50（≈2s）同量级，
+// 够触达激活即可；比它更长的等待没有收益（入场自己还有 5s 预算兜底）。
+const DefaultWarmupTimeout = 2 * time.Second
+
+// BattleWarmer 预热目标对局的 battle actor。
+//
+// 实现必须**幂等**且无票务副作用（只触发激活/登记，不出票、不开入座窗口）：
+// 唯一入场入口仍是 Admit，预热只是提前把懒激活的冷启动消费掉。
+type BattleWarmer interface {
+	// Warm 触达 battle:{battleID} 并返回错误（调用方只记日志与打点，不据此改处置）。
+	Warm(ctx context.Context, battleID, matchID string, playerIDs []string) error
+}
+
 // MatchSettleDeduper 是成局结算去重接口：
 // matchmaker 对同局每张 ticket 各发一次 TicketCompleted，
 // 发布事件与开局调用必须按 matchID 幂等（仅首个处理者执行）。

@@ -111,3 +111,19 @@ observability:
   # 采样完立即关闭。同机起全栈的建议端口：gateway 6060 / game 6061 / matcher 6062
   # / battle 6063 / edge 6064（本服务 6062）。
   # pprof: 127.0.0.1:6062
+
+# battle 是 battle 域的**选点**与**预热**参数。
+battle:
+  # placement 是选点策略：
+  #   BATTLE_PLACEMENT_LOCAL_FIRST（缺省）同主机候选优先，本机无候选才跨机；
+  #   BATTLE_PLACEMENT_ANY 不区分主机（旧行为）。
+  # 依据：同主机 ≈ 同故障域 + 最低时延；跨节点懒激活冷启动（实测 p50≈2s）会摊到每次首调用上。
+  placement: BATTLE_PLACEMENT_LOCAL_FIRST
+  # local_hosts 留空 = 由本进程网卡/主机名推导「本机」（selector/filter.LocalHosts）；
+  # 跨机部署或想让「本机」指向特定地址时显式列出（主机名或 IP）。
+  # 注意：判定比对的是 battle **注册出去的端点主机**（如 internal_addr 绑通配地址
+  # 0.0.0.0 时注册的就是 0.0.0.0）——这种部署要把该主机写进 local_hosts，
+  # 否则「本机优先」判不出来、退回跨机（行为与改造前一致，不会出错）。
+  # warmup 缺省打开：成局后、入场前异步预热目标 battle actor（失败只记日志与打点，不阻塞入场）。
+  warmup: true
+  # warmup_timeout_ms 是单次预热预算（缺省 2000）：与冷启动实测 p50 同量级。

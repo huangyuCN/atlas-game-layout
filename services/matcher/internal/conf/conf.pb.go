@@ -24,6 +24,60 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// BattlePlacement 是 matcher 选 battle 节点的策略：只影响「打到哪个节点」，
+// 不改变 actor 归属规则（归属仍由 battle 侧目录 Claim 决定）。
+type BattlePlacement int32
+
+const (
+	// BATTLE_PLACEMENT_UNSPECIFIED 表示未配置：按 LOCAL_FIRST 处理（缺省即本机优先）。
+	BattlePlacement_BATTLE_PLACEMENT_UNSPECIFIED BattlePlacement = 0
+	// BATTLE_PLACEMENT_LOCAL_FIRST 表示同主机候选优先，本机一个都没有才跨机。
+	BattlePlacement_BATTLE_PLACEMENT_LOCAL_FIRST BattlePlacement = 1
+	// BATTLE_PLACEMENT_ANY 表示不区分主机（旧行为：负载均衡在全部候选里挑）。
+	BattlePlacement_BATTLE_PLACEMENT_ANY BattlePlacement = 2
+)
+
+// Enum value maps for BattlePlacement.
+var (
+	BattlePlacement_name = map[int32]string{
+		0: "BATTLE_PLACEMENT_UNSPECIFIED",
+		1: "BATTLE_PLACEMENT_LOCAL_FIRST",
+		2: "BATTLE_PLACEMENT_ANY",
+	}
+	BattlePlacement_value = map[string]int32{
+		"BATTLE_PLACEMENT_UNSPECIFIED": 0,
+		"BATTLE_PLACEMENT_LOCAL_FIRST": 1,
+		"BATTLE_PLACEMENT_ANY":         2,
+	}
+)
+
+func (x BattlePlacement) Enum() *BattlePlacement {
+	p := new(BattlePlacement)
+	*p = x
+	return p
+}
+
+func (x BattlePlacement) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (BattlePlacement) Descriptor() protoreflect.EnumDescriptor {
+	return file_services_matcher_internal_conf_conf_proto_enumTypes[0].Descriptor()
+}
+
+func (BattlePlacement) Type() protoreflect.EnumType {
+	return &file_services_matcher_internal_conf_conf_proto_enumTypes[0]
+}
+
+func (x BattlePlacement) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use BattlePlacement.Descriptor instead.
+func (BattlePlacement) EnumDescriptor() ([]byte, []int) {
+	return file_services_matcher_internal_conf_conf_proto_rawDescGZIP(), []int{0}
+}
+
 // Matchmaker 是撮合运行参数（等待阈值 + 成局处置的有界扇出）。
 // 所有字段的 0 / 缺省都表示「取代码缺省值」（见 internal/infra.DefaultRequestTimeout、
 // internal/biz.DefaultAdmit*）——这些参数不存在「0 有意义」的取值，
@@ -131,6 +185,83 @@ func (x *Matchmaker) GetFetchSize() int32 {
 	return 0
 }
 
+// Battle 是 matcher 访问 battle 域的选点与预热参数。
+type Battle struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// placement 是选点策略（缺省 = LOCAL_FIRST）。依据：同主机 ≈ 同故障域 + 最低时延，
+	// 跨节点懒激活的冷启动（实测 p50≈2s）会摊到每次首调用上；本机不可用时仍跨机（不降级为不可用）。
+	Placement BattlePlacement `protobuf:"varint,1,opt,name=placement,proto3,enum=matcher.conf.BattlePlacement" json:"placement,omitempty"`
+	// local_hosts 是「本机」主机白名单（主机名或 IP；空 = 由本进程网卡/主机名推导，
+	// 见框架 selector/filter.LocalHosts）。仅 LOCAL_FIRST 使用。
+	LocalHosts []string `protobuf:"bytes,2,rep,name=local_hosts,json=localHosts,proto3" json:"local_hosts,omitempty"`
+	// warmup 是「成局后、入场前」异步预热目标 battle actor 的开关（缺省 true）。
+	// 用 proto3 optional 表达「未配置」：nil 取 true，显式 false 关闭。
+	Warmup *bool `protobuf:"varint,3,opt,name=warmup,proto3,oneof" json:"warmup,omitempty"`
+	// warmup_timeout_ms 是单次预热预算（毫秒；缺省 2000）。预热在独立 goroutine 内跑，
+	// 超时只记日志与打点，不阻塞也不改变本局处置。
+	WarmupTimeoutMs int64 `protobuf:"varint,4,opt,name=warmup_timeout_ms,json=warmupTimeoutMs,proto3" json:"warmup_timeout_ms,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Battle) Reset() {
+	*x = Battle{}
+	mi := &file_services_matcher_internal_conf_conf_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Battle) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Battle) ProtoMessage() {}
+
+func (x *Battle) ProtoReflect() protoreflect.Message {
+	mi := &file_services_matcher_internal_conf_conf_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Battle.ProtoReflect.Descriptor instead.
+func (*Battle) Descriptor() ([]byte, []int) {
+	return file_services_matcher_internal_conf_conf_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Battle) GetPlacement() BattlePlacement {
+	if x != nil {
+		return x.Placement
+	}
+	return BattlePlacement_BATTLE_PLACEMENT_UNSPECIFIED
+}
+
+func (x *Battle) GetLocalHosts() []string {
+	if x != nil {
+		return x.LocalHosts
+	}
+	return nil
+}
+
+func (x *Battle) GetWarmup() bool {
+	if x != nil && x.Warmup != nil {
+		return *x.Warmup
+	}
+	return false
+}
+
+func (x *Battle) GetWarmupTimeoutMs() int64 {
+	if x != nil {
+		return x.WarmupTimeoutMs
+	}
+	return 0
+}
+
 type Bootstrap struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Runtime  *configs.Runtime       `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
@@ -141,14 +272,16 @@ type Bootstrap struct {
 	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
 	Observability *configs.Observability `protobuf:"bytes,6,opt,name=observability,proto3" json:"observability,omitempty"`
 	// matchmaker 是撮合运行参数（等待阈值与成局处置并发，见 Matchmaker 字段注释）。
-	Matchmaker    *Matchmaker `protobuf:"bytes,7,opt,name=matchmaker,proto3" json:"matchmaker,omitempty"`
+	Matchmaker *Matchmaker `protobuf:"bytes,7,opt,name=matchmaker,proto3" json:"matchmaker,omitempty"`
+	// battle 是 battle 域的选点（本机优先）与预热参数（见 Battle 字段注释）。
+	Battle        *Battle `protobuf:"bytes,8,opt,name=battle,proto3" json:"battle,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Bootstrap) Reset() {
 	*x = Bootstrap{}
-	mi := &file_services_matcher_internal_conf_conf_proto_msgTypes[1]
+	mi := &file_services_matcher_internal_conf_conf_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +293,7 @@ func (x *Bootstrap) String() string {
 func (*Bootstrap) ProtoMessage() {}
 
 func (x *Bootstrap) ProtoReflect() protoreflect.Message {
-	mi := &file_services_matcher_internal_conf_conf_proto_msgTypes[1]
+	mi := &file_services_matcher_internal_conf_conf_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +306,7 @@ func (x *Bootstrap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Bootstrap.ProtoReflect.Descriptor instead.
 func (*Bootstrap) Descriptor() ([]byte, []int) {
-	return file_services_matcher_internal_conf_conf_proto_rawDescGZIP(), []int{1}
+	return file_services_matcher_internal_conf_conf_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Bootstrap) GetRuntime() *configs.Runtime {
@@ -225,6 +358,13 @@ func (x *Bootstrap) GetMatchmaker() *Matchmaker {
 	return nil
 }
 
+func (x *Bootstrap) GetBattle() *Battle {
+	if x != nil {
+		return x.Battle
+	}
+	return nil
+}
+
 var File_services_matcher_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_matcher_internal_conf_conf_proto_rawDesc = "" +
@@ -238,7 +378,14 @@ const file_services_matcher_internal_conf_conf_proto_rawDesc = "" +
 	"\radmit_wait_ms\x18\x04 \x01(\x03R\vadmitWaitMs\x12(\n" +
 	"\x10tick_interval_ms\x18\x05 \x01(\x03R\x0etickIntervalMs\x12\x1d\n" +
 	"\n" +
-	"fetch_size\x18\x06 \x01(\x05R\tfetchSize\"\xee\x02\n" +
+	"fetch_size\x18\x06 \x01(\x05R\tfetchSize\"\xba\x01\n" +
+	"\x06Battle\x12;\n" +
+	"\tplacement\x18\x01 \x01(\x0e2\x1d.matcher.conf.BattlePlacementR\tplacement\x12\x1f\n" +
+	"\vlocal_hosts\x18\x02 \x03(\tR\n" +
+	"localHosts\x12\x1b\n" +
+	"\x06warmup\x18\x03 \x01(\bH\x00R\x06warmup\x88\x01\x01\x12*\n" +
+	"\x11warmup_timeout_ms\x18\x04 \x01(\x03R\x0fwarmupTimeoutMsB\t\n" +
+	"\a_warmup\"\x9c\x03\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
@@ -248,7 +395,12 @@ const file_services_matcher_internal_conf_conf_proto_rawDesc = "" +
 	"\robservability\x18\x06 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x128\n" +
 	"\n" +
 	"matchmaker\x18\a \x01(\v2\x18.matcher.conf.MatchmakerR\n" +
-	"matchmakerBLZJgithub.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf;confb\x06proto3"
+	"matchmaker\x12,\n" +
+	"\x06battle\x18\b \x01(\v2\x14.matcher.conf.BattleR\x06battle*o\n" +
+	"\x0fBattlePlacement\x12 \n" +
+	"\x1cBATTLE_PLACEMENT_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cBATTLE_PLACEMENT_LOCAL_FIRST\x10\x01\x12\x18\n" +
+	"\x14BATTLE_PLACEMENT_ANY\x10\x02BLZJgithub.com/huangyuCN/atlas-game-layout/services/matcher/internal/conf;confb\x06proto3"
 
 var (
 	file_services_matcher_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -262,30 +414,35 @@ func file_services_matcher_internal_conf_conf_proto_rawDescGZIP() []byte {
 	return file_services_matcher_internal_conf_conf_proto_rawDescData
 }
 
-var file_services_matcher_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_services_matcher_internal_conf_conf_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_services_matcher_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_services_matcher_internal_conf_conf_proto_goTypes = []any{
-	(*Matchmaker)(nil),            // 0: matcher.conf.Matchmaker
-	(*Bootstrap)(nil),             // 1: matcher.conf.Bootstrap
-	(*configs.Runtime)(nil),       // 2: atlas.configs.Runtime
-	(*configs.Registry)(nil),      // 3: atlas.configs.Registry
-	(*configs.Server)(nil),        // 4: atlas.configs.Server
-	(*configs.Data)(nil),          // 5: atlas.configs.Data
-	(*configs.Log)(nil),           // 6: atlas.configs.Log
-	(*configs.Observability)(nil), // 7: atlas.configs.Observability
+	(BattlePlacement)(0),          // 0: matcher.conf.BattlePlacement
+	(*Matchmaker)(nil),            // 1: matcher.conf.Matchmaker
+	(*Battle)(nil),                // 2: matcher.conf.Battle
+	(*Bootstrap)(nil),             // 3: matcher.conf.Bootstrap
+	(*configs.Runtime)(nil),       // 4: atlas.configs.Runtime
+	(*configs.Registry)(nil),      // 5: atlas.configs.Registry
+	(*configs.Server)(nil),        // 6: atlas.configs.Server
+	(*configs.Data)(nil),          // 7: atlas.configs.Data
+	(*configs.Log)(nil),           // 8: atlas.configs.Log
+	(*configs.Observability)(nil), // 9: atlas.configs.Observability
 }
 var file_services_matcher_internal_conf_conf_proto_depIdxs = []int32{
-	2, // 0: matcher.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
-	3, // 1: matcher.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
-	4, // 2: matcher.conf.Bootstrap.server:type_name -> atlas.configs.Server
-	5, // 3: matcher.conf.Bootstrap.data:type_name -> atlas.configs.Data
-	6, // 4: matcher.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	7, // 5: matcher.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
-	0, // 6: matcher.conf.Bootstrap.matchmaker:type_name -> matcher.conf.Matchmaker
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	0, // 0: matcher.conf.Battle.placement:type_name -> matcher.conf.BattlePlacement
+	4, // 1: matcher.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
+	5, // 2: matcher.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
+	6, // 3: matcher.conf.Bootstrap.server:type_name -> atlas.configs.Server
+	7, // 4: matcher.conf.Bootstrap.data:type_name -> atlas.configs.Data
+	8, // 5: matcher.conf.Bootstrap.log:type_name -> atlas.configs.Log
+	9, // 6: matcher.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	1, // 7: matcher.conf.Bootstrap.matchmaker:type_name -> matcher.conf.Matchmaker
+	2, // 8: matcher.conf.Bootstrap.battle:type_name -> matcher.conf.Battle
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_services_matcher_internal_conf_conf_proto_init() }
@@ -293,18 +450,20 @@ func file_services_matcher_internal_conf_conf_proto_init() {
 	if File_services_matcher_internal_conf_conf_proto != nil {
 		return
 	}
+	file_services_matcher_internal_conf_conf_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_services_matcher_internal_conf_conf_proto_rawDesc), len(file_services_matcher_internal_conf_conf_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_services_matcher_internal_conf_conf_proto_goTypes,
 		DependencyIndexes: file_services_matcher_internal_conf_conf_proto_depIdxs,
+		EnumInfos:         file_services_matcher_internal_conf_conf_proto_enumTypes,
 		MessageInfos:      file_services_matcher_internal_conf_conf_proto_msgTypes,
 	}.Build()
 	File_services_matcher_internal_conf_conf_proto = out.File

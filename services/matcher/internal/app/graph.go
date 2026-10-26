@@ -54,6 +54,7 @@ var Module = fx.Module("matcher",
 		// ── biz：撮合 API 绑定 + 成局观察方 + grpc handler ──
 		serviceOf,
 		newSink,
+		newWarmer,
 		newMatcherDeps,
 		handler.NewMatcherHandler,
 		// ── server：传输层构造（启停归属驱动方）──

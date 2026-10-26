@@ -44,6 +44,33 @@ message Matchmaker {
   int32 fetch_size = 6;
 }
 
+// BattlePlacement 是 matcher 选 battle 节点的策略：只影响「打到哪个节点」，
+// 不改变 actor 归属规则（归属仍由 battle 侧目录 Claim 决定）。
+enum BattlePlacement {
+  // BATTLE_PLACEMENT_UNSPECIFIED 表示未配置：按 LOCAL_FIRST 处理（缺省即本机优先）。
+  BATTLE_PLACEMENT_UNSPECIFIED = 0;
+  // BATTLE_PLACEMENT_LOCAL_FIRST 表示同主机候选优先，本机一个都没有才跨机。
+  BATTLE_PLACEMENT_LOCAL_FIRST = 1;
+  // BATTLE_PLACEMENT_ANY 表示不区分主机（旧行为：负载均衡在全部候选里挑）。
+  BATTLE_PLACEMENT_ANY = 2;
+}
+
+// Battle 是 matcher 访问 battle 域的选点与预热参数。
+message Battle {
+  // placement 是选点策略（缺省 = LOCAL_FIRST）。依据：同主机 ≈ 同故障域 + 最低时延，
+  // 跨节点懒激活的冷启动（实测 p50≈2s）会摊到每次首调用上；本机不可用时仍跨机（不降级为不可用）。
+  BattlePlacement placement = 1;
+  // local_hosts 是「本机」主机白名单（主机名或 IP；空 = 由本进程网卡/主机名推导，
+  // 见框架 selector/filter.LocalHosts）。仅 LOCAL_FIRST 使用。
+  repeated string local_hosts = 2;
+  // warmup 是「成局后、入场前」异步预热目标 battle actor 的开关（缺省 true）。
+  // 用 proto3 optional 表达「未配置」：nil 取 true，显式 false 关闭。
+  optional bool warmup = 3;
+  // warmup_timeout_ms 是单次预热预算（毫秒；缺省 2000）。预热在独立 goroutine 内跑，
+  // 超时只记日志与打点，不阻塞也不改变本局处置。
+  int64 warmup_timeout_ms = 4;
+}
+
 message Bootstrap {
   atlas.configs.Runtime runtime = 1;
   atlas.configs.Registry registry = 2;
@@ -54,4 +81,6 @@ message Bootstrap {
   atlas.configs.Observability observability = 6;
   // matchmaker 是撮合运行参数（等待阈值与成局处置并发，见 Matchmaker 字段注释）。
   Matchmaker matchmaker = 7;
+  // battle 是 battle 域的选点（本机优先）与预热参数（见 Battle 字段注释）。
+  Battle battle = 8;
 }

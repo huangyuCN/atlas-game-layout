@@ -28,9 +28,11 @@ type MatcherDeps struct {
 	Mapper      biz.PlayerTicketMapper
 	PartyMapper biz.PartyQueueMapper
 	Sink        biz.MatchEventSink
+	Warmer      biz.BattleWarmer // 预热端口（nil = 不预热）
 	Deduper     biz.MatchSettleDeduper
 	Roster      biz.PartyRosterPublisher
 	Admission   biz.Admission
+	Warmup      biz.Warmup
 	Metrics     metrics.Collector
 }
 
@@ -44,8 +46,10 @@ type MatcherHandler struct {
 	sink        biz.MatchEventSink
 	deduper     biz.MatchSettleDeduper
 	roster      biz.PartyRosterPublisher
-	gate        *admissionGate // 成局处置的有界并发闸门（上限 + 背压）
-	admission   biz.Admission  // 单局入场预算（超时/等槽，零值取缺省）
+	gate        *admissionGate   // 成局处置的有界并发闸门（上限 + 背压）
+	admission   biz.Admission    // 单局入场预算（超时/等槽，零值取缺省）
+	warmer      biz.BattleWarmer // 入场前的异步预热端口（nil = 不预热）
+	warmup      biz.Warmup       // 预热开关与预算（零值 = 打开 + 缺省预算）
 	meter       metrics.Collector
 }
 
@@ -61,6 +65,8 @@ func NewMatcherHandler(d MatcherDeps) *MatcherHandler {
 		mapper:      d.Mapper,
 		partyMapper: d.PartyMapper,
 		sink:        d.Sink,
+		warmer:      d.Warmer,
+		warmup:      d.Warmup,
 		deduper:     d.Deduper,
 		roster:      d.Roster,
 		gate:        newAdmissionGate(d.Admission),

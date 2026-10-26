@@ -27,6 +27,19 @@ message Bootstrap {
   atlas.configs.Observability observability = 14;
   // relay 是推送/控制回调访问 redis 的预算（懒激活冷启动预算，非超时兜底）。
   Relay relay = 7;
+  // link 是会话联动（Register/Login/Logout）调 game internal 面的预算。
+  Link link = 8;
+}
+
+// Link 是会话联动（网关 → game internal 面 Register/Login/Logout）的调用预算。
+//
+// 单独成节的原因：这一跳要等 game 侧按账号**懒激活**玩家 actor（冷启动实测 p50≈2s），
+// 与推送/控制回调的 redis 预算不是一回事，混用会把「激活慢」误判成「redis 慢」。
+message Link {
+  // timeout 是单次调用的预算（time.ParseDuration 字符串，如 5s；空 = 5s）。
+  // 缺省取 5s：与 relay.timeout 同口径（同一条会话链路的两段预算不各行其是）；
+  // 显式 ≤0 或非法字符串 ⇒ 启动失败（不静默回落缺省）。
+  string timeout = 1;
 }
 
 // Relay 是网关推送/控制回调的预算配置。
