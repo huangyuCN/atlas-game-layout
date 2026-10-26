@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/bootstrap"
@@ -24,6 +25,11 @@ func TestServiceConfigLoads(t *testing.T) {
 	}
 	if cfg.GetSession().GetTtl() != "30s" {
 		t.Fatalf("session.ttl = %q, 期望 30s", cfg.GetSession().GetTtl())
+	}
+	// relay.timeout 是推送/控制回调的懒激活冷启动预算：样例必须显式写 5s（缺省同值），
+	// 写错（0s/非法）会在启动期被 RelayTimeout 拒绝。
+	if got, err := cfg.RelayTimeout(); err != nil || got != 5*time.Second {
+		t.Fatalf("relay.timeout = %v (err=%v), 期望 5s", got, err)
 	}
 	// R9 严格模式：真实配置必须显式带 runtime.namespace（样例值 test）——
 	// 删掉该字段或用旧名 actor_namespace 时本用例即失败，错误信息含字段全名。

@@ -178,3 +178,21 @@ func startCount(svc *fakeService) int {
 	defer svc.mu.Unlock()
 	return len(svc.starts)
 }
+
+// TestAdmissionTimeoutDefault 验证单局入场预算缺省 5s（未配置 = 缺省，不是 0 超时）。
+func TestAdmissionTimeoutDefault(t *testing.T) {
+	h, _, _, _ := newTestHandler()
+	if got := h.admissionTimeout(); got != 5*time.Second {
+		t.Fatalf("缺省入场预算 = %v, want 5s", got)
+	}
+}
+
+// TestAdmissionTimeoutConfigured 验证显式配置覆盖缺省（配置项已有，仅缺省值变化）。
+func TestAdmissionTimeoutConfigured(t *testing.T) {
+	h, _, _, _ := newTestHandlerWith(testHandlerOpts{
+		admission: biz.Admission{Timeout: 7 * time.Second},
+	})
+	if got := h.admissionTimeout(); got != 7*time.Second {
+		t.Fatalf("显式入场预算 = %v, want 7s", got)
+	}
+}

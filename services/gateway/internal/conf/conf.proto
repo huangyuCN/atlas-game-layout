@@ -25,4 +25,14 @@ message Bootstrap {
   atlas.configs.Session session = 6;
   // observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
   atlas.configs.Observability observability = 14;
+  // relay 是推送/控制回调访问 redis 的预算（懒激活冷启动预算，非超时兜底）。
+  Relay relay = 7;
+}
+
+// Relay 是网关推送/控制回调的预算配置。
+message Relay {
+  // timeout 是单次回调访问 redis 的预算（time.ParseDuration 字符串，如 5s；空 = 5s）。
+  // 它是懒激活的冷启动预算（路由表/会话表首次触达 redis 的那一跳），不是业务超时兜底；
+  // 显式 ≤0 或非法字符串 ⇒ 启动失败（不静默回落缺省）。
+  string timeout = 1;
 }

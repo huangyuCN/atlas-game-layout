@@ -102,7 +102,7 @@ func newGWEnvMeter(t *testing.T, id, redisAddr, natsURL string, meter metrics.Co
 	sess := session.NewManager(session.NewRedisStore(cli), id, session.Options{TTL: 30 * time.Second})
 	mock := newMockDomain()
 	g := NewGateway(id, newRouteTable(t), sess, mock, mock, meter, nc, testPublisher(nc),
-		push, new(fakePusher), VersionGate{})
+		push, new(fakePusher), VersionGate{}, conf.DefaultRelayTimeout)
 	cfg := &conf.Bootstrap{
 		Server: &configspb.Server{
 			Tcp:       &configspb.Server_TCP{Addr: "127.0.0.1:0"},

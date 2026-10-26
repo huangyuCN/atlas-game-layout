@@ -11,6 +11,7 @@ import (
 	matcherv1 "github.com/huangyuCN/atlas-game-layout/api/matcher/v1"
 	"github.com/huangyuCN/atlas-game-layout/pkg/matchpush"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
+	"github.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -59,7 +60,7 @@ func (g *Gateway) StartRelay(ctx context.Context) error {
 // 解码/编码失败静默忽略（事件总线消息允许丢失，恢复路径见查询接口）。
 func (g *Gateway) relayEvent(operation string, data []byte,
 	build func(ctx context.Context) (players []string, notify []byte, ok bool)) {
-	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), g.relayTimeout)
 	defer cancel()
 	players, notify, ok := build(ctx)
 	if !ok {
@@ -78,7 +79,7 @@ func (g *Gateway) relayEvent(operation string, data []byte,
 // （matchpush.NotifyFor）并逐人下发。无票者跳过——绝不下发空票：空票连不上接入层，
 // 只会把「服务端没出票」伪装成「客户端连不上」，比不下发更难排查。
 func (g *Gateway) onMatchStarted(_ string, data []byte) {
-	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), g.relayTimeout)
 	defer cancel()
 	var ev matcherv1.MatchStartedEvent
 	if err := protojson.Unmarshal(data, &ev); err != nil {
@@ -144,8 +145,14 @@ func (g *Gateway) onPartyRoster(_ string, data []byte) {
 	})
 }
 
-// relayTimeout 是推送/控制回调访问 redis 的兜底超时（防回调 goroutine 悬挂）。
-const relayTimeout = 2 * time.Second
+// relayBudget 归一推送/控制回调预算：未注入/非正值回落缺省 5s
+// （配置层已拒绝 ≤0，这里兜住直接构造 Gateway 的调用方）。
+func relayBudget(d time.Duration) time.Duration {
+	if d <= 0 {
+		return conf.DefaultRelayTimeout
+	}
+	return d
+}
 
 // onPushEvent 处理推送事件：解析玩家 ID 与消息信封，仅本实例持有该玩家时下发。
 func (g *Gateway) onPushEvent(subject string, data []byte) {
@@ -157,7 +164,7 @@ func (g *Gateway) onPushEvent(subject string, data []byte) {
 	if err := json.Unmarshal(data, &env); err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), g.relayTimeout)
 	defer cancel()
 	route, err := g.sess.Route(ctx, playerID)
 	if err != nil || route == nil || route.InstanceID != g.instanceID {
@@ -178,7 +185,7 @@ func (g *Gateway) onKickNotice(_ string, data []byte) {
 	}
 	g.pushKicked(sess)
 	// 清理本地会话；redis 路由已被新实例覆盖，Unbind 的属主校验会跳过删除。
-	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), g.relayTimeout)
 	defer cancel()
 	if conn := sess.Conn; conn != nil {
 		g.sess.Unbind(ctx, kn.PlayerID, conn.ID)

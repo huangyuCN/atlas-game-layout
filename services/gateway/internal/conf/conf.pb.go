@@ -37,6 +37,8 @@ type Bootstrap struct {
 	Session *configs.Session `protobuf:"bytes,6,opt,name=session,proto3" json:"session,omitempty"`
 	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
 	Observability *configs.Observability `protobuf:"bytes,14,opt,name=observability,proto3" json:"observability,omitempty"`
+	// relay 是推送/控制回调访问 redis 的预算（懒激活冷启动预算，非超时兜底）。
+	Relay         *Relay `protobuf:"bytes,7,opt,name=relay,proto3" json:"relay,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -120,11 +122,66 @@ func (x *Bootstrap) GetObservability() *configs.Observability {
 	return nil
 }
 
+func (x *Bootstrap) GetRelay() *Relay {
+	if x != nil {
+		return x.Relay
+	}
+	return nil
+}
+
+// Relay 是网关推送/控制回调的预算配置。
+type Relay struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// timeout 是单次回调访问 redis 的预算（time.ParseDuration 字符串，如 5s；空 = 5s）。
+	// 它是懒激活的冷启动预算（路由表/会话表首次触达 redis 的那一跳），不是业务超时兜底；
+	// 显式 ≤0 或非法字符串 ⇒ 启动失败（不静默回落缺省）。
+	Timeout       string `protobuf:"bytes,1,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Relay) Reset() {
+	*x = Relay{}
+	mi := &file_services_gateway_internal_conf_conf_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Relay) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Relay) ProtoMessage() {}
+
+func (x *Relay) ProtoReflect() protoreflect.Message {
+	mi := &file_services_gateway_internal_conf_conf_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Relay.ProtoReflect.Descriptor instead.
+func (*Relay) Descriptor() ([]byte, []int) {
+	return file_services_gateway_internal_conf_conf_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Relay) GetTimeout() string {
+	if x != nil {
+		return x.Timeout
+	}
+	return ""
+}
+
 var File_services_gateway_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_gateway_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	")services/gateway/internal/conf/conf.proto\x12\fgateway.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1eprotobuf/configs/session.proto\"\xe6\x02\n" +
+	")services/gateway/internal/conf/conf.proto\x12\fgateway.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1eprotobuf/configs/session.proto\"\x91\x03\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
@@ -132,7 +189,10 @@ const file_services_gateway_internal_conf_conf_proto_rawDesc = "" +
 	"\x04data\x18\x04 \x01(\v2\x13.atlas.configs.DataR\x04data\x12$\n" +
 	"\x03log\x18\x05 \x01(\v2\x12.atlas.configs.LogR\x03log\x120\n" +
 	"\asession\x18\x06 \x01(\v2\x16.atlas.configs.SessionR\asession\x12B\n" +
-	"\robservability\x18\x0e \x01(\v2\x1c.atlas.configs.ObservabilityR\robservabilityBLZJgithub.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf;confb\x06proto3"
+	"\robservability\x18\x0e \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x12)\n" +
+	"\x05relay\x18\a \x01(\v2\x13.gateway.conf.RelayR\x05relay\"!\n" +
+	"\x05Relay\x12\x18\n" +
+	"\atimeout\x18\x01 \x01(\tR\atimeoutBLZJgithub.com/huangyuCN/atlas-game-layout/services/gateway/internal/conf;confb\x06proto3"
 
 var (
 	file_services_gateway_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -146,30 +206,32 @@ func file_services_gateway_internal_conf_conf_proto_rawDescGZIP() []byte {
 	return file_services_gateway_internal_conf_conf_proto_rawDescData
 }
 
-var file_services_gateway_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_services_gateway_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_services_gateway_internal_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil),             // 0: gateway.conf.Bootstrap
-	(*configs.Runtime)(nil),       // 1: atlas.configs.Runtime
-	(*configs.Registry)(nil),      // 2: atlas.configs.Registry
-	(*configs.Server)(nil),        // 3: atlas.configs.Server
-	(*configs.Data)(nil),          // 4: atlas.configs.Data
-	(*configs.Log)(nil),           // 5: atlas.configs.Log
-	(*configs.Session)(nil),       // 6: atlas.configs.Session
-	(*configs.Observability)(nil), // 7: atlas.configs.Observability
+	(*Relay)(nil),                 // 1: gateway.conf.Relay
+	(*configs.Runtime)(nil),       // 2: atlas.configs.Runtime
+	(*configs.Registry)(nil),      // 3: atlas.configs.Registry
+	(*configs.Server)(nil),        // 4: atlas.configs.Server
+	(*configs.Data)(nil),          // 5: atlas.configs.Data
+	(*configs.Log)(nil),           // 6: atlas.configs.Log
+	(*configs.Session)(nil),       // 7: atlas.configs.Session
+	(*configs.Observability)(nil), // 8: atlas.configs.Observability
 }
 var file_services_gateway_internal_conf_conf_proto_depIdxs = []int32{
-	1, // 0: gateway.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
-	2, // 1: gateway.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
-	3, // 2: gateway.conf.Bootstrap.server:type_name -> atlas.configs.Server
-	4, // 3: gateway.conf.Bootstrap.data:type_name -> atlas.configs.Data
-	5, // 4: gateway.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	6, // 5: gateway.conf.Bootstrap.session:type_name -> atlas.configs.Session
-	7, // 6: gateway.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	2, // 0: gateway.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
+	3, // 1: gateway.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
+	4, // 2: gateway.conf.Bootstrap.server:type_name -> atlas.configs.Server
+	5, // 3: gateway.conf.Bootstrap.data:type_name -> atlas.configs.Data
+	6, // 4: gateway.conf.Bootstrap.log:type_name -> atlas.configs.Log
+	7, // 5: gateway.conf.Bootstrap.session:type_name -> atlas.configs.Session
+	8, // 6: gateway.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	1, // 7: gateway.conf.Bootstrap.relay:type_name -> gateway.conf.Relay
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_services_gateway_internal_conf_conf_proto_init() }
@@ -183,7 +245,7 @@ func file_services_gateway_internal_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_services_gateway_internal_conf_conf_proto_rawDesc), len(file_services_gateway_internal_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

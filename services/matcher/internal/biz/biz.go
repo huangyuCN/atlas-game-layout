@@ -68,8 +68,8 @@ type Admission struct {
 const (
 	// DefaultAdmitConcurrency 是同时进行的成局处置数上限。
 	DefaultAdmitConcurrency = 200
-	// DefaultAdmitTimeout 是单局开局+出票的超时。
-	DefaultAdmitTimeout = 3 * time.Second
+	// DefaultAdmitTimeout 是单局开局+出票的预算（含 battle 侧懒激活冷启动那一跳）。
+	DefaultAdmitTimeout = 5 * time.Second
 	// DefaultAdmitWait 是等并发槽的预算。
 	DefaultAdmitWait = 5 * time.Second
 )

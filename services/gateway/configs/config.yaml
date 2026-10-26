@@ -100,6 +100,11 @@ server:
 session:
   ttl: 30s
   # sweep_interval: 15s         # 过期会话清扫周期（不配 = ttl 的一半）
+# 推送/控制回调访问 redis 的预算（time.ParseDuration 字符串；空 = 5s）。
+# 这是**懒激活冷启动预算**（回调触达 redis 路由表/会话表的第一跳），不是业务超时兜底；
+# 显式 0s/负值/非法 ⇒ 启动失败（不静默回落缺省）。
+relay:
+  timeout: 5s
 data:
   redis:
     # mode 缺省即 single（单点）；哨兵/集群形态与字段见 protobuf/configs/data.proto

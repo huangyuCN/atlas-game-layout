@@ -24,8 +24,8 @@ message Matchmaker {
   // admit_concurrency 是成局处置（开局+出票，一次跨进程 RPC）的并发上限（缺省 200）：
   // 拿不到并发槽的成局在各自的 ticket 监听里等待（背压），不会无界并发打向 battle。
   int32 admit_concurrency = 2;
-  // admit_timeout_ms 是单局「开局+出票」的超时（毫秒；缺省 3000）：
-  // 超时即按失败处置（发失败事件 + 回池），不无限挂住。
+  // admit_timeout_ms 是单局「开局+出票」的预算（毫秒；缺省 5000）：
+  // 含 battle 侧懒激活冷启动的那一跳；超时即按失败处置（发失败事件 + 回池），不无限挂住。
   int64 admit_timeout_ms = 3;
   // admit_wait_ms 是拿不到并发槽时的等槽预算（毫秒；缺省 5000）：超时同样按失败处置。
   int64 admit_wait_ms = 4;

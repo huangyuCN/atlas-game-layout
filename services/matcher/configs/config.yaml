@@ -84,8 +84,9 @@ matchmaker:
   # admit_concurrency 是「开局+出票」（一次跨进程 RPC）的并发上限：拿不到槽的成局在各自的
   # ticket 监听里等（背压），不会像旧实现那样每票一 goroutine 无界打向 battle。
   admit_concurrency: 200
-  # admit_timeout_ms 是单局入场预算：超时按失败处置（失败事件 + 回池 + 打点），不无限挂住。
-  admit_timeout_ms: 3000
+  # admit_timeout_ms 是单局入场预算（含 battle 侧懒激活冷启动的那一跳；缺省 5000）：
+  # 超时按失败处置（失败事件 + 回池 + 打点），不无限挂住。
+  admit_timeout_ms: 5000
   # admit_wait_ms 是等槽预算：超时同样按失败处置（排队有界）。
   admit_wait_ms: 5000
   # fetch_size 是每 tick 认领的候选上限（缺省 100；≤0 取缺省、>1000 夹到安全上限）。

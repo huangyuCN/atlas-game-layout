@@ -37,8 +37,8 @@ type Matchmaker struct {
 	// admit_concurrency 是成局处置（开局+出票，一次跨进程 RPC）的并发上限（缺省 200）：
 	// 拿不到并发槽的成局在各自的 ticket 监听里等待（背压），不会无界并发打向 battle。
 	AdmitConcurrency int32 `protobuf:"varint,2,opt,name=admit_concurrency,json=admitConcurrency,proto3" json:"admit_concurrency,omitempty"`
-	// admit_timeout_ms 是单局「开局+出票」的超时（毫秒；缺省 3000）：
-	// 超时即按失败处置（发失败事件 + 回池），不无限挂住。
+	// admit_timeout_ms 是单局「开局+出票」的预算（毫秒；缺省 5000）：
+	// 含 battle 侧懒激活冷启动的那一跳；超时即按失败处置（发失败事件 + 回池），不无限挂住。
 	AdmitTimeoutMs int64 `protobuf:"varint,3,opt,name=admit_timeout_ms,json=admitTimeoutMs,proto3" json:"admit_timeout_ms,omitempty"`
 	// admit_wait_ms 是拿不到并发槽时的等槽预算（毫秒；缺省 5000）：超时同样按失败处置。
 	AdmitWaitMs int64 `protobuf:"varint,4,opt,name=admit_wait_ms,json=admitWaitMs,proto3" json:"admit_wait_ms,omitempty"`

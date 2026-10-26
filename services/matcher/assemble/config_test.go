@@ -27,4 +27,8 @@ func TestServiceConfigLoads(t *testing.T) {
 	if err := bootstrap.RequireNamespace(cfg.GetRuntime().GetNamespace()); err != nil {
 		t.Fatalf("runtime.namespace 未通过 R9 校验: %v", err)
 	}
+	// admit_timeout_ms 是单局「开局+出票」的懒激活冷启动预算：样例从 3000 提到 5000。
+	if got := cfg.GetMatchmaker().GetAdmitTimeoutMs(); got != 5000 {
+		t.Fatalf("matchmaker.admit_timeout_ms = %d, 期望 5000", got)
+	}
 }

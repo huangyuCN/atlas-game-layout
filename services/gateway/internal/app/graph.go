@@ -133,8 +133,13 @@ func newGateway(
 	if err != nil {
 		return nil, fmt.Errorf("gateway: 透传路由表合并失败: %w", err)
 	}
+	// 推送/控制回调的懒激活冷启动预算：缺省 5s，显式 ≤0/非法即启动失败。
+	relayTimeout, err := cfg.RelayTimeout()
+	if err != nil {
+		return nil, fmt.Errorf("gateway: %w", err)
+	}
 	g := server.NewGateway(instanceID, table, sess, inv, players, meter, nc, pub, tcpSrv, wsSrv,
-		server.NewVersionGate(cfg.GetRuntime()))
+		server.NewVersionGate(cfg.GetRuntime()), relayTimeout)
 	if err := server.RegisterGatewayHandlers(cfg, tcpSrv, wsSrv, g); err != nil {
 		return nil, err
 	}

@@ -81,6 +81,8 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `server.*.tls` | `enabled=true` 且 `cert_file`/`key_file` 非空 | 未启用（缺失或 `enabled=false`）⇒ 明文，不追加选项 | `ca_file` 空 ⇒ 不校验客户端；`client_auth=true` 时 `ca_file` 必填（缺则报错） |
 | `session.ttl` | 无 | — | `""` ⇒ 默认 30s（`session.DefaultTTL`） |
 | `session.sweep_interval` | 无 | — | `""`/非正 ⇒ `ttl` 的一半 |
+| `relay.timeout`（gateway） | 无 | — | `""` ⇒ 5s（`conf.DefaultRelayTimeout`）；显式值须为 `time.ParseDuration` 字符串且 >0，`≤0`/非法 ⇒ **启动失败**（懒激活冷启动预算，非超时兜底） |
+| `matchmaker.admit_timeout_ms`（matcher） | 无 | — | `0`/缺失 ⇒ 5000ms（`biz.DefaultAdmitTimeout`）；显式正值 = 单局「开局+出票」预算（含 battle 侧懒激活冷启动那一跳） |
 | `data.redis.addrs` | 非空 | **不装配 redis**（构造失败：single 需恰好 1 个地址） | `mode` 空/`0` ⇒ 单点；`password`/`db` 空 ⇒ 不覆盖；`master_name` 在哨兵形态必填 |
 | `data.nats.url` | 非空（需要 NATS 的能力） | 构造失败（`nats: url 不能为空`） | — |
 | `data.mongo.uri` / `database` | 均非空（需要 Mongo 的服务） | 构造失败 | — |
@@ -104,6 +106,10 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `edge.listeners` | 至少一面，且 `name`/`network`/`addr`/`carrier` 齐备 | **启动失败**（`edge.listeners 不能为空`） | `name` 必须与 battle 帧面实例元数据里的端口键（`ws`/`kcp`/`udp`）一致；KCP/UDP 面只能配 `CARRIER_DATAGRAM`（框架不允许数据报面配 `stream_hello`），WS 面配 `CARRIER_WS_UPGRADE` |
 | `edge.max_streams` / `edge.idle_timeout` / `edge.new_conn_rate` / `edge.max_per_ip` | 无 | — | 空/非正 ⇒ 框架缺省（并发流 `1024` / 空闲回收 `60s` / 不限新连接速率 / 不限每 IP 连接数） |
 | `edge.dial_timeout` / `edge.probe_after` / `edge.probe_timeout` | 无 | — | 空 ⇒ 框架缺省（拨号与握手读取 `5s`；探活触发取 `idle_timeout`、等待回应取触发时长的一半、下限 `50ms`） |
+
+> 两个 **5s** 都是**懒激活冷启动预算**：gateway 的是推送/控制回调首次触达 redis 路由表/会话表的预算，
+> matcher 的是单局「开局+出票」首次触达 battle 并触发对局 actor 懒激活的预算。它们不是慢请求的超时兜底，
+> 也不要当成压测里「服务端处理慢」的背锅项——超时只说明冷启动那一跳没在预算内完成。
 
 **共享可选参数**（`server.grpc` / `server.tcp` / `server.websocket` / `server.kcp` / `server.udp` 共用同一套语义）：
 `network` 未设置 ⇒ 底层默认 `tcp`（非法枚举值启动报错，不静默回落）；数值项 `0` ⇒ 底层默认（负数报错）；

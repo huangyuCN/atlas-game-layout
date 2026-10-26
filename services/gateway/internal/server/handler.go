@@ -80,13 +80,15 @@ type Gateway struct {
 	relay      *Relay // 业务 op 透传引擎（表由注解生成，见 relay.go）
 	meter      metrics.Collector
 	gate       VersionGate // 客户端版本门槛（M1；装配期注入，见 version_gate.go）
+	// relayTimeout 是推送/控制回调访问 redis 的懒激活冷启动预算（配置 relay.timeout，缺省 5s）。
+	relayTimeout time.Duration
 }
 
 // onSessionsExpired 异常下线联动撮合域（会话过期清扫回调）：
 // 对「确认属主且未被接管」的过期会话，向 game PlayerActor 发 Logout（SESSION_EXPIRED）
 // → 触发现有 OnStop 联动（取消匹配 / 离队 / 下线落库），登出与断线语义归一。
 func (g *Gateway) onSessionsExpired(swept []session.SweptSession) {
-	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), g.relayTimeout)
 	defer cancel()
 	for _, s := range swept {
 		_, _ = g.players.Logout(g.callCtx(ctx, s.PlayerID), &gamev1.LogoutMsg{
@@ -107,6 +109,7 @@ func NewGateway(
 	pub *pkgnats.Publisher,
 	tcpSrv, wsSrv pushServer,
 	gate VersionGate,
+	relayTimeout time.Duration,
 ) *Gateway {
 	g := &Gateway{
 		instanceID: instanceID,
@@ -118,8 +121,9 @@ func NewGateway(
 			transport.KindTCP:       tcpSrv,
 			transport.KindWebSocket: wsSrv,
 		},
-		meter: meter,
-		gate:  gate,
+		meter:        meter,
+		gate:         gate,
+		relayTimeout: relayBudget(relayTimeout),
 	}
 	// 透传引擎与 Gateway 共用连接摘取、会话管理器与指标采集器。
 	g.relay = NewRelay(table, sess, inv, meter, g.connFrom)
