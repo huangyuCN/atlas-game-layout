@@ -43,10 +43,12 @@ func newFrameRegistry(discovery registry.Discovery) (*resolver.DiscoveryRegistry
 }
 
 // newResolver 装配接入层后端解析器（目录属主 + 帧面实例端口 → 后端地址）。
+// collector 供解析命中率（edge_resolve_cache_total）打点：缺了它命中率就只能靠猜。
 func newResolver(dir resolver.Directory, frames resolver.FrameRegistry,
-	cfg *conf.Bootstrap) (*resolver.Resolver, error) {
+	cfg *conf.Bootstrap, collector metrics.Collector) (*resolver.Resolver, error) {
 	return resolver.New(dir, frames, resolver.Options{
 		FrameService: cfg.GetEdge().GetFrameService(),
+		Metrics:      collector,
 	})
 }
 

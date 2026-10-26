@@ -4,26 +4,53 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/huangyuCN/atlas/contrib/edge"
 	"github.com/huangyuCN/atlas/contrib/edge/ticket"
 )
 
-// stubDirectory 是内存 actor 目录桩（PID → 属主节点）。
+// stubDirectory 是内存 actor 目录桩（PID → 属主节点），并按 WatchOwner 模拟目录监听。
 type stubDirectory struct {
+	mu     sync.Mutex
 	owners map[string]string
 	err    error
 	calls  []string
+	// watchErr 非空表示监听建立失败（模拟 etcd 不可用）：Resolver 必须退回每次查询目录。
+	watchErr  error
+	watchPIDs []string
+	watches   map[string]func(string)
+	cancels   map[string]int
 }
 
-// WatchOwner 实现 Directory：解析用例不需要属主变更监听。
-func (d *stubDirectory) WatchOwner(context.Context, string, func(string)) (func(), error) {
-	return func() {}, nil
+// WatchOwner 实现 Directory：记录 onChange 供用例投递属主变化；watchErr 非空即模拟监听不可用。
+func (d *stubDirectory) WatchOwner(_ context.Context, pid string, onChange func(string)) (func(), error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.watchErr != nil {
+		return nil, d.watchErr
+	}
+	if d.watches == nil {
+		d.watches = make(map[string]func(string))
+	}
+	if d.cancels == nil {
+		d.cancels = make(map[string]int)
+	}
+	d.watchPIDs = append(d.watchPIDs, pid)
+	d.watches[pid] = onChange
+	return func() {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.cancels[pid]++
+		delete(d.watches, pid)
+	}, nil
 }
 
 // OwnerNode 实现 Directory。
 func (d *stubDirectory) OwnerNode(_ context.Context, pid string) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.calls = append(d.calls, pid)
 	if d.err != nil {
 		return "", d.err
@@ -35,20 +62,136 @@ func (d *stubDirectory) OwnerNode(_ context.Context, pid string) (string, error)
 	return node, nil
 }
 
-// stubFrames 是内存帧面实例发现桩。
+// callCount 返回目录被查询的次数。
+func (d *stubDirectory) callCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.calls)
+}
+
+// callList 返回目录查询的入参序列。
+func (d *stubDirectory) callList() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.calls...)
+}
+
+// setErr 改写目录查询的错误（模拟 etcd 抖动：查询失败但监听已建立）。
+func (d *stubDirectory) setErr(err error) {
+	d.mu.Lock()
+	d.err = err
+	d.mu.Unlock()
+}
+
+// setOwner 改写目录记录的属主（模拟目录已被刷新，即 watch 事件丢失后的真相）。
+func (d *stubDirectory) setOwner(pid, owner string) {
+	d.mu.Lock()
+	d.owners[pid] = owner
+	d.mu.Unlock()
+}
+
+// emitOwner 投递一次目录事件（在监听回调里同步执行，等价于 adapter 的监听 goroutine）。
+func (d *stubDirectory) emitOwner(pid, owner string) {
+	d.mu.Lock()
+	onChange := d.watches[pid]
+	d.mu.Unlock()
+	if onChange != nil {
+		onChange(owner)
+	}
+}
+
+// watchCount 返回建立过的监听条数。
+func (d *stubDirectory) watchCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.watchPIDs)
+}
+
+// cancelCount 返回某局监听被取消的次数。
+func (d *stubDirectory) cancelCount(pid string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cancels[pid]
+}
+
+// stubFrames 是内存帧面实例发现桩，并按 WatchInstances 模拟注册中心监听。
 type stubFrames struct {
-	instances []Instance
-	err       error
-	services  []string
+	mu         sync.Mutex
+	instances  []Instance
+	err        error
+	services   []string
+	watchErr   error
+	watchCalls int
+	watchSpans []string
+	onChange   func([]Instance)
+	cancels    int
 }
 
 // Instances 实现 FrameRegistry。
 func (f *stubFrames) Instances(_ context.Context, service string) ([]Instance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.services = append(f.services, service)
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.instances, nil
+}
+
+// WatchInstances 实现 FrameRegistry：记录 onChange 供用例推送全量快照。
+func (f *stubFrames) WatchInstances(_ context.Context, service string,
+	onChange func([]Instance)) (func(), error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.watchCalls++
+	f.watchSpans = append(f.watchSpans, service)
+	if f.watchErr != nil {
+		return nil, f.watchErr
+	}
+	f.onChange = onChange
+	return func() {
+		f.mu.Lock()
+		f.cancels++
+		f.mu.Unlock()
+	}, nil
+}
+
+// callCount 返回实例列表被查询的次数。
+func (f *stubFrames) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.services)
+}
+
+// serviceList 返回查询/监听用过的服务名序列。
+func (f *stubFrames) serviceList() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.services...)
+}
+
+// watchCount 返回建立过的监听条数。
+func (f *stubFrames) watchCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.watchCalls
+}
+
+// cancelCount 返回监听被取消的次数。
+func (f *stubFrames) cancelCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancels
+}
+
+// emitInstances 推送一份全量实例快照（等价于注册中心 watch 的一次回调）。
+func (f *stubFrames) emitInstances(list []Instance) {
+	f.mu.Lock()
+	onChange := f.onChange
+	f.mu.Unlock()
+	if onChange != nil {
+		onChange(list)
+	}
 }
 
 // resolveReq 构造一次解析请求（面名即帧面端口键）。
@@ -102,11 +245,12 @@ func TestResolveSelectsOwnerAndFacePort(t *testing.T) {
 			t.Fatalf("面 %s 后端应为 %s，实际 %s", face, want, backend.Address)
 		}
 	}
-	if len(dir.calls) != len(cases) || dir.calls[0] != "battle:b-1" {
-		t.Fatalf("目录查询入参不对: %v", dir.calls)
+	// 三个面共用同一局的属主：watch 缓存命中后只需查一次目录（改造前每面各查一次）。
+	if calls := dir.callList(); len(calls) != 1 || calls[0] != "battle:b-1" {
+		t.Fatalf("目录查询入参不对: %v", calls)
 	}
-	if frames.services[0] != "battle-frame" {
-		t.Fatalf("帧面服务名应为 battle-frame，实际 %s", frames.services[0])
+	if services := frames.serviceList(); services[0] != "battle-frame" {
+		t.Fatalf("帧面服务名应为 battle-frame，实际 %s", services[0])
 	}
 }
 
@@ -201,7 +345,7 @@ func TestResolveInvalidBattleID(t *testing.T) {
 	dir := &stubDirectory{owners: map[string]string{}}
 	r, _ := New(dir, &stubFrames{}, Options{})
 	requireUnavailable(t, resolveErr(r, "bad/id:with:colon"))
-	if len(dir.calls) != 0 {
-		t.Fatalf("非法 battle_id 不应查目录，实际 %v", dir.calls)
+	if calls := dir.callList(); len(calls) != 0 {
+		t.Fatalf("非法 battle_id 不应查目录，实际 %v", calls)
 	}
 }

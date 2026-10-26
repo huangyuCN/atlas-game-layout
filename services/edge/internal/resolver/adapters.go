@@ -133,13 +133,64 @@ func (r *DiscoveryRegistry) Instances(ctx context.Context, service string) ([]In
 	if err != nil {
 		return nil, err
 	}
+	return instancesOf(list), nil
+}
+
+// WatchInstances 监听帧面实例变化并回调全量快照（规格 §2.1：实例上下线即时更新）。
+// 服务发现的 Next 本身即「有变化就返回最新列表」，故每次回调都是一份可直接替换的快照。
+//
+// cancel 幂等且两件事一起做（与 WatchOwner 同款约束）：取消派生 ctx（关掉客户端侧 watch 流）
+// ＋停掉 watcher（唤醒阻塞在 Next() 的监听 goroutine）——只关停止信号会按监听泄漏 goroutine。
+func (r *DiscoveryRegistry) WatchInstances(ctx context.Context, service string,
+	onChange func([]Instance)) (func(), error) {
+	if onChange == nil {
+		return func() {}, nil
+	}
+	ctx, cancelWatch := context.WithCancel(ctx)
+	w, err := r.discovery.Watch(ctx, service)
+	if err != nil {
+		cancelWatch()
+		return nil, fmt.Errorf("resolver: 监听帧面实例（%s）失败: %w", service, err)
+	}
+	stop := make(chan struct{})
+	var stopOnce sync.Once
+	stopWatch := func() { stopOnce.Do(func() { _ = w.Stop() }) }
+	go func() {
+		defer stopWatch()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			default:
+			}
+			list, err := w.Next()
+			if err != nil {
+				return // 监听终止：调用方退回每次 Instances 查询（保守兜底）
+			}
+			onChange(instancesOf(list))
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancelWatch()
+			stopWatch()
+			close(stop)
+		})
+	}, nil
+}
+
+// instancesOf 把注册实例列表映射为帧面实例列表（nil 实例跳过）。
+func instancesOf(list []*registry.ServiceInstance) []Instance {
 	out := make([]Instance, 0, len(list))
 	for _, si := range list {
 		if si != nil {
 			out = append(out, instanceOf(si))
 		}
 	}
-	return out, nil
+	return out
 }
 
 // instanceOf 把注册实例映射为帧面实例：元数据键契约见 lib/consts

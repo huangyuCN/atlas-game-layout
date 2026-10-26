@@ -19,6 +19,9 @@ type Directory interface {
 type FrameRegistry interface {
 	// Instances 返回服务名的实例列表（含元数据里的 node_id 与传输面端口）。
 	Instances(ctx context.Context, service string) ([]Instance, error)
+	// WatchInstances 监听服务名的实例变化并回调**全量**快照（实例上下线即整份刷新）；
+	// 返回的 cancel 幂等。建立失败（注册中心不可用）时调用方退回每次 Instances 查询。
+	WatchInstances(ctx context.Context, service string, onChange func([]Instance)) (cancel func(), err error)
 }
 
 // Instance 是注册中心里一个帧面实例的中间表示：把框架 registry.ServiceInstance

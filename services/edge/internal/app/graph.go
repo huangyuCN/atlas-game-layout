@@ -16,6 +16,7 @@ import (
 	"github.com/huangyuCN/atlas-game-layout/pkg/middleware"
 	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/guard"
+	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/resolver"
 	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/server"
 	"github.com/huangyuCN/atlas/contrib/edge"
 	"github.com/huangyuCN/atlas/metrics"
@@ -46,7 +47,7 @@ var Module = fx.Module("edge",
 		newProxyOut,
 		fx.Annotate(server.NewHTTPServer, fx.As(new(transport.Server)), fx.ResultTags(`group:"servers"`)),
 	),
-	fx.Invoke(closeGuard),
+	fx.Invoke(closeGuard, closeResolver),
 )
 
 // closeGuard 把守卫的目录监听接入生命周期：停机时统一取消（不留后台 watch goroutine）。
@@ -56,6 +57,18 @@ func closeGuard(lc fx.Lifecycle, g *guard.OwnerGuard) {
 	}
 	lc.Append(fx.Hook{OnStop: func(context.Context) error {
 		g.Close()
+		return nil
+	}})
+}
+
+// closeResolver 把解析器的本地缓存接入生命周期：停机时取消每局的目录监听与唯一的实例监听
+// （否则进程退出前会残留 watch 与监听 goroutine）。
+func closeResolver(lc fx.Lifecycle, r *resolver.Resolver) {
+	if r == nil {
+		return
+	}
+	lc.Append(fx.Hook{OnStop: func(context.Context) error {
+		r.Close()
 		return nil
 	}})
 }
