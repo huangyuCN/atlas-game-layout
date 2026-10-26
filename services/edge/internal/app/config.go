@@ -50,7 +50,10 @@ func proxyConfig(cfg *conf.Bootstrap, res edge.Resolver, collector metrics.Colle
 		Metrics:     collector,
 		MaxStreams:  int(ec.GetMaxStreams()),
 		NewConnRate: int(ec.GetNewConnRate()),
-		MaxPerIP:    int(ec.GetMaxPerIp()),
+		// burst 与 rate 解耦传递（0 = 交给框架缺省 max(rate, 1024)）：只配 rate 时桶深
+		// 可能小于一次开服的并发建连数，超出的连接会被静默拒绝（2026-10-26 诊断 §3.2）。
+		NewConnBurst: int(ec.GetNewConnBurst()),
+		MaxPerIP:     int(ec.GetMaxPerIp()),
 	}
 	if err := applyTimings(&out, ec); err != nil {
 		return edge.Config{}, err

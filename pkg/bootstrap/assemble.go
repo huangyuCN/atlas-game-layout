@@ -78,7 +78,7 @@ func AssembleLoaded(cfg proto.Message, extra ...fx.Option) ([]fx.Option, error) 
 	}
 
 	// 服务身份（runtime.name/id/version/env）：链路资源属性与指标常量标签同源。
-	identity := serviceIdentityOf(like)
+	identity := ServiceIdentity(like)
 	atlaslog.Infof("服务启动: name=%s id=%s build=%s", identity.Name, identity.ID, version.String())
 
 	// OTLP 链路导出（端点未配置时 noop）：资源带服务身份、采样器与采样率可配；
@@ -239,9 +239,12 @@ func serviceVersionOf(runtime *configspb.Runtime) string {
 	return version.Version
 }
 
-// serviceIdentityOf 从 runtime 配置提取服务身份（链路资源属性与指标常量标签共用）：
+// ServiceIdentity 从 runtime 配置提取服务身份（链路资源属性与指标常量标签共用）：
 // 版本与 ModuleFor 同源（serviceVersionOf）。
-func serviceIdentityOf(like ConfigLike) observability.ServiceIdentity {
+//
+// 导出的理由：进程内形态（services/*/assemble）自己建抓取端点时必须与进程形态用**同一份**
+// 身份派生——各写一份会让同一服务在两种形态下的指标标签不一致，面板按实例聚合就分裂成两条曲线。
+func ServiceIdentity(like ConfigLike) observability.ServiceIdentity {
 	runtime := like.GetRuntime()
 	return observability.ServiceIdentity{
 		Name:    runtime.GetName(),

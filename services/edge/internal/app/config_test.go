@@ -38,7 +38,7 @@ func validEdgeConfig() *conf.Bootstrap {
 				{Name: "udp", Network: conf.Edge_NETWORK_UDP, Addr: "127.0.0.1:7102", Carrier: conf.Edge_CARRIER_DATAGRAM},
 			},
 			FrameService: "battle-frame",
-			MaxStreams:   32, IdleTimeout: "45s", NewConnRate: 7, MaxPerIp: 3,
+			MaxStreams:   32, IdleTimeout: "45s", NewConnRate: 7, NewConnBurst: 4, MaxPerIp: 3,
 			DialTimeout: "2s", ProbeAfter: "10s", ProbeTimeout: "3s",
 		},
 	}
@@ -68,6 +68,9 @@ func TestProxyConfigMapsEdgeSection(t *testing.T) {
 	}
 	if cfg.MaxStreams != 32 || cfg.NewConnRate != 7 || cfg.MaxPerIP != 3 {
 		t.Fatalf("限流参数映射不对: %+v", cfg)
+	}
+	if cfg.NewConnBurst != 4 {
+		t.Fatalf("new_conn_burst 应映射为 4（桶深与速率解耦），实际 %d", cfg.NewConnBurst)
 	}
 	if cfg.IdleTimeout != 45*time.Second || cfg.DialTimeout != 2*time.Second {
 		t.Fatalf("时长映射不对: idle=%v dial=%v", cfg.IdleTimeout, cfg.DialTimeout)

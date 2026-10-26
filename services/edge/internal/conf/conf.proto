@@ -72,6 +72,13 @@ message Edge {
   string probe_after = 10;
   // probe_timeout 是单次探测等待回应的时长（空 = 按 probe_after 推导）。
   string probe_timeout = 11;
+  // new_conn_burst 是新连接令牌桶的**瞬时桶深**（0 = 框架缺省 max(new_conn_rate, 1024)）。
+  //
+  // 与 new_conn_rate 的分工：rate 是每秒补充的令牌数（稳态上限），burst 是桶里一次能攒下的
+  // 令牌数（突发建连上限）。只配 rate 而不配 burst 时，桶深可能小于「一次开服的并发建连数」，
+  // 超出的连接会被**静默拒绝**（客户端表现为 WS 重置/建流慢）——2026-10-26 诊断里 4096 场景
+  // 的 666 条重置正是 `3430 ≈ 1024(桶深) + 200(rate) × 12s`。
+  int32 new_conn_burst = 12;
 }
 
 // Bootstrap 是 edge 服务的启动配置。

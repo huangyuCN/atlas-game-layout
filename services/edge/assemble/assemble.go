@@ -43,8 +43,19 @@ type Options struct {
 	MaxStreams  int
 	NewConnRate int
 	MaxPerIP    int
+	// NewConnBurst 是新连接令牌桶的瞬时桶深（0 = 框架缺省 max(NewConnRate, 1024)）：
+	// rate 是每秒补充量，burst 是一次突发最多放行多少条——开服/大规模重连要把 burst
+	// 配到 ≥ 并发建连数，否则超出的连接会被静默拒绝（2026-10-26 诊断 §3.2）。
+	NewConnBurst int
 	// IdleTimeout 是空闲回收时长（0 = 框架缺省 60s）。
 	IdleTimeout time.Duration
+	// MetricsAddr 是 Prometheus 抓取端点地址（如 127.0.0.1:9154，或 127.0.0.1:0 取内核分配端口）；
+	// 空 = 不监听（采集器为 noop，热路径零开销）。
+	//
+	// 非空时与进程形态走同一份 observability.InitMetrics，采集器经 bootstrap.BootWithCollector
+	// 注入依赖图——**两件事都要做**，否则 /metrics 上只有 go_* / process_*、没有任何 edge_*
+	//（2026-10-26 诊断现场就是那个形态，且被误读成「拒绝计数为 0」）。
+	MetricsAddr string
 }
 
 // Edge 是装配完成的接入层实例句柄。
@@ -55,7 +66,9 @@ type Edge struct {
 	ListenerAddrs []string
 	// HTTPURL 是健康检查地址（host:port）。
 	HTTPURL string
-	stop    func(ctx context.Context) error
+	// MetricsURL 是 Prometheus 抓取端点 URL（未配 MetricsAddr 时为空）。
+	MetricsURL string
+	stop       func(ctx context.Context) error
 }
 
 // graphHandles 从依赖图回捞句柄所需组件。
@@ -74,27 +87,44 @@ func New(ctx context.Context, o Options) (*Edge, error) {
 	if err != nil {
 		return nil, err
 	}
+	obs, err := startMetrics(cfg, o.MetricsAddr)
+	if err != nil {
+		return nil, err
+	}
 	opts := []fx.Option{edgeapp.Module}
 	if o.Resolver != nil {
 		// 注入覆盖：解析器换成宿主提供的实现（目录/注册中心仍按配置构造，惰性连接）。
 		opts = append(opts, fx.Decorate(func(edge.Resolver) edge.Resolver { return o.Resolver }))
 	}
-	inst, urls, err := bootstrap.Boot(ctx, cfg, fx.Options(opts...), &h, serverutil.SchemeHTTP)
+	inst, urls, err := bootstrap.BootWithCollector(ctx, cfg, fx.Options(opts...), &h, obs.collector,
+		serverutil.SchemeHTTP)
 	if err != nil {
+		_ = obs.shutdown(ctx)
 		return nil, err
 	}
 	// 接入面监听在 App 的服务端 goroutine 里完成：等它就绪再读实际地址
 	//（进程内形态用随机端口，调用方拿到的是内核分配后的真实地址）。
 	if err := h.Proxy.WaitReady(ctx); err != nil {
 		_ = inst.Stop(ctx)
+		_ = obs.shutdown(ctx)
 		return nil, fmt.Errorf("assemble: 等待接入层就绪失败: %w", err)
 	}
 	return &Edge{
 		Proxy:         h.Proxy,
 		ListenerAddrs: h.Proxy.ListenerAddrs(),
 		HTTPURL:       urls[serverutil.SchemeHTTP].Host,
-		stop:          inst.Stop,
+		MetricsURL:    obs.url,
+		stop:          func(ctx context.Context) error { return stopEdge(ctx, inst, obs) },
 	}, nil
+}
+
+// stopEdge 先停接入层（关监听、拆流）再关抓取端点：停机窗口里的拆流计数仍能被最后一次抓取看到。
+func stopEdge(ctx context.Context, inst *bootstrap.Instance, obs *metricsEndpoint) error {
+	err := inst.Stop(ctx)
+	if mErr := obs.shutdown(ctx); err == nil {
+		err = mErr
+	}
+	return err
 }
 
 // Stop 停止接入层实例（先停新连接、再拆流，由 atlas.App 驱动）。
@@ -119,10 +149,11 @@ func newBootstrap(o Options) (*conf.Bootstrap, error) {
 		listeners = defaultListeners()
 	}
 	ec := &conf.Edge{
-		TicketKey:   base64.StdEncoding.EncodeToString(o.TicketKey),
-		MaxStreams:  int32(o.MaxStreams),
-		NewConnRate: int32(o.NewConnRate),
-		MaxPerIp:    int32(o.MaxPerIP),
+		TicketKey:    base64.StdEncoding.EncodeToString(o.TicketKey),
+		MaxStreams:   int32(o.MaxStreams),
+		NewConnRate:  int32(o.NewConnRate),
+		NewConnBurst: int32(o.NewConnBurst),
+		MaxPerIp:     int32(o.MaxPerIP),
 	}
 	if o.IdleTimeout > 0 {
 		ec.IdleTimeout = o.IdleTimeout.String()

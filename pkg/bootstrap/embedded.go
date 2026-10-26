@@ -58,6 +58,22 @@ func (s *Servers) All() []transport.Server { return s.List }
 // 缺端点意味着该协议没起来或没进启停组，属装配错误，不能静默留空。
 func Boot(ctx context.Context, cfg ConfigLike, app fx.Option,
 	handles interface{ All() []transport.Server }, require ...string) (*Instance, map[string]*url.URL, error) {
+	return BootWithCollector(ctx, cfg, app, handles, nil, require...)
+}
+
+// BootWithCollector 同 Boot，但把采集器注入依赖图（nil = 与 Boot 完全一致的 noop）。
+//
+// 为什么需要这个接缝：嵌入式形态此前把 metrics.Collector **写死**成 noop，于是任何
+// 「进程内装配」的服务（含 services/edge 的 assemble 形态）在 /metrics 上一条业务指标都
+// 不可能出现——2026-10-26 诊断里「只有 go_* / process_*、没有 edge_*」正是这一形态的特征。
+// 采集器的**来源**（是否真的监听 Prometheus 端点）仍由驱动方决定：不注入就还是 noop，
+// 现有调用方（battle/game/gateway/matcher 的 assemble）行为一字不变。
+func BootWithCollector(ctx context.Context, cfg ConfigLike, app fx.Option,
+	handles interface{ All() []transport.Server }, collector metrics.Collector,
+	require ...string) (*Instance, map[string]*url.URL, error) {
+	if collector == nil {
+		collector = metrics.Noop()
+	}
 	// own 回捞 Boot 自用的组件（servers 值组 + 启动信号），与调用方句柄一次 Populate。
 	var own struct {
 		fx.In
@@ -67,8 +83,8 @@ func Boot(ctx context.Context, cfg ConfigLike, app fx.Option,
 	}
 	root := fx.New(
 		fx.NopLogger,
-		// 嵌入式形态默认 noop 采集器（观测由进程形态经 AssembleLoaded 接线）。
-		fx.Provide(func() metrics.Collector { return metrics.Noop() }),
+		// 采集器由驱动方交入（缺省 noop）：嵌入式默认不监听端点、热路径零开销。
+		fx.Provide(func() metrics.Collector { return collector }),
 		fx.Supply(cfg),
 		app,
 		ModuleForEmbedded(cfg),

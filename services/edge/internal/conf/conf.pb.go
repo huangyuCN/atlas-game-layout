@@ -160,7 +160,14 @@ type Edge struct {
 	// probe_after 是数据报面静默多久后开始探活（空 = 取 idle_timeout）。
 	ProbeAfter string `protobuf:"bytes,10,opt,name=probe_after,json=probeAfter,proto3" json:"probe_after,omitempty"`
 	// probe_timeout 是单次探测等待回应的时长（空 = 按 probe_after 推导）。
-	ProbeTimeout  string `protobuf:"bytes,11,opt,name=probe_timeout,json=probeTimeout,proto3" json:"probe_timeout,omitempty"`
+	ProbeTimeout string `protobuf:"bytes,11,opt,name=probe_timeout,json=probeTimeout,proto3" json:"probe_timeout,omitempty"`
+	// new_conn_burst 是新连接令牌桶的**瞬时桶深**（0 = 框架缺省 max(new_conn_rate, 1024)）。
+	//
+	// 与 new_conn_rate 的分工：rate 是每秒补充的令牌数（稳态上限），burst 是桶里一次能攒下的
+	// 令牌数（突发建连上限）。只配 rate 而不配 burst 时，桶深可能小于「一次开服的并发建连数」，
+	// 超出的连接会被**静默拒绝**（客户端表现为 WS 重置/建流慢）——2026-10-26 诊断里 4096 场景
+	// 的 666 条重置正是 `3430 ≈ 1024(桶深) + 200(rate) × 12s`。
+	NewConnBurst  int32 `protobuf:"varint,12,opt,name=new_conn_burst,json=newConnBurst,proto3" json:"new_conn_burst,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -270,6 +277,13 @@ func (x *Edge) GetProbeTimeout() string {
 		return x.ProbeTimeout
 	}
 	return ""
+}
+
+func (x *Edge) GetNewConnBurst() int32 {
+	if x != nil {
+		return x.NewConnBurst
+	}
+	return 0
 }
 
 // Bootstrap 是 edge 服务的启动配置。
@@ -437,7 +451,7 @@ var File_services_edge_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xe7\x05\n" +
+	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\x8d\x06\n" +
 	"\x04Edge\x126\n" +
 	"\tlisteners\x18\x01 \x03(\v2\x18.edge.conf.Edge.ListenerR\tlisteners\x12\x1d\n" +
 	"\n" +
@@ -454,7 +468,8 @@ const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"\vprobe_after\x18\n" +
 	" \x01(\tR\n" +
 	"probeAfter\x12#\n" +
-	"\rprobe_timeout\x18\v \x01(\tR\fprobeTimeout\x1a\x98\x01\n" +
+	"\rprobe_timeout\x18\v \x01(\tR\fprobeTimeout\x12$\n" +
+	"\x0enew_conn_burst\x18\f \x01(\x05R\fnewConnBurst\x1a\x98\x01\n" +
 	"\bListener\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x121\n" +
 	"\anetwork\x18\x02 \x01(\x0e2\x17.edge.conf.Edge.NetworkR\anetwork\x12\x12\n" +

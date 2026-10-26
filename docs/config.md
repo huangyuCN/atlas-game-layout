@@ -104,7 +104,8 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `edge.frame_service` | 无 | — | 空 ⇒ `battle-frame`（battle 注册的帧面实例服务名） |
 | `edge.actor_namespace` | 无 | — | 空 ⇒ 取 `runtime.namespace`（**不是**注册键前缀路径）；必须与 battle 同值，否则查不到属主 |
 | `edge.listeners` | 至少一面，且 `name`/`network`/`addr`/`carrier` 齐备 | **启动失败**（`edge.listeners 不能为空`） | `name` 必须与 battle 帧面实例元数据里的端口键（`ws`/`kcp`/`udp`）一致；KCP/UDP 面只能配 `CARRIER_DATAGRAM`（框架不允许数据报面配 `stream_hello`），WS 面配 `CARRIER_WS_UPGRADE` |
-| `edge.max_streams` / `edge.idle_timeout` / `edge.new_conn_rate` / `edge.max_per_ip` | 无 | — | 空/非正 ⇒ 框架缺省（并发流 `1024` / 空闲回收 `60s` / 不限新连接速率 / 不限每 IP 连接数） |
+| `edge.max_streams` / `edge.idle_timeout` / `edge.max_per_ip` | 无 | — | 空/非正 ⇒ 框架缺省（并发流 `1024` / 空闲回收 `60s` / 不限每 IP 连接数） |
+| `edge.new_conn_rate` / `edge.new_conn_burst` | 无 | — | 空/非正 ⇒ 不限制速率 / 桶深取 `max(new_conn_rate, 1024)`；**两者语义不同**（每秒补充 vs 瞬时桶深，见 §7.8） |
 | `edge.dial_timeout` / `edge.probe_after` / `edge.probe_timeout` | 无 | — | 空 ⇒ 框架缺省（拨号与握手读取 `5s`；探活触发取 `idle_timeout`、等待回应取触发时长的一半、下限 `50ms`） |
 
 > 两个 **5s** 都是**懒激活冷启动预算**：gateway 的是推送/控制回调首次触达 redis 路由表/会话表的预算，
@@ -233,6 +234,12 @@ go build -o /tmp/loadtest ./scripts/loadtest
 - Prometheus 告警规则：`deploy/observability/rules/atlas-alerts.yml`（`promtool check rules` 可校验）；
 - Grafana 面板：`deploy/observability/grafana/provisioning/dashboards/json/atlas-stage3.json`。
 
+> **口径前提（序列懒创建）**：`edge_*` 序列由 OTel SDK 在**第一次观测**时才创建，空闲实例上
+> `/metrics` 里一条 `edge_*` 都没有（只有 `go_*` / `process_*`）。因此「抓不到」**不能**读成
+> 「计数为 0」——验收指标接线必须**先触发一次该事件**（打一次坏票 / 建一条流 / 拨一次失败后端）
+> 再抓；空集只能证明没触发过事件。这条踩过：2026-10-26 诊断里多轮「拒绝计数=0」的推断，
+> 其证据链正是「抓不到 `edge_*`」。
+
 ### 7.6 局时长可配（`battle.max_frames` / `battle.tick_interval_ms`）
 
 单局寿命 = `max_frames` × `tick_interval_ms`。两者**缺省即现值**（60 × 100ms ≈ 6s）——不配置时
@@ -289,6 +296,44 @@ go build -o /tmp/loadtest ./scripts/loadtest
 （要么调大 `seat_window_ms`，要么查建连/取票耗时）；恒为 `all_seated` 说明窗口已够。
 **`max_players` 必须 ≥ 实际成局人数**（casual 规则集单侧上限 5 ⇒ 一局 10 人）：小于成局人数时
 多出来的人会因「会话已满」进不去——旧缺省 `2` 就等于把 10 人局做成 2 人局。
+
+### 7.8 新连接准入：`edge.new_conn_rate` 与 `edge.new_conn_burst` 的分工
+
+两者是同一只令牌桶的两个旋钮，**不是**「同一个数的两种写法」：
+
+| 配置 | 语义 | 作用域 |
+|---|---|---|
+| `edge.new_conn_rate` | **每秒补充的令牌数**（稳态上限：平均每秒最多新建多少条流） | 持续一整段时间 |
+| `edge.new_conn_burst` | **瞬时桶深**（一次性突发最多放行多少条） | 某一瞬间 |
+
+只配 `rate` 时桶深缺省取 `max(rate, 1024)`。开服、大规模重连、对局集中开局都属于「一瞬间涌入
+几千条」的场景：桶深一旦小于并发建连数，超出的连接就会被**静默拒绝**（L4 只有断开，客户端看到的是
+`connection reset by peer` 或 `unexpected EOF`，服务端拒绝计数在 `edge_ticket_rejected_total{reason="rate_limited"}`）。
+
+算账依据（2026-10-26 诊断 §3.2，4096 人一轮压测）：`new_conn_rate: 200`、桶深缺省 1024 时，
+放行条数为 `1024 + 200 × 12s ≈ 3430`，与实际建连成功数 `players_matched=3430` 完全一致，
+剩余的 666 条即被限流拒绝——**数字对得上，就不再需要怀疑 TCP/WS 层损坏**。
+
+取值建议：`burst ≥ 一次开服/大规模重连的并发建连数`（本模板 `max_streams: 4096` ⇒ 取 `5000` 留余量），
+`rate ≥ 峰值人/秒`。两者同值是合理起点：速率上限不变，只是允许一次性突发到桶深。
+
+### 7.9 数据报面收缓冲：生产必须把 `net.core.rmem_max` 抬到 ≥ 8 MiB
+
+接入层在 `ListenPacket` 之后对每个数据报面调用 `SetReadBuffer(8 MiB)`，但**能不能拿到由内核决定**：
+内核会把请求值截断到 `net.core.rmem_max`。默认值通常只有 208 KiB 量级（实测 `212992`），
+单读循环在 10–20k pps 下缓冲只够约 0.2 秒，一旦被调度延迟就**静默丢包**——表现为客户端重传/补帧、
+最终判掉线，而服务端日志里什么都看不到，只有内核计数器在涨：
+
+```bash
+sysctl net.core.rmem_max                  # 现状（生产要求 ≥ 8388608）
+ss -u -a -n | grep 7102                   # Recv-Q 持续非 0 也说明读不动
+cat /proc/net/snmp | grep -A1 '^Udp:'     # UdpRcvbufErrors 即内核丢包计数（只增不减）
+```
+
+- **生产必须**：`net.core.rmem_max ≥ 8388608`（8 MiB），否则本项等于没设；
+- 申请失败（无权限、容器只读 sysctl）**只告警不阻断启动**，日志里会有
+  「接入面收缓冲申请失败（内核按 net.core.rmem_max 限流…）」，此时必须按上面的办法抬上限；
+- 长期修法是「每面多个 socket + `SO_REUSEPORT` + 多读协程」，把单读循环的天花板解开（尚未实现）。
 
 ## 8. 客户端版本门槛（gateway 登录入口专属）
 

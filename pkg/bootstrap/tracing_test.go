@@ -11,22 +11,22 @@ import (
 // TestServiceIdentityOf 验证 runtime → 服务身份映射：
 // 版本配置优先，未配置回退构建注入值（lib/version）；其余字段直接透传。
 func TestServiceIdentityOf(t *testing.T) {
-	got := serviceIdentityOf(&testBootstrap{Runtime: &configspb.Runtime{
+	got := ServiceIdentity(&testBootstrap{Runtime: &configspb.Runtime{
 		Name: "game", Id: "game-1", Version: "v1.2.3", Env: "test",
 	}})
 	want := observability.ServiceIdentity{Name: "game", ID: "game-1", Version: "v1.2.3", Env: "test"}
 	if got != want {
-		t.Fatalf("serviceIdentityOf() = %+v, 期望 %+v", got, want)
+		t.Fatalf("ServiceIdentity() = %+v, 期望 %+v", got, want)
 	}
 
 	// 配置未写 version：回退构建注入版本。
-	got = serviceIdentityOf(&testBootstrap{Runtime: &configspb.Runtime{Name: "game"}})
+	got = ServiceIdentity(&testBootstrap{Runtime: &configspb.Runtime{Name: "game"}})
 	if got.Version != version.Version {
 		t.Fatalf("version 缺省应回退构建注入值 %q，实际 %q", version.Version, got.Version)
 	}
 
 	// Runtime 缺失：仅版本回退，其余零值。
-	got = serviceIdentityOf(&testBootstrap{})
+	got = ServiceIdentity(&testBootstrap{})
 	if got.Name != "" || got.ID != "" || got.Env != "" || got.Version != version.Version {
 		t.Fatalf("Runtime 缺失时身份不符: %+v", got)
 	}
@@ -95,7 +95,7 @@ func TestTracingOptionsOf(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := tracingOptionsOf(tc.cfg, serviceIdentityOf(tc.cfg))
+			got, err := tracingOptionsOf(tc.cfg, ServiceIdentity(tc.cfg))
 			if err != nil {
 				t.Fatalf("tracingOptionsOf() 错误 = %v", err)
 			}
@@ -112,7 +112,7 @@ func TestTracingOptionsOfUnknownSampler(t *testing.T) {
 		Runtime: &configspb.Runtime{Name: "game"},
 		obs:     &configspb.Observability{Sampler: configspb.TraceSampler(9)},
 	}
-	if _, err := tracingOptionsOf(cfg, serviceIdentityOf(cfg)); err == nil {
+	if _, err := tracingOptionsOf(cfg, ServiceIdentity(cfg)); err == nil {
 		t.Fatal("未知采样器应报错，实际为 nil")
 	}
 }
