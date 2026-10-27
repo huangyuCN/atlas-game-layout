@@ -1,0 +1,64 @@
+{
+  "name": "@huangyucn/atlas-game-protocol",
+  "version": "0.1.0",
+  "description": "Atlas 游戏协议包：battle / game / matcher 三个游戏域的消息 DTO 与 op 常量（三端同源生成，零运行时依赖）",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./battle": {
+      "types": "./dist/battle.d.ts",
+      "import": "./dist/battle.js"
+    },
+    "./game": {
+      "types": "./dist/game.d.ts",
+      "import": "./dist/game.js"
+    },
+    "./matcher": {
+      "types": "./dist/matcher.d.ts",
+      "import": "./dist/matcher.js"
+    },
+    "./common": {
+      "types": "./dist/common.d.ts",
+      "import": "./dist/common.js"
+    },
+    "./lockstep": {
+      "types": "./dist/lockstep.d.ts",
+      "import": "./dist/lockstep.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "keywords": [
+    "atlas",
+    "game",
+    "protocol",
+    "battle",
+    "matcher",
+    "lockstep",
+    "游戏协议"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/huangyuCN/atlas-game-layout.git"
+  }
+}

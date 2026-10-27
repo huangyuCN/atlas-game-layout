@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 游戏协议包（C#）：api/**/*.cs 全部由 scripts/gen-protocol.sh 生成，勿手改。 -->
+  <PropertyGroup>
+    <!-- TFM 与 Atlas SDK（HuangyuCN.Atlas.Sdk）对齐：netstandard2.1（Unity 优先）。 -->
+    <TargetFrameworks>netstandard2.1</TargetFrameworks>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- 生成物只有 <summary> 而无逐成员注释：与 SDK 同一条豁免（缺 XML 注释不告警）。 -->
+    <NoWarn>CS1591</NoWarn>
+    <RootNamespace>HuangyuCN.AtlasGame.Protocol</RootNamespace>
+    <AssemblyName>HuangyuCN.AtlasGame.Protocol</AssemblyName>
+
+    <!-- NuGet 发布元数据（dotnet build 即出包；dotnet pack 亦可）。 -->
+    <PackageId>HuangyuCN.AtlasGame.Protocol</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Atlas 游戏协议包：battle / game / matcher 三个游戏域的消息 POCO 与 op 常量（零 protobuf 运行时依赖，protojson JSON 语义）</Description>
+    <Authors>huangyuCN</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageTags>atlas;game;protocol;battle;matcher;client</PackageTags>
+    <RepositoryUrl>https://github.com/huangyuCN/atlas-game-layout</RepositoryUrl>
+    <!-- 出包入口是 dotnet pack（见 protocol/README.md §三）：它先构建再打包，干净工作区
+         一条命令即可。**不**开 GeneratePackageOnBuild —— 与 TargetFrameworks 交叉编译目标
+         叠加时，pack 会在内层构建前就去找 dll（NU5026），干净树上一条命令跑不通。 -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 零 protobuf 运行时：DTO 用 System.Text.Json 的字段特性表达 protojson 语义
+         （netstandard2.1 不含该命名空间，需显式引用，与 SDK 同一版本）。 -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 包页展示协议包的生成/发布说明（本仓 protocol/README.md）。 -->
+    <None Include="../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

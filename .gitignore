@@ -41,3 +41,11 @@ go.work.sum
 # macOS 垃圾文件（勿入库）
 .DS_Store
 **/.DS_Store
+
+# 协议包（protocol/）的三端构建产物：只入库生成源码与包元数据，
+# 编译产物（node_modules / dist / bin / obj / nupkg）一律不入库。
+protocol/ts/node_modules/
+protocol/ts/dist/
+protocol/csharp/bin/
+protocol/csharp/obj/
+*.nupkg

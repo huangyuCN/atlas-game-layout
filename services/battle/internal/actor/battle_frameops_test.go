@@ -228,7 +228,9 @@ func (p *framePort) Push(_ stream.Conn, operation string, msg any) error {
 }
 
 // PushRaw 实现 stream.Port：记录一次已编码载荷推送（帧广播路径，载荷复用于全体目标）。
-func (p *framePort) PushRaw(_ stream.Conn, operation string, payload []byte) error {
+// 载荷编码版本（ver）在本桩不参与断言——本包只验链路行为（推送序列、结算只关一次、
+// 迟到 op 只补投）；「ver 与载荷编码自洽」由 internal/stream 的 fakePort 用例覆盖。
+func (p *framePort) PushRaw(_ stream.Conn, operation string, payload []byte, _ uint8) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pushed = append(p.pushed, operation)

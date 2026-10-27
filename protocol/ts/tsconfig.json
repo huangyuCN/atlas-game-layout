@@ -1,0 +1,19 @@
+{
+  // 游戏协议包（TS）：生成物在 src/api/**（scripts/gen-protocol.sh 产出），本配置只管编译。
+  // 零运行时依赖：产物是 interface/type/const，不引 protobuf 运行时，也不引 SDK。
+  "compilerOptions": {
+    // target ES2020：与三端 SDK 同一姿态（嵌入 JS 引擎的覆盖面优先于新语法）；
+    // 协议层只用 interface/type/const，不需要更高 target。
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "sourceMap": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -121,6 +121,26 @@ jobs:
             exit 1
           fi
 
+      # 协议包（protocol/）与三个游戏域 proto 同源：重生成有 diff 即红——改了 proto 忘了重跑
+      # scripts/gen-protocol.sh、或手改了生成物，都在这里被挡住（与三端 SDK 仓的 dto-drift 门同姿态）。
+      - name: 协议包重生成无 diff
+        env:
+          ATLAS_DIR: ../atlas
+        run: |
+          bash scripts/gen-protocol.sh
+          out="$(git status --porcelain -- protocol)"
+          if [ -n "$out" ]; then
+            echo "::error::scripts/gen-protocol.sh 产物与仓库内容不一致：请在本地重跑该脚本并提交生成物"
+            echo "$out"
+            git --no-pager diff --stat -- protocol
+            exit 1
+          fi
+
+      # 生成物的 Go import 映射只在编译时才暴露问题（M 映射写错 → 包路径对不上），
+      # 故单独编一次 protocol 模块（嵌套 module，父仓的 go build ./... 覆盖不到它）。
+      - name: 协议包 Go 端可构建
+        run: cd protocol/go && go build ./...
+
       - name: gofmt 检查
         run: |
           out="$(gofmt -l . | grep -v '^third_party/' || true)"
