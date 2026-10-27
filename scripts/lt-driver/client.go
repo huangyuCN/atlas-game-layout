@@ -24,9 +24,11 @@ import (
 	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/edge"
+	"github.com/huangyuCN/atlas/transport/frame"
 	udpt "github.com/huangyuCN/atlas/transport/udp"
 	wst "github.com/huangyuCN/atlas/transport/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // frameErrCount 是帧面错误打印计数（临时诊断用）。
@@ -42,6 +44,13 @@ type frameClient interface {
 	Close() error
 }
 
+// versionNotifier 是 frameClient 的可选能力：按帧头载荷版本分发推送。
+// 服务端可能对同一连接混用两种编码（帧广播 ver=2 protobuf、补帧/探针/入局/结算 ver=1 JSON），
+// 驱动只有拿到帧头版本才能正确分派解码（ws/udp/kcp 三个载体都实现）。
+type versionNotifier interface {
+	OnNotifyVersion(fn func(ver uint8, operation string, payload []byte))
+}
+
 // wsFrameClient 把框架 WS 客户端适配为 frameClient（剥掉可选调用参数）。
 type wsFrameClient struct{ cli *wst.Client }
 
@@ -52,6 +61,11 @@ func (w wsFrameClient) Invoke(ctx context.Context, operation string, req, resp a
 
 // OnNotify 挂接推送分发。
 func (w wsFrameClient) OnNotify(fn func(operation string, payload []byte)) { w.cli.OnNotify(fn) }
+
+// OnNotifyVersion 挂接按帧头版本分派的推送分发（ver=1 protojson、ver=2 protobuf）。
+func (w wsFrameClient) OnNotifyVersion(fn func(ver uint8, operation string, payload []byte)) {
+	w.cli.OnNotifyVersion(fn)
+}
 
 // Close 关闭连接。
 func (w wsFrameClient) Close() error { return w.cli.Close() }
@@ -84,6 +98,9 @@ type loadPlayer struct {
 
 	inputs     atomic.Int64  // 已发出的帧输入数（含失败）
 	broadcasts atomic.Int64  // 已收到的帧广播数
+	framesV1   atomic.Int64  // 帧广播中以 ver=1（protojson）到达的条数
+	framesV2   atomic.Int64  // 帧广播中以 ver=2（protobuf）到达的条数
+	decodeFail atomic.Int64  // 推送解码失败数（含未知版本与解码错误）
 	lastFrame  atomic.Uint64 // 已见到的最新帧号（补帧探针据此请求增量，避免回执无限增大）
 	outs       atomic.Int64  // 出局通知数（压测中必须为 0：不误判掉线）
 	failures   atomic.Int64  // 帧链路失败次数（连接失败/调用失败）
@@ -201,7 +218,11 @@ func (p *loadPlayer) dialFrame(ctx context.Context, o dialOpts) error {
 		p.failures.Add(1)
 		return fmt.Errorf("%s 帧连接失败（%s/%s）: %w", p.tag, o.via, o.transport, err)
 	}
-	cli.OnNotify(p.onNotify)
+	if vn, ok := cli.(versionNotifier); ok {
+		vn.OnNotifyVersion(p.onNotifyVersion)
+	} else {
+		cli.OnNotify(p.onNotify)
+	}
 	p.frame = cli
 	return nil
 }
@@ -256,13 +277,25 @@ func (p *loadPlayer) join(ctx context.Context) error {
 	return p.probeOnce(ctx)
 }
 
-// onNotify 分发帧面推送：帧广播计入下行样本，出局通知单独计数（压测中应为 0）。
+// onNotify 兼容不提供帧头版本的载体：等价于按 ver=1（protojson）分派。
 func (p *loadPlayer) onNotify(operation string, payload []byte) {
+	p.onNotifyVersion(frame.Version, operation, payload)
+}
+
+// onNotifyVersion 分发帧面推送：帧广播计入下行样本，出局通知单独计数（压测中应为 0）。
+// 统计口径不变（帧号/pps/失败），另按帧头 ver 分别计数（frames_v1/v2）以证明开关真的生效。
+func (p *loadPlayer) onNotifyVersion(ver uint8, operation string, payload []byte) {
 	switch operation {
 	case battlev1opclient.BattleServicePushOps.FrameBroadcast:
 		var fb battlev1.FrameBroadcast
-		if protojson.Unmarshal(payload, &fb) != nil {
+		if decodeByVersion(ver, payload, &fb) != nil {
+			p.decodeFail.Add(1)
 			return
+		}
+		if ver == frame.Version2 {
+			p.framesV2.Add(1)
+		} else {
+			p.framesV1.Add(1)
 		}
 		p.broadcasts.Add(1)
 		// 用广播帧号推进「已见到的最新帧」：否则探针的 last_seen_frame 停滞，
@@ -276,8 +309,22 @@ func (p *loadPlayer) onNotify(operation string, payload []byte) {
 			p.downlink.add(time.Since(st.AsTime()))
 		}
 	case battlev1opclient.BattleServicePushOps.PlayerOutNotify:
+		var out battlev1.PlayerOutNotify
+		if decodeByVersion(ver, payload, &out) != nil {
+			p.decodeFail.Add(1)
+			return
+		}
 		p.outs.Add(1)
 	}
+}
+
+// decodeByVersion 按帧头载荷版本选解码器：ver=2 走 protobuf 二进制，其余走 protojson。
+// 同一连接混用两种编码是设计内的（只有帧广播切二进制），故必须按 ver 选解码器。
+func decodeByVersion(ver uint8, payload []byte, msg proto.Message) error {
+	if ver == frame.Version2 {
+		return proto.Unmarshal(payload, msg)
+	}
+	return protojson.Unmarshal(payload, msg)
 }
 
 // DefaultFrameCallTimeout 是单次帧调用的缺省预算（pumpCfg.callTimeout 未配置时用）。

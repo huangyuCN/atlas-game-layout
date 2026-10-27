@@ -151,6 +151,11 @@ func (k kcpFrameClient) OnNotify(fn func(operation string, payload []byte)) {
 	k.cli.SetNotifyHandler(fn)
 }
 
+// OnNotifyVersion 挂接按帧头版本分派的推送分发（ver=1 protojson、ver=2 protobuf）。
+func (k kcpFrameClient) OnNotifyVersion(fn func(ver uint8, operation string, payload []byte)) {
+	k.cli.SetNotifyHandlerVersion(fn)
+}
+
 // Close 关闭连接（引擎会读循环退出并释放资源）。
 func (k kcpFrameClient) Close() error { return k.cli.Close() }
 
