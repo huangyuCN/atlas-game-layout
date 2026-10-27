@@ -8,6 +8,7 @@ import (
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
 	errorv1 "github.com/huangyuCN/atlas-game-layout/api/error/v1"
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/framelimit"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/lockstep"
@@ -54,6 +55,10 @@ func (b *BattleActor) JoinBattle(ctx core.ActorContext, req *battlev1.JoinBattle
 
 // SyncFrames 实现 battlev1actor.BattleService：按参战名单复核发起者后回执补帧
 // （断线重连按帧区间拉取缺失帧；发起者由 sender 注入）。
+//
+// 回执按单包预算截断（见 clipSyncReply）：一条回执绝不超出一个帧，被截掉的帧由客户端按
+// 回执的 next_frame 续传点再要一次——超包回执会被接入层整包丢弃，客户端连 ack 都发不出去，
+// 下行就此自锁（现场症状：每连接下行恒等于连上后先到的那 60 帧）。
 func (b *BattleActor) SyncFrames(ctx core.ActorContext, req *battlev1.SyncFramesReq) (*battlev1.SyncFramesReply, error) {
 	playerID, err := b.senderPlayer(ctx, "补帧")
 	if err != nil {
@@ -66,11 +71,7 @@ func (b *BattleActor) SyncFrames(ctx core.ActorContext, req *battlev1.SyncFrames
 	if err != nil {
 		return nil, err
 	}
-	return &battlev1.SyncFramesReply{
-		CurrentFrame: reconnect.GetCurrentFrame(),
-		Snapshot:     reconnect.GetSnapshot(),
-		Missed:       reconnect.GetMissed(),
-	}, nil
+	return clipSyncReply(reconnect, framelimit.ReplyBudget)
 }
 
 // GetState 实现 battlev1actor.BattleService：状态查询（grpc 管理接口转发）。
@@ -114,6 +115,10 @@ func (b *BattleActor) askReconnect(ctx core.ActorContext, lastSeen uint64) (*bat
 	}
 	for _, ins := range reply.MissedInputs {
 		group := &locksteppb.FrameInputs{}
+		if len(ins) > 0 {
+			// 帧组自带帧号：客户端据此把输入放回正确的帧，不必从组内输入反推。
+			group.FrameId = uint64(ins[0].Frame)
+		}
 		for _, in := range ins {
 			group.Inputs = append(group.Inputs, toPBInput(in))
 		}

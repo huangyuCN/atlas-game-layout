@@ -46,11 +46,24 @@ message SyncFramesReq {
   uint64 last_seen_frame = 2;
 }
 
-// SyncFramesReply 补帧回执：当前帧、快照与缺失帧输入。
+// SyncFramesReply 补帧回执：当前帧、快照与缺失帧输入（按单包上限**分批**送达）。
+//
+// 一条回执**绝不超出一个帧**：接入层回程按整个数据报计 16 KiB，超出的整包被丢弃，
+// 客户端连回执都收不到（更 ack 不了）——旧实现把缺失帧全塞进一条回执，客户端落后
+// 几十帧就超包，回执被丢弃后 ack 水位永不动，下行随之自锁。服务端因此按**编码后
+// 字节预算**截断 missed：被截掉的帧留在会话里，由客户端按 next_frame 再要一次。
 message SyncFramesReply {
   uint64 current_frame = 1;
   atlas.game.lockstep.SnapshotMeta snapshot = 2;
+  // missed 是本次送达的缺失帧输入（帧号连续、每项自带 frame_id）：可能只是
+  // [last_seen_frame+1, current_frame] 的一段前缀，剩余部分见 has_more。
   repeated atlas.game.lockstep.FrameInputs missed = 3;
+  // next_frame 是本次回执的续传点：客户端下一次请求填 `last_seen_frame = next_frame - 1`。
+  // 本次未截断时等于 current_frame + 1（已追平，没有更多历史帧要补）。
+  uint64 next_frame = 4;
+  // has_more 表示本次因单包预算截断、还有未送达的缺失帧：客户端应立刻按 next_frame
+  // 再发一次 SyncFrames，直到 has_more = false（不要靠猜「是否还有」）。
+  bool has_more = 5;
 }
 
 // PingReq 保活探针请求：只带客体寻址字段（target PID = battle:{battle_id}），

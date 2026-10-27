@@ -90,6 +90,12 @@ public sealed class SyncFramesReply
     [JsonPropertyName("missed")]
     public List<FrameInputs>? Missed { get; set; }
 
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("nextFrame")]
+    public ulong? NextFrame { get; set; }
+
+    [JsonPropertyName("hasMore")]
+    public bool? HasMore { get; set; }
+
 }
 
 /// <summary>PingReq DTO（protojson JSON 语义）。</summary>

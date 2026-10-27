@@ -386,12 +386,25 @@ func (x *SyncFramesReq) GetLastSeenFrame() uint64 {
 	return 0
 }
 
-// SyncFramesReply 补帧回执：当前帧、快照与缺失帧输入。
+// SyncFramesReply 补帧回执：当前帧、快照与缺失帧输入（按单包上限**分批**送达）。
+//
+// 一条回执**绝不超出一个帧**：接入层回程按整个数据报计 16 KiB，超出的整包被丢弃，
+// 客户端连回执都收不到（更 ack 不了）——旧实现把缺失帧全塞进一条回执，客户端落后
+// 几十帧就超包，回执被丢弃后 ack 水位永不动，下行随之自锁。服务端因此按**编码后
+// 字节预算**截断 missed：被截掉的帧留在会话里，由客户端按 next_frame 再要一次。
 type SyncFramesReply struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	CurrentFrame  uint64                  `protobuf:"varint,1,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
-	Snapshot      *lockstep.SnapshotMeta  `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	Missed        []*lockstep.FrameInputs `protobuf:"bytes,3,rep,name=missed,proto3" json:"missed,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	CurrentFrame uint64                 `protobuf:"varint,1,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
+	Snapshot     *lockstep.SnapshotMeta `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	// missed 是本次送达的缺失帧输入（帧号连续、每项自带 frame_id）：可能只是
+	// [last_seen_frame+1, current_frame] 的一段前缀，剩余部分见 has_more。
+	Missed []*lockstep.FrameInputs `protobuf:"bytes,3,rep,name=missed,proto3" json:"missed,omitempty"`
+	// next_frame 是本次回执的续传点：客户端下一次请求填 `last_seen_frame = next_frame - 1`。
+	// 本次未截断时等于 current_frame + 1（已追平，没有更多历史帧要补）。
+	NextFrame uint64 `protobuf:"varint,4,opt,name=next_frame,json=nextFrame,proto3" json:"next_frame,omitempty"`
+	// has_more 表示本次因单包预算截断、还有未送达的缺失帧：客户端应立刻按 next_frame
+	// 再发一次 SyncFrames，直到 has_more = false（不要靠猜「是否还有」）。
+	HasMore       bool `protobuf:"varint,5,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -445,6 +458,20 @@ func (x *SyncFramesReply) GetMissed() []*lockstep.FrameInputs {
 		return x.Missed
 	}
 	return nil
+}
+
+func (x *SyncFramesReply) GetNextFrame() uint64 {
+	if x != nil {
+		return x.NextFrame
+	}
+	return 0
+}
+
+func (x *SyncFramesReply) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
 }
 
 // PingReq 保活探针请求：只带客体寻址字段（target PID = battle:{battle_id}），
@@ -895,11 +922,14 @@ const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\x0fFrameInputReply\"T\n" +
 	"\rSyncFramesReq\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x12&\n" +
-	"\x0flast_seen_frame\x18\x02 \x01(\x04R\rlastSeenFrame\"\xaf\x01\n" +
+	"\x0flast_seen_frame\x18\x02 \x01(\x04R\rlastSeenFrame\"\xe9\x01\n" +
 	"\x0fSyncFramesReply\x12#\n" +
 	"\rcurrent_frame\x18\x01 \x01(\x04R\fcurrentFrame\x12=\n" +
 	"\bsnapshot\x18\x02 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\x128\n" +
-	"\x06missed\x18\x03 \x03(\v2 .atlas.game.lockstep.FrameInputsR\x06missed\"&\n" +
+	"\x06missed\x18\x03 \x03(\v2 .atlas.game.lockstep.FrameInputsR\x06missed\x12\x1d\n" +
+	"\n" +
+	"next_frame\x18\x04 \x01(\x04R\tnextFrame\x12\x19\n" +
+	"\bhas_more\x18\x05 \x01(\bR\ahasMore\"&\n" +
 	"\aPingReq\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"2\n" +
 	"\x13IssueEntryTicketReq\x12\x1b\n" +

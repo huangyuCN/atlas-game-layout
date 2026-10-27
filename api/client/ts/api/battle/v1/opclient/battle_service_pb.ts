@@ -33,6 +33,8 @@ export interface SyncFramesReply {
   currentFrame?: string // int64; // battle.v1.SyncFramesReply.current_frame
   snapshot?: SnapshotMeta; // battle.v1.SyncFramesReply.snapshot
   missed?: FrameInputs[]; // battle.v1.SyncFramesReply.missed
+  nextFrame?: string // int64; // battle.v1.SyncFramesReply.next_frame
+  hasMore?: boolean; // battle.v1.SyncFramesReply.has_more
 }
 
 export interface PingReq {

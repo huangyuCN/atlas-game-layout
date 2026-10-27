@@ -9,8 +9,13 @@
 // 本文件三个落点：
 //  1. frameBodySize / limitBody：帧面装配期把 max_body_size 收敛到契约值（未配置即补默认，
 //     显式超限即启动失败——配大了不会生效，只会让大回执在接入层被丢弃）；
-//  2. LimitReply：handler 回执超过上限即替换为可判定拒绝（TRANSPORT_DOWNLINK_FAILED）；
+//  2. LimitReply：handler 回执超过**载荷**上限即替换为可判定拒绝（TRANSPORT_DOWNLINK_FAILED），
+//     载荷上限比 body 上限小一个回执信封（[hasError][dataLen]），否则「载荷恰好合规」的回执
+//     仍会反推出 5 字节超包；它是兜底——补帧回执在业务侧就按编码后字节预算自裁
+//     （actor.clipSyncReply），正常路径撞不到它；
 //  3. 配置注释（services/battle/configs/config.yaml 的 server.kcp/udp/websocket.max_body_size）。
+//
+// 三处取值同源于 internal/framelimit，不各自写死 16 KiB。
 
 package server
 
@@ -18,16 +23,17 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/huangyuCN/atlas-game-layout/services/battle/internal/framelimit"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
-	"github.com/huangyuCN/atlas/transport/frame"
 	"github.com/huangyuCN/atlas/transport/frame/engine"
 	"google.golang.org/protobuf/proto"
 )
 
 // MaxFrameBodySize 是 battle 帧面单帧 body 的上限：接入层回程单包上限（16 KiB）减去帧头长度。
-// 口径依据：帧头 + body 才是落在网线上的数据报，而接入层按**整个数据报**判超限；
+// 口径依据与完整推导见 internal/framelimit（装配、闸门与业务回执自裁共用同一份）；
+// 一句话：帧头 + body 才是落在网线上的数据报，而接入层按**整个数据报**判超限，
 // 故 body 上限必须比 16 KiB 小一个帧头，否则「恰好合规」的回执仍会被接入层丢掉。
-const MaxFrameBodySize = 16*1024 - frame.HeaderSize
+const MaxFrameBodySize = framelimit.MaxBodySize
 
 // frameBodySize 返回某帧面生效的 body 上限：未配置（0）即取契约上限；显式配置只允许
 // 0 < n ≤ MaxFrameBodySize，超限或负数即装配期失败（该错误让进程启动失败，不静默放过）。
@@ -73,17 +79,22 @@ func frameHandler(operation string, h engine.MsgHandler, m *FrameMetrics) engine
 // 改回可判定拒绝（reason=TRANSPORT_DOWNLINK_FAILED：回执已生成但下发失败，客户端可换更小的
 // 请求重试，如补帧区间收窄），并按 operation 计数。
 //
+// 上限口径是**载荷**上限（ReplyPayloadLimit）：落到网线上的 body 还要套 5 字节回执信封
+// （[hasError][dataLen]），只比 body 上限会被「载荷恰好合规」的回执反推出 5 字节超包。
+//
+// 这一层是兜底而非常态：补帧（SyncFrames）在业务侧就按编码后字节预算自裁（见 actor
+// clipSyncReply），正常路径不会撞到闸门；其余 op 的回执仍由它兜住。
 // 为什么必须在这一层拦：引擎对超包回执是**静默丢弃**（只落日志），客户端只会等到超时；
 // 超包是「请求区间太大」这类客户端可自行收窄的问题，给稳定 reason 才可判定。
 func LimitReply(operation string, h engine.MsgHandler, m *FrameMetrics) engine.MsgHandler {
 	return func(ctx context.Context, dec engine.Decoder, enc engine.Encoder) ([]byte, error) {
 		out, err := h(ctx, dec, enc)
-		if err != nil || len(out) <= MaxFrameBodySize {
+		if err != nil || len(out) <= framelimit.ReplyPayloadLimit {
 			return out, err
 		}
 		m.oversizeOf(operation).Add(1)
 		return nil, atlaserrors.New(500, atlaserrors.ReasonDownlinkFailed,
-			fmt.Sprintf("回执 %d 字节超过单包上限 %d（operation=%s）：请缩小请求区间后重试",
-				len(out), MaxFrameBodySize, operation))
+			fmt.Sprintf("回执载荷 %d 字节超过单包上限 %d（body = 载荷 + 回执信封 %d；operation=%s）：请缩小请求区间后重试",
+				len(out), framelimit.ReplyPayloadLimit, framelimit.ReplyEnvelopeSize, operation))
 	}
 }
