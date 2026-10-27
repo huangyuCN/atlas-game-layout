@@ -79,11 +79,16 @@ func NewActorRuntime(cfg *conf.Bootstrap, discovery registry.Discovery, meter me
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
 	}
+	dirOpts, err := pkgactor.DirectoryFromConf(cfg.GetActor())
+	if err != nil {
+		return nil, fmt.Errorf("app: %w", err)
+	}
 	rt, err := pkgactor.NewRuntime(pkgactor.Options{
 		NodeID:        nodeID,
 		Namespace:     derived.Namespace,
 		ServiceName:   consts.ServiceBattle,
 		EtcdEndpoints: endpoints,
+		Directory:     dirOpts,
 		NatsURL:       natsURLOf(cfg),
 		Tracer:        pkgactor.DefaultTracer(),
 		Meter:         meter,

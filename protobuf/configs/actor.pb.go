@@ -1,4 +1,4 @@
-// 公共配置：actor 集群租约（归属键 TTL 与续租周期）。
+// 公共配置：actor 集群租约（归属键 TTL 与续租周期）与目录后端选择。
 //
 // 缺省约定（唯一规则）见 docs/config.md §10：两项都是**可选参数**——空 = 取缺省
 // 60s/20s，不覆盖底层默认；显式值必须能被 time.ParseDuration 解析、为正，且
@@ -38,8 +38,11 @@ type Actor struct {
 	// lease_renew_interval 是归属续租周期（time.ParseDuration 字符串，如 "20s"；空 = 20s）。
 	// 必须为正且**严格小于** lease_ttl（建议 TTL/3）：续租周期逼近 TTL 时，一次抖动就整批失租。
 	LeaseRenewInterval string `protobuf:"bytes,2,opt,name=lease_renew_interval,json=leaseRenewInterval,proto3" json:"lease_renew_interval,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// directory 是 actor 目录后端（Locator 写入侧与接入层只读侧共用**同一份**配置）：
+	// 缺段或 backend 为空 = etcd，保持现网行为；两端配得不一样会表现为「查不到属主」。
+	Directory     *Directory `protobuf:"bytes,3,opt,name=directory,proto3" json:"directory,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Actor) Reset() {
@@ -86,14 +89,234 @@ func (x *Actor) GetLeaseRenewInterval() string {
 	return ""
 }
 
+func (x *Actor) GetDirectory() *Directory {
+	if x != nil {
+		return x.Directory
+	}
+	return nil
+}
+
+// Directory 是 actor 目录后端配置。
+//
+// 目录后端只影响 actor 归属记录（Claim/Renew/Release/Lookup + 接入层属主监听），
+// 注册中心、配置中心、rollout 选举、再平衡锁都不受它影响。
+type Directory struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// backend 是后端类型：etcd（缺省）| redis。空 = etcd（保持现网行为）。
+	Backend string `protobuf:"bytes,1,opt,name=backend,proto3" json:"backend,omitempty"`
+	// redis 是 redis 后端连接配置（仅 backend=redis 时使用）。
+	Redis *DirectoryRedis `protobuf:"bytes,2,opt,name=redis,proto3" json:"redis,omitempty"`
+	// quiesce_grace 是 Claim 在租约过期后的额外等待窗口（time.ParseDuration 字符串；空 = 框架 5s）。
+	// 故障接管等待 ≈ 剩余租约 + quiesce_grace；redis 后端还要求它 >= replication_lag。
+	QuiesceGrace string `protobuf:"bytes,3,opt,name=quiesce_grace,json=quiesceGrace,proto3" json:"quiesce_grace,omitempty"`
+	// replication_lag 是主从复制滞后上界（time.ParseDuration 字符串，如 "500ms"；空 = 不声明）。
+	//
+	// 仅 redis 后端使用：续租写不等待同步复制（WAIT），切主会丢掉最后一段续租写，新主上的
+	// lease_deadline 因而最多提前一个复制滞后。**若 quiesce_grace < replication_lag，他节点会在
+	// 旧 owner 仍自认存活时抢占 ⇒ 双活**，故装配期强制校验 grace >= lag（违反即启动失败）。
+	ReplicationLag string `protobuf:"bytes,4,opt,name=replication_lag,json=replicationLag,proto3" json:"replication_lag,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *Directory) Reset() {
+	*x = Directory{}
+	mi := &file_protobuf_configs_actor_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Directory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Directory) ProtoMessage() {}
+
+func (x *Directory) ProtoReflect() protoreflect.Message {
+	mi := &file_protobuf_configs_actor_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Directory.ProtoReflect.Descriptor instead.
+func (*Directory) Descriptor() ([]byte, []int) {
+	return file_protobuf_configs_actor_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Directory) GetBackend() string {
+	if x != nil {
+		return x.Backend
+	}
+	return ""
+}
+
+func (x *Directory) GetRedis() *DirectoryRedis {
+	if x != nil {
+		return x.Redis
+	}
+	return nil
+}
+
+func (x *Directory) GetQuiesceGrace() string {
+	if x != nil {
+		return x.QuiesceGrace
+	}
+	return ""
+}
+
+func (x *Directory) GetReplicationLag() string {
+	if x != nil {
+		return x.ReplicationLag
+	}
+	return ""
+}
+
+// DirectoryRedis 是 actor 目录的 Redis 连接配置（单点 / 哨兵；不支持集群分片）。
+//
+// 不支持分片的理由：目录的变更事件用「全局版本号键 + 数据键」记账，分片后两者可能落在
+// 不同槽，Lua/事务无法跨槽；目录规模（单命名空间万级 PID）用单主 + 从库足够。
+type DirectoryRedis struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// endpoints 是节点地址列表：单点恰好 1 个；哨兵形态为全部哨兵地址（如 127.0.0.1:26380）。
+	Endpoints []string `protobuf:"bytes,1,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
+	// master_name 是哨兵监控的主库名（如 "atlas"；空 = 单点直连 endpoints[0]）。
+	MasterName string `protobuf:"bytes,2,opt,name=master_name,json=masterName,proto3" json:"master_name,omitempty"`
+	// password 是可选密码。
+	Password string `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
+	// tls 启用 TLS（系统根证书校验）。
+	Tls bool `protobuf:"varint,4,opt,name=tls,proto3" json:"tls,omitempty"`
+	// insecure_skip_verify 在 TLS 下跳过证书校验（仅测试环境使用）。
+	InsecureSkipVerify bool `protobuf:"varint,5,opt,name=insecure_skip_verify,json=insecureSkipVerify,proto3" json:"insecure_skip_verify,omitempty"`
+	// db 是数据库编号（单点 / 哨兵形态；0 = 缺省库）。
+	Db int32 `protobuf:"varint,6,opt,name=db,proto3" json:"db,omitempty"`
+	// sync_replicas 是「关键写」等待复制的从库数（0 = 不同步，行为与直连一致）。
+	//
+	// Claim/Release/Migrate 等关键写会 WAIT 至少这么多个从库确认后才算成功；续租写不走 WAIT
+	// （高频，丢失的后果是租约过期重 Claim，由 quiesce_grace 兜住）。生产用 1 主 1 从及以上
+	// 时**必须**配 1，否则切主窗口内的 Claim 缺少 fencing 依据。
+	SyncReplicas int32 `protobuf:"varint,7,opt,name=sync_replicas,json=syncReplicas,proto3" json:"sync_replicas,omitempty"`
+	// sync_timeout 是 WAIT 的等待上限（time.ParseDuration 字符串；空 = 2s）。
+	SyncTimeout   string `protobuf:"bytes,8,opt,name=sync_timeout,json=syncTimeout,proto3" json:"sync_timeout,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DirectoryRedis) Reset() {
+	*x = DirectoryRedis{}
+	mi := &file_protobuf_configs_actor_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DirectoryRedis) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DirectoryRedis) ProtoMessage() {}
+
+func (x *DirectoryRedis) ProtoReflect() protoreflect.Message {
+	mi := &file_protobuf_configs_actor_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DirectoryRedis.ProtoReflect.Descriptor instead.
+func (*DirectoryRedis) Descriptor() ([]byte, []int) {
+	return file_protobuf_configs_actor_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DirectoryRedis) GetEndpoints() []string {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
+}
+
+func (x *DirectoryRedis) GetMasterName() string {
+	if x != nil {
+		return x.MasterName
+	}
+	return ""
+}
+
+func (x *DirectoryRedis) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *DirectoryRedis) GetTls() bool {
+	if x != nil {
+		return x.Tls
+	}
+	return false
+}
+
+func (x *DirectoryRedis) GetInsecureSkipVerify() bool {
+	if x != nil {
+		return x.InsecureSkipVerify
+	}
+	return false
+}
+
+func (x *DirectoryRedis) GetDb() int32 {
+	if x != nil {
+		return x.Db
+	}
+	return 0
+}
+
+func (x *DirectoryRedis) GetSyncReplicas() int32 {
+	if x != nil {
+		return x.SyncReplicas
+	}
+	return 0
+}
+
+func (x *DirectoryRedis) GetSyncTimeout() string {
+	if x != nil {
+		return x.SyncTimeout
+	}
+	return ""
+}
+
 var File_protobuf_configs_actor_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_actor_proto_rawDesc = "" +
 	"\n" +
-	"\x1cprotobuf/configs/actor.proto\x12\ratlas.configs\"V\n" +
+	"\x1cprotobuf/configs/actor.proto\x12\ratlas.configs\"\x8e\x01\n" +
 	"\x05Actor\x12\x1b\n" +
 	"\tlease_ttl\x18\x01 \x01(\tR\bleaseTtl\x120\n" +
-	"\x14lease_renew_interval\x18\x02 \x01(\tR\x12leaseRenewIntervalBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
+	"\x14lease_renew_interval\x18\x02 \x01(\tR\x12leaseRenewInterval\x126\n" +
+	"\tdirectory\x18\x03 \x01(\v2\x18.atlas.configs.DirectoryR\tdirectory\"\xa8\x01\n" +
+	"\tDirectory\x12\x18\n" +
+	"\abackend\x18\x01 \x01(\tR\abackend\x123\n" +
+	"\x05redis\x18\x02 \x01(\v2\x1d.atlas.configs.DirectoryRedisR\x05redis\x12#\n" +
+	"\rquiesce_grace\x18\x03 \x01(\tR\fquiesceGrace\x12'\n" +
+	"\x0freplication_lag\x18\x04 \x01(\tR\x0ereplicationLag\"\x87\x02\n" +
+	"\x0eDirectoryRedis\x12\x1c\n" +
+	"\tendpoints\x18\x01 \x03(\tR\tendpoints\x12\x1f\n" +
+	"\vmaster_name\x18\x02 \x01(\tR\n" +
+	"masterName\x12\x1a\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpassword\x12\x10\n" +
+	"\x03tls\x18\x04 \x01(\bR\x03tls\x120\n" +
+	"\x14insecure_skip_verify\x18\x05 \x01(\bR\x12insecureSkipVerify\x12\x0e\n" +
+	"\x02db\x18\x06 \x01(\x05R\x02db\x12#\n" +
+	"\rsync_replicas\x18\a \x01(\x05R\fsyncReplicas\x12!\n" +
+	"\fsync_timeout\x18\b \x01(\tR\vsyncTimeoutBAZ?github.com/huangyuCN/atlas-game-layout/protobuf/configs;configsb\x06proto3"
 
 var (
 	file_protobuf_configs_actor_proto_rawDescOnce sync.Once
@@ -107,16 +330,20 @@ func file_protobuf_configs_actor_proto_rawDescGZIP() []byte {
 	return file_protobuf_configs_actor_proto_rawDescData
 }
 
-var file_protobuf_configs_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_protobuf_configs_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_protobuf_configs_actor_proto_goTypes = []any{
-	(*Actor)(nil), // 0: atlas.configs.Actor
+	(*Actor)(nil),          // 0: atlas.configs.Actor
+	(*Directory)(nil),      // 1: atlas.configs.Directory
+	(*DirectoryRedis)(nil), // 2: atlas.configs.DirectoryRedis
 }
 var file_protobuf_configs_actor_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: atlas.configs.Actor.directory:type_name -> atlas.configs.Directory
+	2, // 1: atlas.configs.Directory.redis:type_name -> atlas.configs.DirectoryRedis
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_protobuf_configs_actor_proto_init() }
@@ -130,7 +357,7 @@ func file_protobuf_configs_actor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protobuf_configs_actor_proto_rawDesc), len(file_protobuf_configs_actor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

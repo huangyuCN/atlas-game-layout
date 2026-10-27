@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/directory"
 	"github.com/huangyuCN/atlas-game-layout/pkg/etcd"
 	pkgnats "github.com/huangyuCN/atlas-game-layout/pkg/nats"
 	"github.com/huangyuCN/atlas/contrib/actor/cluster"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/rollout"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
-	etcdlocator "github.com/huangyuCN/atlas/contrib/locator/etcd"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/namespace"
 	"github.com/huangyuCN/atlas/registry"
@@ -29,8 +29,12 @@ type Options struct {
 	NodeID string
 	// ServiceName 是服务发现中的服务名（懒激活候选节点）。
 	ServiceName string
-	// EtcdEndpoints 是 Locator 后端 etcd 地址。
+	// EtcdEndpoints 是 etcd 地址：既用于 actor 目录（backend=etcd 时），也用于节点 ID
+	// 归属声明（node claim 仍走 etcd 租约键，属于注册/选举面，不在「目录后端可替换」范围内）。
 	EtcdEndpoints []string
+	// Directory 是 actor 目录后端配置（配置段 actor.directory）：零值 = etcd，保持现网行为。
+	// 接入层（edge）必须配同一个后端 + 同一个命名空间，否则读不到属主。
+	Directory directory.Options
 	// NatsURL 是集群传输 NATS 地址。
 	NatsURL string
 	// Namespace 是命名空间 token（配置字段 runtime.namespace 经框架 namespace.Derive 归一后的值）：
@@ -80,6 +84,8 @@ type Runtime struct {
 	tr  *cluster.NATSTransport
 	// releaseClaim 是节点归属的释放函数（Start 成功时设置，Shutdown 调用并置空）。
 	releaseClaim func(context.Context)
+	// releaseDir 释放目录后端自建的连接（redis 后端才有；etcd 复用 r.ec，为 no-op）。
+	releaseDir func()
 }
 
 // NewRuntime 装配集群运行时（惰性：Start 前不建任何连接）。
@@ -93,24 +99,33 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 装配期校验目录后端的双活风险：redis 主从切主会丢掉未同步的续租写，保护窗必须覆盖复制滞后。
+	// 配置经 directory.Parse 时已校验过一次；直接构造 Options 的调用方（示例/测试）在这里兜住。
+	// 位置在**建任何连接之前**：配错必须启动即失败，而不是连上后端之后才炸。
+	if opts.Directory.Backend == directory.BackendRedis {
+		if err := cluster.ValidateReplicationGrace(lease.QuiesceGrace, opts.Directory.ReplicationLag); err != nil {
+			return nil, fmt.Errorf("actor: %w", err)
+		}
+	}
 	nc, err := pkgnats.Connect(pkgnats.Options{URL: opts.NatsURL, Name: "actor-" + opts.NodeID})
 	if err != nil {
 		return nil, err
 	}
-	ec, loc, err := newLocator(opts, derived)
+	ec, be, releaseDir, err := newLocator(opts, derived)
 	if err != nil {
 		nc.Close()
 		return nil, err
 	}
-	inner, dir, tr, err := newClusterRuntime(opts, derived, lease, nc, loc)
+	inner, dir, tr, err := newClusterRuntime(opts, derived, lease, nc, be)
 	if err != nil {
 		nc.Close()
+		releaseDir()
 		_ = ec.Close()
 		return nil, err
 	}
 	claimer := newNodeClaimer(opts, ec, derived.EtcdDirectory, lease.TTL)
 	return &Runtime{inner: inner, nc: nc, ec: ec, nodeID: opts.NodeID, claimer: claimer,
-		dir: dir, tr: tr}, nil
+		dir: dir, tr: tr, releaseDir: releaseDir}, nil
 }
 
 // newNodeClaimer 构造节点 ID 归属声明器：**TTL 跟随 actor 目录租约**（同一个 etcd、同一份
@@ -142,26 +157,36 @@ func deriveOptions(opts Options) (namespace.Derived, error) {
 	return derived, nil
 }
 
-// newLocator 构造 etcd 客户端与 locator：目录前缀取 Derived.EtcdDirectory（/atlas/actors/<ns>），
-// 使共用同一 etcd 的两套部署不争同一条 PID 归属记录（节点归属键复用同一前缀）。
-func newLocator(opts Options, derived namespace.Derived) (*clientv3.Client, *etcdlocator.Locator, error) {
+// newLocator 构造 etcd 客户端、目录后端 locator 与其释放函数。
+//
+// 为什么两件事一起做：节点 ID 归属声明（node claim）仍走 etcd 租约键，与目录后端无关，
+// 故 etcd 客户端总是要建；目录后端则按 actor.directory 选择（缺省 etcd 复用同一条客户端）。
+// 目录前缀由 directory.Prefix 统一派生（etcd: /atlas/actors/<ns>；redis: atlas:<ns>:actors），
+// 共用同一后端的两套部署因此不争同一条 PID 归属记录。
+func newLocator(opts Options, derived namespace.Derived) (*clientv3.Client, cluster.Backend, func(), error) {
 	ec, err := etcd.NewClient(etcd.Options{Endpoints: opts.EtcdEndpoints})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	loc, err := etcdlocator.NewLocator(ec, etcdlocator.WithPrefix(derived.EtcdDirectory))
+	raw, release, err := directory.Open(opts.Directory, ec, derived)
 	if err != nil {
 		_ = ec.Close()
-		return nil, nil, fmt.Errorf("actor: 创建 locator 失败: %w", err)
+		return nil, nil, nil, fmt.Errorf("actor: 创建 locator 失败: %w", err)
 	}
-	return ec, loc, nil
+	be, ok := raw.(cluster.Backend)
+	if !ok {
+		release()
+		_ = ec.Close()
+		return nil, nil, nil, fmt.Errorf("actor: 目录后端 %s 不支持 CAS（Directory 需要 Locator + CASLocator）", opts.Directory.Backend)
+	}
+	return ec, be, release, nil
 }
 
 // newClusterRuntime 组装集群运行时（目录 + NATS 传输 + 可选发现/追踪/指标）。
 // 日志不显式注入：cluster 默认取 atlas 全局 Logger（bootstrap 已把本服务配置好的 Logger
 // 装进全局），再捕获一次只会在将来二次 SetLogger 时固化为旧实例。
 func newClusterRuntime(opts Options, derived namespace.Derived, lease cluster.LeaseConfig,
-	nc *nats.Conn, loc *etcdlocator.Locator) (*cluster.Runtime, cluster.Directory, *cluster.NATSTransport, error) {
+	nc *nats.Conn, be cluster.Backend) (*cluster.Runtime, cluster.Directory, *cluster.NATSTransport, error) {
 	transport, err := cluster.NewNATSTransport(nc,
 		cluster.WithLocalNodeID(opts.NodeID), cluster.WithNamespace(derived.Namespace.String()))
 	if err != nil {
@@ -172,9 +197,9 @@ func newClusterRuntime(opts Options, derived namespace.Derived, lease cluster.Le
 		Mode:   cluster.ModeCluster,
 		Lease:  lease,
 	}
-	// Directory 的 TTL 必须与租约一致：它写进归属记录的截止时间与 etcd 键的 TTL。
+	// Directory 的 TTL 必须与租约一致：它写进归属记录的截止时间与后端键的 TTL。
 	// 只改续租周期会把「配置生效」变成假象（键仍按旧 TTL 过期）。
-	dir := cluster.NewDirectory(loc, opts.NodeID, lease.TTL)
+	dir := cluster.NewDirectory(be, opts.NodeID, lease.TTL)
 	rtOpts := []cluster.Option{
 		cluster.WithDirectory(dir),
 		cluster.WithTransport(transport),
@@ -220,6 +245,9 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	r.releaseClaim = nil
 	if release != nil {
 		release(ctx)
+	}
+	if r.releaseDir != nil {
+		r.releaseDir() // redis 后端自建的客户端（etcd 后端为 no-op）
 	}
 	_ = r.ec.Close()
 	r.nc.Close()

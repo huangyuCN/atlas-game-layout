@@ -24,6 +24,20 @@ runtime:
 actor:
   lease_ttl: 60s
   lease_renew_interval: 20s
+  # directory 是 actor 目录后端（缺段/backend 为空 = etcd，保持现网行为）。切到 redis 时
+  # **托管方（battle/game）与接入层（edge）必须配成同一个 backend + 同一个 namespace**，
+  # 否则目录写入正常、接入层却查不到属主（表现为大量 backend_unavailable）。
+  # redis 后端强制 quiesce_grace >= replication_lag：续租写不 WAIT，切主会丢最后一段续租写，
+  # 保护窗不覆盖复制滞后就会双活（装配期校验，违反即启动失败）。详见 docs/config.md §11。
+  # directory:
+  #   backend: redis
+  #   quiesce_grace: 5s
+  #   replication_lag: 500ms          # 按主从复制实测上界声明（P99）
+  #   redis:
+  #     endpoints: [127.0.0.1:26380]  # 哨兵地址；单点直连写 [127.0.0.1:6379]
+  #     master_name: atlas            # 哨兵主库名（单点留空）
+  #     sync_replicas: 1              # 关键写 WAIT（生产 1 主 N 从建议 1）
+  #     sync_timeout: 2s
 
 registry:
   etcd:

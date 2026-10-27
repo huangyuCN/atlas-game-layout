@@ -69,6 +69,11 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `runtime.min_client_version` | 无 | — | 空 ⇒ **仅记录**（记录客户端上报版本，不拒绝）；非空 ⇒ **登录期强制**（低于门槛/未上报/版本串非法一律拒绝，reason 常量 `CLIENT_VERSION_TOO_LOW`）。比较规则、非法串处置与取值见 §8 |
 | `runtime.min_client_version_mode` | 无 | — | 只有 `NEGOTIATE` 有意义（只记录不拒绝的灰度逃生门）；缺省（含 `OFF`）与 `ENFORCE` 在网关侧同义 = 强制（见 §8） |
 | `actor.lease_ttl` / `actor.lease_renew_interval` | 无（常驻能力：只有 actor 宿主 battle / game 持有归属对象） | 空 ⇒ 缺省 `60s` / `20s`（不覆盖底层默认） | 显式值必须是 `time.ParseDuration` 字符串、为正，且 `lease_renew_interval` **严格小于** `lease_ttl`，违反即**启动失败**（不静默回落）；TTL 与接管等待的取舍见 §10 |
+| `actor.directory.backend` | 无 | 空 ⇒ `etcd`（保持现网行为） | `etcd` / `redis`；**托管方（battle/game）与接入层（edge）必须同值**，见 §11 |
+| `actor.directory.redis.endpoints` | `backend: redis` 时非空 | 启动失败（不猜地址） | 单点 1 个；哨兵为全部哨兵地址；`master_name` 空 = 单点直连 |
+| `actor.directory.redis.*` | 无 | — | `password` / `db` / `tls` / `insecure_skip_verify` / `sync_replicas` / `sync_timeout`（空 ⇒ 底层默认，`sync_timeout` 缺省 2s） |
+| `actor.directory.quiesce_grace` | 无 | 空 ⇒ 框架 `5s` | Claim 保护窗；**redis 后端要求 `>= replication_lag`**，违反即启动失败 |
+| `actor.directory.replication_lag` | 无（redis 后端强烈建议显式声明） | 空 ⇒ 不校验（仍有双活风险） | 切主完成窗口上界（含哨兵降级旧主的时间），见 §11.1 |
 | `registry.etcd.endpoints` | 非空 | etcd 客户端构造失败（装配期报错，注册/发现均不可用） | — |
 | `registry.ttl` | 无 | — | `""` ⇒ 底层默认 15s（`registry.NewEtcd` 只在 `>0` 时追加 `RegisterTTL`） |
 | `server.grpc.edge_addr` | 非空 | **不启用 edge 面**（不监听、不注册 Edge 接口） | 见下「共享可选参数」 |
@@ -495,3 +500,61 @@ TTL 变长不是免费的：他节点必须等「租约过期 + QuiesceGrace（�
 Lookup-first / 按 PID 单飞 / 隔离窗口 / 激活闸门纪律）；成功即恢复服务，用尽上限则保持冻结
 并输出 Error 日志 + `actor_reclaim_total{result="exhausted"}`（可告警）。语义细节见框架仓
 `contrib/actor/cluster/doc.go` 的「Lost 自愈（判 Lost 不再永久冻结）」一节。
+
+## 11. actor 目录后端（`actor.directory.*`：etcd | redis）
+
+目录（PID → 属主归属记录）默认仍写 **etcd**（`/atlas/actors/<ns>`，保持现网行为）。
+把 `actor.directory.backend` 配成 `redis` 后，写入侧（battle / game 的 `pkg/actor`）和
+只读侧（edge 的属主解析）**同时**切到 Redis——两端共用 `pkg/directory` 的同一份解析与
+前缀派生，配得不一致会表现为「写入正常、接入层查不到属主」。
+
+**范围**：只有 actor 目录换后端。注册中心、配置中心、rollout 选举、再平衡锁、以及
+节点 ID 归属声明（node claim，仍走 etcd 租约键）都不变，故 `registry.etcd.endpoints`
+仍然必填。
+
+| 配置 | 缺省 | 语义 |
+|---|---|---|
+| `actor.directory.backend` | 空 ⇒ `etcd` | 目录后端：`etcd` \| `redis`（其它值启动失败） |
+| `actor.directory.redis.endpoints` | 无 | 单点 1 个地址；哨兵形态为全部哨兵地址（backend=redis 必填） |
+| `actor.directory.redis.master_name` | 空 | 哨兵监控的主库名（空 = 单点直连） |
+| `actor.directory.redis.password` / `db` | 空 / 0 | 认证与库号 |
+| `actor.directory.redis.tls` / `insecure_skip_verify` | false | TLS 与测试环境跳过证书校验 |
+| `actor.directory.redis.sync_replicas` / `sync_timeout` | 0 / `2s` | 关键写 WAIT 的从库数与时延上限（生产 1 主 N 从建议 `sync_replicas: 1`） |
+| `actor.directory.quiesce_grace` | 空 ⇒ 框架 `5s` | Claim 保护窗（租约过期后额外等待） |
+| `actor.directory.replication_lag` | 空 ⇒ 不声明 | 主从复制滞后上界，**redis 后端要求 `quiesce_grace >= replication_lag`** |
+
+**前缀**：`/atlas/actors/<ns>`（etcd）与 `atlas:<ns>:actors`（redis）由
+`namespace.Derive` 派生，一一对应；同一 Redis 上多套部署按 `<ns>` 隔离。
+
+**监听（Watch）语义**：Redis 后端用 pub/sub 增量 + **订阅后全量对齐**（重订阅再来一次），
+写事件带全局单调版本号，重复/乱序事件按版本丢弃；连接正常时靠版本号连续性发现丢消息
+（每次检查一次 GET），发现缺口立刻全量。因此属主变更的收敛延迟是「一次 pub/sub 投递」，
+断线/丢消息场景是一次全量扫描。
+
+### 11.1 切主双活风险（硬约束）
+
+Redis 续租是高频写，**不等待同步复制**（不 WAIT）。切主时有两段写会丢：
+
+1. **稳态复制滞后**：最后一次续租写还没同步到从库；
+2. **切主完成窗口**：哨兵先提升新主，之后才把旧主降为从库——这段窗口里旧主仍在接受续租写，
+   而这些写永远到不了新主（实测窗口约 3s，上界是哨兵的 `failover-timeout`）。
+
+两段合起来就是配置项 `actor.directory.replication_lag` 要声明的量（**取上界，不是稳态 P99**；
+演练时把 `sentinel failover-timeout` 调小到与它一致最稳）。
+
+框架侧为此做了两件事（都在框架仓，模板无需额外代码）：
+
+- **归属键的 TTL = `lease_ttl` + `quiesce_grace`**：Claim 的「过期后仍拒抢」只在记录还存在时
+  生效；键若与记录内的 `lease_deadline` 同时消失，他节点的 `Create` 会直接成功、绕过 grace。
+  让键多活一个 grace 后，抢占最早时刻恒为「最后一次成功续租 + `lease_ttl` + `quiesce_grace`」，
+  `quiesce_grace >= replication_lag` 才真正闭合双活窗口。
+- **装配期校验** `quiesce_grace >= replication_lag`（`pkg/directory.Parse` 与
+  `pkg/actor.NewRuntime` 两处），违反即**启动失败**，不静默放行。
+
+**结论（必须遵守）**：`quiesce_grace` 要覆盖「切主完成窗口」上界。若哨兵 `failover-timeout`
+是 10s，就配 `quiesce_grace: 10s` 且 `replication_lag: 10s`；只配缺省 5s 而 `failover-timeout`
+是 10s，就仍存在一个不超过 5s 的双活窗口（期间投递由 epoch 栅栏挡住，但共享库写不保证）。
+
+**观测口径**：切主演练（`contrib/actor/loadtest` 的 `TestFailoverSingleOwnerDrill`）会用
+样本 PID 断言「任一时刻至多一个节点自认属主」；演练拓扑的 `failover-timeout` 必须
+≤ 声明的 `replication_lag`，否则演练本身就会红——那不是框架缺陷，而是配置没覆盖真实窗口。

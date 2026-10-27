@@ -5,6 +5,7 @@ package edge.conf;
 
 option go_package = "github.com/huangyuCN/atlas-game-layout/services/edge/internal/conf;conf";
 
+import "protobuf/configs/actor.proto";
 import "protobuf/configs/runtime.proto";
 import "protobuf/configs/registry.proto";
 import "protobuf/configs/server.proto";
@@ -91,4 +92,7 @@ message Bootstrap {
   atlas.configs.Observability observability = 5;
   // edge 是接入层配置（缺段/缺密钥/缺监听面即启动失败）。
   Edge edge = 6;
+  // actor 是 actor 公共配置段：接入层只用其中的 directory（目录后端选择）。
+  // **必须与托管方（battle/game）配成同一个后端 + 同一个命名空间**，否则读不到属主。
+  atlas.configs.Actor actor = 7;
 }

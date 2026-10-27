@@ -1,25 +1,31 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/huangyuCN/atlas-game-layout/pkg/directory"
 	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/conf"
 	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/guard"
 	"github.com/huangyuCN/atlas-game-layout/services/edge/internal/resolver"
 	"github.com/huangyuCN/atlas/contrib/edge"
-	etcdlocator "github.com/huangyuCN/atlas/contrib/locator/etcd"
 	"github.com/huangyuCN/atlas/metrics"
 	"github.com/huangyuCN/atlas/namespace"
 	"github.com/huangyuCN/atlas/registry"
-	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3"
+	"go.uber.org/fx"
 )
 
-// newActorDirectory 装配 actor 目录的**只读**适配器：
-// 前缀取 namespace.Derive(actor_namespace 或 runtime.namespace).EtcdDirectory
-// （/atlas/actors/<ns>），与 battle 侧托管方写入目录时同源——前缀不一致会表现为「查不到属主」。
-func newActorDirectory(cfg *conf.Bootstrap, ec *clientv3.Client) (*resolver.LocatorDirectory, error) {
-	if ec == nil {
-		return nil, fmt.Errorf("app: etcd 客户端为空（actor 目录不可用）")
+// newActorDirectory 装配 actor 目录的**只读**适配器。
+//
+// 后端与前缀都由 pkg/directory 统一决定（actor.directory.backend，缺省 etcd；前缀
+// etcd = /atlas/actors/<ns>、redis = atlas:<ns>:actors），与托管方写入目录时同源：
+// 两端后端或命名空间配得不一致，表现就是「兜底查不到属主 → 帧流永远建不起来」。
+func newActorDirectory(lc fx.Lifecycle, cfg *conf.Bootstrap,
+	ec *clientv3.Client) (*resolver.LocatorDirectory, error) {
+	dirOpts, err := directory.Parse(cfg.GetActor())
+	if err != nil {
+		return nil, fmt.Errorf("app: %w", err)
 	}
 	ns := cfg.GetEdge().GetActorNamespace()
 	if ns == "" {
@@ -29,10 +35,15 @@ func newActorDirectory(cfg *conf.Bootstrap, ec *clientv3.Client) (*resolver.Loca
 	if err != nil {
 		return nil, fmt.Errorf("app: actor 目录命名空间非法（edge.actor_namespace 或 runtime.namespace）: %w", err)
 	}
-	loc, err := etcdlocator.NewLocator(ec, etcdlocator.WithPrefix(derived.EtcdDirectory))
+	loc, release, err := directory.Open(dirOpts, ec, derived)
 	if err != nil {
 		return nil, fmt.Errorf("app: 构造 actor 目录 locator 失败: %w", err)
 	}
+	// redis 后端会自建连接：挂到生命周期上，停机时关掉（etcd 后端复用注入的客户端，release 为 no-op）。
+	lc.Append(fx.Hook{OnStop: func(context.Context) error {
+		release()
+		return nil
+	}})
 	return resolver.NewLocatorDirectory(loc)
 }
 

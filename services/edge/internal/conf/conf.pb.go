@@ -296,7 +296,10 @@ type Bootstrap struct {
 	// observability 是可观测性配置（OTLP 导出端点；空 = noop 不导出）。
 	Observability *configs.Observability `protobuf:"bytes,5,opt,name=observability,proto3" json:"observability,omitempty"`
 	// edge 是接入层配置（缺段/缺密钥/缺监听面即启动失败）。
-	Edge          *Edge `protobuf:"bytes,6,opt,name=edge,proto3" json:"edge,omitempty"`
+	Edge *Edge `protobuf:"bytes,6,opt,name=edge,proto3" json:"edge,omitempty"`
+	// actor 是 actor 公共配置段：接入层只用其中的 directory（目录后端选择）。
+	// **必须与托管方（battle/game）配成同一个后端 + 同一个命名空间**，否则读不到属主。
+	Actor         *configs.Actor `protobuf:"bytes,7,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -369,6 +372,13 @@ func (x *Bootstrap) GetObservability() *configs.Observability {
 func (x *Bootstrap) GetEdge() *Edge {
 	if x != nil {
 		return x.Edge
+	}
+	return nil
+}
+
+func (x *Bootstrap) GetActor() *configs.Actor {
+	if x != nil {
+		return x.Actor
 	}
 	return nil
 }
@@ -451,7 +461,7 @@ var File_services_edge_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\x8d\x06\n" +
+	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1cprotobuf/configs/actor.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\x8d\x06\n" +
 	"\x04Edge\x126\n" +
 	"\tlisteners\x18\x01 \x03(\v2\x18.edge.conf.Edge.ListenerR\tlisteners\x12\x1d\n" +
 	"\n" +
@@ -483,14 +493,15 @@ const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"\x13CARRIER_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12CARRIER_WS_UPGRADE\x10\x01\x12\x18\n" +
 	"\x14CARRIER_STREAM_HELLO\x10\x02\x12\x14\n" +
-	"\x10CARRIER_DATAGRAM\x10\x03\"\xb0\x02\n" +
+	"\x10CARRIER_DATAGRAM\x10\x03\"\xdc\x02\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
 	"\x06server\x18\x03 \x01(\v2\x15.atlas.configs.ServerR\x06server\x12$\n" +
 	"\x03log\x18\x04 \x01(\v2\x12.atlas.configs.LogR\x03log\x12B\n" +
 	"\robservability\x18\x05 \x01(\v2\x1c.atlas.configs.ObservabilityR\robservability\x12#\n" +
-	"\x04edge\x18\x06 \x01(\v2\x0f.edge.conf.EdgeR\x04edgeBIZGgithub.com/huangyuCN/atlas-game-layout/services/edge/internal/conf;confb\x06proto3"
+	"\x04edge\x18\x06 \x01(\v2\x0f.edge.conf.EdgeR\x04edge\x12*\n" +
+	"\x05actor\x18\a \x01(\v2\x14.atlas.configs.ActorR\x05actorBIZGgithub.com/huangyuCN/atlas-game-layout/services/edge/internal/conf;confb\x06proto3"
 
 var (
 	file_services_edge_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -517,22 +528,24 @@ var file_services_edge_internal_conf_conf_proto_goTypes = []any{
 	(*configs.Server)(nil),        // 7: atlas.configs.Server
 	(*configs.Log)(nil),           // 8: atlas.configs.Log
 	(*configs.Observability)(nil), // 9: atlas.configs.Observability
+	(*configs.Actor)(nil),         // 10: atlas.configs.Actor
 }
 var file_services_edge_internal_conf_conf_proto_depIdxs = []int32{
-	4, // 0: edge.conf.Edge.listeners:type_name -> edge.conf.Edge.Listener
-	5, // 1: edge.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
-	6, // 2: edge.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
-	7, // 3: edge.conf.Bootstrap.server:type_name -> atlas.configs.Server
-	8, // 4: edge.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	9, // 5: edge.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
-	2, // 6: edge.conf.Bootstrap.edge:type_name -> edge.conf.Edge
-	0, // 7: edge.conf.Edge.Listener.network:type_name -> edge.conf.Edge.Network
-	1, // 8: edge.conf.Edge.Listener.carrier:type_name -> edge.conf.Edge.Carrier
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	4,  // 0: edge.conf.Edge.listeners:type_name -> edge.conf.Edge.Listener
+	5,  // 1: edge.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
+	6,  // 2: edge.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
+	7,  // 3: edge.conf.Bootstrap.server:type_name -> atlas.configs.Server
+	8,  // 4: edge.conf.Bootstrap.log:type_name -> atlas.configs.Log
+	9,  // 5: edge.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	2,  // 6: edge.conf.Bootstrap.edge:type_name -> edge.conf.Edge
+	10, // 7: edge.conf.Bootstrap.actor:type_name -> atlas.configs.Actor
+	0,  // 8: edge.conf.Edge.Listener.network:type_name -> edge.conf.Edge.Network
+	1,  // 9: edge.conf.Edge.Listener.carrier:type_name -> edge.conf.Edge.Carrier
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_services_edge_internal_conf_conf_proto_init() }

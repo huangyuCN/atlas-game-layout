@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/huangyuCN/atlas-game-layout/pkg/config"
+	"github.com/huangyuCN/atlas-game-layout/pkg/directory"
 	configspb "github.com/huangyuCN/atlas-game-layout/protobuf/configs"
 	"github.com/huangyuCN/atlas/contrib/actor/cluster"
 )
@@ -63,8 +64,24 @@ func (o Options) leaseConfig() (cluster.LeaseConfig, error) {
 	}
 	lease := cluster.DefaultLease()
 	lease.TTL, lease.RenewInterval = ttl, renew
+	// 保护窗由目录配置给出（actor.directory.quiesce_grace；0 = 框架缺省 5s）：
+	// 它决定故障接管前要额外等多久，redis 后端还须覆盖主从复制滞后。
+	if o.Directory.QuiesceGrace > 0 {
+		lease.QuiesceGrace = o.Directory.QuiesceGrace
+	}
 	if err := lease.Validate(); err != nil {
 		return cluster.LeaseConfig{}, fmt.Errorf("actor: 租约配置非法: %w", err)
 	}
 	return lease, nil
+}
+
+// DirectoryFromConf 从公共 actor 配置段解析目录后端（actor.directory）：缺段或 backend 为空
+// = etcd（保持现网行为）。未知后端、redis 缺 endpoints、grace < 复制滞后都在这里报错——
+// 装配期失败优于运行期「目录写进去了、接入层查不到属主」的静默错配。
+func DirectoryFromConf(a *configspb.Actor) (directory.Options, error) {
+	opts, err := directory.Parse(a)
+	if err != nil {
+		return directory.Options{}, fmt.Errorf("actor: %w", err)
+	}
+	return opts, nil
 }

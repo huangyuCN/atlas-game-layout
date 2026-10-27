@@ -10,6 +10,19 @@ runtime:
   # /atlas/services/<ns> 都由它派生（框架 namespace.Derive）。**必须显式配置，缺失即启动失败**；
   # 必须与 battle 侧同值，否则查不到战斗属主（表现为大量 backend_unavailable）。
   namespace: test
+# actor 段：接入层只读其中的 directory（目录后端选择）。**必须与 battle 配成同一个后端**，
+# 否则按 etcd 前缀去查 Redis 目录（或反之）永远查不到属主。缺段 = etcd（保持现网行为）。
+# actor:
+#   directory:
+#     backend: redis
+#     quiesce_grace: 5s
+#     replication_lag: 500ms
+#     redis:
+#       endpoints: [127.0.0.1:26380]
+#       master_name: atlas
+#       sync_replicas: 1
+#       sync_timeout: 2s
+# 命名空间由 runtime.namespace（或 edge.actor_namespace）派生，与托管方同值即可。
 registry:
   etcd:
     endpoints:
