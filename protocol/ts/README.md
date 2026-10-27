@@ -44,7 +44,10 @@
 - 消息 DTO（Go 是 `protoc-gen-go` 的标准结构体；TS/C# 是 `protoc-gen-atlas-client` 的零运行时
   DTO，protojson 语义：camelCase 字段名、64 位整数与 bytes 以字符串下发、枚举以枚举名下发）；
 - 枚举（C# 另配 `<Enum>XConst` 字符串常量，兼容未知枚举名）；
-- op 常量：`<Service>ProtocolOps`（客户端可达 op 名）、`<Service>PushOps`（服务端推送 op 名）。
+- op 常量（**三端都有**）：会话 op 用 `<Service>ProtocolOps`，推送 op 用 `<File>PushOps`
+  （文件基名驼峰）。Go 的产物在 `protocol/go/api/**/opclient/`（同一插件
+  `lang=go,emit_stub=false`，只出常量、不装 stub），TS/C# 在各自 `api/**/opclient/`；
+  三端值逐一相同，由 `scripts/check-protocol-ops` 门禁校验。
 
 **不含**：调用 stub、传输、会话、心跳、重连、序列化器实现。这些是 SDK 的职责（见 §四）。
 
@@ -57,8 +60,10 @@ make proto-tools           # 首次：准备 protoc-gen-go（及 Atlas 插件依
 bash scripts/gen-protocol.sh
 ```
 
-脚本做的事：`protoc` 三趟 → `protocol/go/api/**/*.pb.go`、`protocol/ts/src/api/**/*_pb.ts`、
-`protocol/csharp/api/**/*_client.g.cs`，再渲染 TS 入口 `protocol/ts/src/{index,<域>}.ts`。
+脚本做的事：`protoc` 四趟 → `protocol/go/api/**/*.pb.go`（消息）、
+`protocol/go/api/**/opclient/*.pb.go`（Go op 常量）、`protocol/ts/src/api/**/*_pb.ts`、
+`protocol/csharp/api/**/*_client.g.cs`，再渲染 TS 入口 `protocol/ts/src/{index,<域>}.ts`，
+最后跑 `scripts/check-protocol-ops` 校验三端 op 常量逐一相同。
 
 | 环境变量 | 默认 | 用途 |
 |---|---|---|
@@ -68,17 +73,22 @@ bash scripts/gen-protocol.sh
 
 要点：
 
-- 插件 `protoc-gen-atlas-client` **总是从框架仓源码现建**（`go build` 到本仓 `bin/`）。它带着
-  生成协议包必需的 `emit_stub=false`（只出 DTO 与 op 常量，不引 SDK 内核）；复用旧二进制会直接
-  报 `no such flag -emit_stub`。
+- 插件 `protoc-gen-atlas-client` **总是从框架仓源码现建**（`go build` 到本仓 `bin/`）。三端都用
+  它的 `emit_stub=false`（只出协议描述符、不引 SDK 内核）：Go 只出 op 常量（消息 DTO 由
+  `protoc-gen-go` 另出），TS/C# 出 DTO、枚举与 op 常量。复用旧二进制会直接报
+  `no such flag -emit_stub`。
+- **op 常量三端同源**：Go/TS/C# 都从同一份 `atlas.route.v1` 注解生成（`access=CLIENT` 过滤、
+  push 注解取消息完整名），命名一致（会话 op = `<Service>ProtocolOps`，推送 op =
+  `<File>PushOps`）；脚本末尾的 `scripts/check-protocol-ops` 解析三端产物逐键比对，
+  任何一端漏生成或值漂移都会让生成失败。
 - **协议改动流程**：改 `api/**/*.proto` → `make proto`（服务端 Go 产物）→
   `bash scripts/gen-protocol.sh` → 提交两者 → 按 §三 发版（三端同版本号）。
 - **禁止手改生成物**（文件头有 `DO NOT EDIT`）。要改就改 `.proto` 或本脚本。
 - 本文件（`protocol/README.md`）是手写源文件；脚本会把它复制成 `protocol/ts/README.md`
   （npm 只把包根的 README 打进 tarball）。**改完本文件要重跑脚本**，否则 CI 的漂移门会红。
 - CI 门禁：`.github/workflows/ci.yml` 里 `scripts/gen-protocol.sh` + `git status` 检查「重生成无 diff」，
-  生成物与 proto 不一致即红；同一处还会单独编一次 `protocol/go`（嵌套 module，父仓 `go build ./...`
-  覆盖不到它）。
+  生成物与 proto 不一致即红（脚本内的跨端 op 比对同一次跑完）；同一处还会单独编一次
+  `protocol/go`（嵌套 module，父仓 `go build ./...` 覆盖不到它）。
 
 ## 三、三端怎么发布
 
@@ -95,8 +105,13 @@ git push origin protocol/v0.1.0
 go get github.com/huangyuCN/atlas-game-layout/protocol@v0.1.0
 ```
 
+消息类型在根包（`.../protocol/api/battle/v1`，`protoc-gen-go` 产物）；op 常量在 `opclient/` 子包：
+
 ```go
-import battlev1 "github.com/huangyuCN/atlas-game-layout/protocol/api/battle/v1"
+import battleopclient "github.com/huangyuCN/atlas-game-layout/protocol/api/battle/v1/opclient"
+
+op := battleopclient.BattleServiceProtocolOps.JoinBattle   // "/battle.v1.BattleService/JoinBattle"
+push := battleopclient.BattleServicePushOps.FrameBroadcast // "/battle.v1.FrameBroadcast"
 ```
 
 （本地联调可 `replace github.com/huangyuCN/atlas-game-layout/protocol => ../atlas-game-layout/protocol/go`。）

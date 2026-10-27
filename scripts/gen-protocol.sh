@@ -15,6 +15,8 @@
 #
 # 三端产物（全部入库；CI 有「重生成无 diff」门禁，见 .github/workflows/ci.yml）：
 #   protocol/go/api/**/*.pb.go            独立 module（.../atlas-game-layout/protocol），只 require protobuf 运行时
+#   protocol/go/api/**/opclient/*.pb.go   零 SDK 依赖的 op 常量（protoc-gen-atlas-client lang=go, emit_stub=false，
+#                                         只出 <Service>ProtocolOps / <File>PushOps，不装会话通道 stub）
 #   protocol/ts/src/api/**/*_pb.ts        零运行时 DTO + op 常量（protoc-gen-atlas-client lang=ts, emit_stub=false）
 #   protocol/ts/src/{index,<域>}.ts        包入口与按域桶文件（本脚本渲染，非手写）
 #   protocol/csharp/api/**/*_client.g.cs  零 protobuf 运行时 POCO（同上 lang=csharp）
@@ -98,15 +100,26 @@ require_go_plugin() {
 	die "找不到 protoc-gen-go：先执行 make proto-tools（或在 ATLAS_BIN 下备好该插件）"
 }
 
-# go_opt_args 输出 --go_opt=M<proto>=<import>;<pkg> 参数（每行一个），
-# 把生成物的 Go import 路径钉在 protocol 模块内（否则会跟 proto 的 go_package 走到框架仓/本仓）。
+# go_opt_args 输出 --go_opt=M<proto>=<import>;<pkg> 参数（每行一个）。
 go_opt_args() {
-	local entry proto pkg dir
+	opt_mappings --go_opt=
+}
+
+# ops_opt_args 输出 --atlas-client_opt=M<proto>=<import>;<pkg> 参数（每行一个）：
+# op 常量与 pb.go 共用同一套 M 映射，产物的 import 才钉在 protocol 模块内。
+ops_opt_args() {
+	opt_mappings --atlas-client_opt=
+}
+
+# opt_mappings 输出「前缀 + M<proto>=<import>;<pkg>」参数（每行一个），
+# 把生成物的 Go import 路径钉在 protocol 模块内（否则会跟 proto 的 go_package 走到框架仓/本仓）。
+opt_mappings() {
+	local prefix="$1" entry proto pkg dir
 	for entry in "${PROTO_SET[@]}"; do
 		proto="${entry%%|*}"
 		pkg="${entry##*|}"
 		dir="$(dirname "$proto")"
-		printf -- '--go_opt=M%s=%s/%s;%s\n' "$proto" "$GO_MODULE" "$dir" "$pkg"
+		printf -- '%sM%s=%s/%s;%s\n' "$prefix" "$proto" "$GO_MODULE" "$dir" "$pkg"
 	done
 }
 
@@ -141,6 +154,26 @@ gen_go() {
 	PATH="$BIN_DIR:$ATLAS_BIN:$PATH" "$PROTOC" "${inc[@]}" \
 		--go_out="$GO_OUT" --go_opt=paths=source_relative "${opts[@]}" "${protos[@]}"
 	echo "Go   产物 → protocol/go/api（${#protos[@]} 个 proto）"
+}
+
+# gen_go_ops 生成 Go 侧 op 常量（lang=go,emit_stub=false）：只出 <Service>ProtocolOps
+# 与 <File>PushOps 两组常量，不生成会话通道 stub、不引 SDK 内核（消息 DTO 仍由
+# protoc-gen-go 的 pb.go 提供）。产物落 <proto 目录>/opclient/，与 TS/C# 布局同构。
+gen_go_ops() {
+	local -a opts=()
+	local opt
+	while IFS= read -r opt; do opts+=("$opt"); done < <(ops_opt_args)
+	local -a inc=()
+	while IFS= read -r opt; do inc+=("$opt"); done < <(proto_includes)
+	local -a protos=()
+	while IFS= read -r opt; do protos+=("$opt"); done < <(proto_list "$DOMAIN_PROTO_COUNT")
+
+	PATH="$BIN_DIR:$ATLAS_BIN:$PATH" "$PROTOC" "${inc[@]}" \
+		--plugin="protoc-gen-atlas-client=$BIN_DIR/protoc-gen-atlas-client" \
+		--atlas-client_out="$GO_OUT" \
+		--atlas-client_opt=lang=go,emit_stub=false,paths=source_relative \
+		"${opts[@]}" "${protos[@]}"
+	echo "Go   op 常量 → protocol/go/api/**/opclient（${#protos[@]} 个 proto）"
 }
 
 # prune_closure 清掉「只为解析依赖而入闭包、但产物无运行期引用」的生成物：
@@ -241,16 +274,25 @@ render_ts_readme() {
 	echo "TS   README → protocol/ts/README.md（复制自 protocol/README.md）"
 }
 
+# check_ops_parity 校验三端 op 常量逐一相同（解析三端产物，见 scripts/check-protocol-ops）。
+# 放在生成末尾：任何一端漏生成、改名或值漂移都当场失败，而不是等客户端按 op 分发时才发现。
+check_ops_parity() {
+	echo "校验：三端 op 常量一致性"
+	go run ./scripts/check-protocol-ops
+}
+
 main() {
 	require_upstream
 	require_go_plugin
 	build_atlas_plugin
 
 	gen_go
+	gen_go_ops
 	gen_ts
 	gen_csharp
 	render_ts_index
 	render_ts_readme
+	check_ops_parity
 
 	echo "完成：protocol/{go,ts,csharp}（重跑本脚本应无 diff）"
 }
