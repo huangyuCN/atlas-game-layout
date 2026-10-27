@@ -28,6 +28,9 @@ type Locator struct {
 	prefixes []string
 	ctxs     []context.Context
 	watchers []*Watcher
+	// snapshot 是每次新监听建立时先投递的「全量快照」：模拟 Redis 后端 Watch 的
+	// 「订阅后先 SCAN 一次（重建/重订阅再 SCAN）」语义。
+	snapshot []locator.WatchEvent
 }
 
 // Watch 记录订阅参数并返回阻塞型监听。
@@ -40,8 +43,19 @@ func (l *Locator) Watch(ctx context.Context, opts locator.WatchOptions) (locator
 	l.prefixes = append(l.prefixes, opts.KeyPrefix)
 	l.ctxs = append(l.ctxs, ctx)
 	l.watchers = append(l.watchers, w)
+	snapshot := append([]locator.WatchEvent(nil), l.snapshot...)
 	l.mu.Unlock()
+	if len(snapshot) > 0 {
+		w.Emit(snapshot...)
+	}
 	return w, nil
+}
+
+// SetSnapshot 设置新监听建立时的首批「全量快照」事件（模拟后端在启动/重建时先扫一遍）。
+func (l *Locator) SetSnapshot(events ...locator.WatchEvent) {
+	l.mu.Lock()
+	l.snapshot = append([]locator.WatchEvent(nil), events...)
+	l.mu.Unlock()
 }
 
 // Count 返回订阅次数。
@@ -91,7 +105,7 @@ type Watcher struct {
 
 // NewWatcher 构造阻塞型监听。
 func NewWatcher() *Watcher {
-	return &Watcher{events: make(chan []locator.WatchEvent, 8), stopCh: make(chan struct{})}
+	return &Watcher{events: make(chan []locator.WatchEvent, 16), stopCh: make(chan struct{})}
 }
 
 // Next 返回排队的变更事件；无事件时阻塞直到 Stop 被调用（此后返回 io.EOF）。

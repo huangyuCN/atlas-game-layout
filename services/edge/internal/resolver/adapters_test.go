@@ -83,31 +83,31 @@ func TestAdaptersValidateDeps(t *testing.T) {
 	}
 }
 
-// TestWatchOwnerCancelStopsWatcher 覆盖评审 P1-1：cancel 必须停掉真 watcher 并取消派生 ctx
-// （etcd 客户端侧 watch 流挂在 ctx 上）。只 close 停止信号的实现会让 goroutine 永久阻塞在
-// Next()——每局泄漏 1 watch + 1 goroutine。
+// TestWatchOwnerCancelStopsWatcher 覆盖取消语义：cancel 只注销本消费者；共享 watcher 在整类
+// 订阅归零、空闲超时后关闭（幂等，恰好 Stop 一次），并取消传给 locator.Watch 的 ctx——
+// 只 close 停止信号会让 goroutine 永久阻塞在 Next()（按监听泄漏 goroutine）。
 func TestWatchOwnerCancelStopsWatcher(t *testing.T) {
 	loc := &testlocator.Locator{}
-	dir, err := NewLocatorDirectory(loc)
-	if err != nil {
-		t.Fatalf("NewLocatorDirectory: %v", err)
-	}
+	dir := newTestDirectory(t, loc)
 	cancel, err := dir.WatchOwner(context.Background(), "battle:b1", func(string) {})
 	if err != nil {
 		t.Fatalf("WatchOwner: %v", err)
 	}
-	if loc.Count() != 1 || loc.Prefix(0) != "battle:b1" {
-		t.Fatalf("应按 PID 建一条前缀监听，实际 count=%d prefix=%q", loc.Count(), loc.Prefix(0))
+	if loc.Count() != 1 || loc.Prefix(0) != "battle:" {
+		t.Fatalf("应按 PID 类型建一条前缀级监听，实际 count=%d prefix=%q", loc.Count(), loc.Prefix(0))
 	}
 
 	cancel()
+	if got := dir.hub.topicCount("battle:"); got != 0 {
+		t.Fatalf("cancel 后该局条目应立即丢弃，实际 %d 个", got)
+	}
 	if !loc.Watcher(0).Stopped(testlocator.WaitTimeout) {
-		t.Fatal("cancel 未停掉真 watcher：goroutine 永久阻塞在 Next()（每局泄漏 1 watch + 1 goroutine）")
+		t.Fatal("空闲超时后未停掉共享 watcher：goroutine 永久阻塞在 Next()")
 	}
 	select {
 	case <-loc.Ctx(0).Done():
 	case <-time.After(testlocator.WaitTimeout):
-		t.Fatal("cancel 未取消传给 locator.Watch 的 ctx：客户端侧 watch 流不会关闭")
+		t.Fatal("空闲关闭未取消传给 locator.Watch 的 ctx：客户端侧 watch 流不会关闭")
 	}
 	cancel() // 幂等：不得二次 Stop（etcd 实现重复 Stop 会 panic）
 	if n := loc.Watcher(0).Stops(); n != 1 {
@@ -115,14 +115,30 @@ func TestWatchOwnerCancelStopsWatcher(t *testing.T) {
 	}
 }
 
+// TestWatchOwnerCtxCancelUnsubscribes 覆盖「调用方 ctx 取消即注销消费者」：接入层停机取消父
+// ctx 时，每局订阅都应被注销（不必等空闲超时），与旧实现同口径。
+func TestWatchOwnerCtxCancelUnsubscribes(t *testing.T) {
+	loc := &testlocator.Locator{}
+	dir := newTestDirectory(t, loc)
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	if _, err := dir.WatchOwner(ctx, "battle:b1", func(string) {}); err != nil {
+		t.Fatalf("WatchOwner: %v", err)
+	}
+	cancelCtx()
+	deadline := time.Now().Add(testlocator.WaitTimeout)
+	for dir.hub.topicCount("battle:") != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("取消调用方 ctx 后订阅未注销")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestWatchOwnerFiltersByKey 覆盖监听回调：同前缀的别局事件被过滤（battle:b1 不收 battle:b10），
 // 本局事件按属主回调，删除事件按「属主为空」回调（drain 与 activate 之间的窗口要拆流）。
 func TestWatchOwnerFiltersByKey(t *testing.T) {
 	loc := &testlocator.Locator{}
-	dir, err := NewLocatorDirectory(loc)
-	if err != nil {
-		t.Fatalf("NewLocatorDirectory: %v", err)
-	}
+	dir := newTestDirectory(t, loc)
 	owners := make(chan string, 4)
 	cancel, err := dir.WatchOwner(context.Background(), "battle:b1", func(owner string) { owners <- owner })
 	if err != nil {

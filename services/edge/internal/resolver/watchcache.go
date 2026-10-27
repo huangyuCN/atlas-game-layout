@@ -19,7 +19,7 @@ const (
 	// DefaultFrameFreshTTL 是帧面实例快照的最长有效期（兜底），语义同上。
 	DefaultFrameFreshTTL = time.Minute
 	// DefaultOwnerIdleTTL 是属主条目的空闲回收时长：既无解析命中也无 watch 事件超过它即回收
-	// （并取消该局的目录监听）。正常结束的对局由目录删除事件即时回收，本项只是兜底：
+	// （并注销该局的目录订阅）。正常结束的对局由目录删除事件即时回收，本项只是兜底：
 	// 防止「监听断开后错过删除事件」让条目与 watch 按历史对局数一直累积。
 	DefaultOwnerIdleTTL = 10 * time.Minute
 	// sweepInterval 是空闲回收的巡检间隔（空闲上限的一半：最多多留半个周期）。
@@ -55,7 +55,7 @@ type ownerEntry struct {
 	owner    string    // 最近一次事实：属主节点 ID
 	seen     time.Time // 最近一次「证据」时间（解析命中、watch 事件或回填）
 	eventAt  time.Time // 最近一次 watch 事件时间（判定「查询结果是否更旧」用；零值 = 从无事件）
-	cancel   func()    // 该局目录监听的取消函数（nil = 监听未建立，条目不可用）
+	cancel   func()    // 该局目录订阅的注销函数（nil = 订阅未建立，条目不可用）
 	starting bool      // 正在建立监听（防并发重复建）
 	retryAt  time.Time // 监听建立失败后的下次尝试时间
 }
@@ -96,7 +96,8 @@ func (r *Resolver) storeOwner(battleID, owner string, started time.Time) {
 	e.owner, e.seen = owner, started
 }
 
-// ensureOwnerWatch 确保该局有一条目录监听（幂等）：已建立、正在建立或仍在退避窗口内即跳过。
+// ensureOwnerWatch 确保该局有一个目录订阅（幂等；底层由 LocatorDirectory 共享一条前缀级监听，
+// 这里只按局登记消费者）：已建立、正在建立或仍在退避窗口内即跳过。
 func (r *Resolver) ensureOwnerWatch(pid types.PID, battleID string) {
 	if !r.beginOwnerWatch(battleID) {
 		return
@@ -349,7 +350,7 @@ func (r *Resolver) startSweeper() {
 }
 
 // Close 停止全部监听并回收本地缓存（幂等；接入层停机时由装配层调用）。
-// 每局目录监听与唯一的实例监听都必须在这里取消，否则停机后残留 watch 与 goroutine。
+// 每局目录订阅与唯一的实例监听都必须在这里注销，否则停机后残留 watch 与 goroutine。
 func (r *Resolver) Close() {
 	r.mu.Lock()
 	if r.closed {

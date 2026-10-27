@@ -23,7 +23,8 @@ type OwnerWatcher interface {
 	WatchOwner(ctx context.Context, pid string, onChange func(owner string)) (cancel func(), err error)
 }
 
-// OwnerGuard 实现 edge.BackendGuard：按 battle_id 维护一条目录监听，属主变化即拆该局全部流。
+// OwnerGuard 实现 edge.BackendGuard：按 battle_id 维护一个目录订阅（底层与解析器共享一条
+// 前缀级监听），属主变化即拆该局全部流。
 type OwnerGuard struct {
 	watcher   OwnerWatcher
 	actorType string

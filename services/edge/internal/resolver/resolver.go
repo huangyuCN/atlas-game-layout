@@ -54,7 +54,7 @@ type Resolver struct {
 	wg     sync.WaitGroup
 
 	mu            sync.Mutex
-	owners        map[string]*ownerEntry // battle_id → 属主条目（每局一条目录监听）
+	owners        map[string]*ownerEntry // battle_id → 属主条目（每局一个目录订阅，底层共享前缀级监听）
 	snapshot      *frameSnapshot         // 帧面实例全量快照（全局一条监听维护）
 	frameWatch    func()                 // 实例监听的取消函数（nil = 未建立）
 	frameStarting bool                   // 正在建立实例监听（防并发重复建）

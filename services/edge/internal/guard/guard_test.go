@@ -1,9 +1,9 @@
 // 属主变更守卫用例：目录属主变化 → 该局全部流被请求拆除；属主未变（租约续期重写记录）不拆；
-// 该局最后一条流结束后监听被回收。
+// 该局最后一条流结束后订阅被注销（共享监听留给其他局，只在适配层 Close/空闲超时时关闭）。
 //
 // 监听链路上不放假替身：守卫注入的是**真适配层**（resolver.LocatorDirectory）＋阻塞型目录
-// （testlocator，只有 Stop 才能唤醒 Next）。因此「cancel 有没有真正停掉 watcher」由本用例
-// 断言——只 close 停止信号而不 Stop 的实现在这里必然超时（评审 P1-1：每局泄漏 1 watch + 1 goroutine）。
+// （testlocator，只有 Stop 才能唤醒 Next）。因此「注销有没有真正摘掉消费者、Close 有没有
+// 停掉 watcher」由本用例断言——只 close 停止信号而不 Stop 的实现在这里必然超时。
 package guard
 
 import (
@@ -110,25 +110,49 @@ func assertWatchStopped(t *testing.T, loc *testlocator.Locator, i int) {
 	}
 }
 
-// newGuardWith 用给定目录替身装配「真适配层 + 阻塞型目录」的守卫。
-func newGuardWith(loc *testlocator.Locator) (*OwnerGuard, *testlocator.Locator, error) {
+// newGuardWith 用给定目录替身装配「真适配层 + 阻塞型目录」的守卫（适配层一并交回）。
+func newGuardWith(loc *testlocator.Locator) (*OwnerGuard, *resolver.LocatorDirectory, error) {
 	dir, err := resolver.NewLocatorDirectory(loc)
 	if err != nil {
-		return nil, loc, err
+		return nil, nil, err
 	}
 	g, err := New(dir, nil)
-	return g, loc, err
+	if err != nil {
+		dir.Close()
+		return nil, nil, err
+	}
+	return g, dir, nil
+}
+
+// newGuardWithDir 构造守卫并把适配层一并交回：生命周期用例需要主动停共享监听。
+func newGuardWithDir(t *testing.T) (*OwnerGuard, *resolver.LocatorDirectory, *testlocator.Locator) {
+	t.Helper()
+	loc := &testlocator.Locator{}
+	g, dir, err := newGuardWith(loc)
+	if err != nil {
+		t.Fatalf("装配守卫: %v", err)
+	}
+	t.Cleanup(func() {
+		g.Close()
+		dir.Close()
+	})
+	return g, dir, loc
 }
 
 // newGuard 构造守卫并返回目录替身，供断言订阅与停止。
 func newGuard(t *testing.T) (*OwnerGuard, *testlocator.Locator) {
 	t.Helper()
-	g, loc, err := newGuardWith(&testlocator.Locator{})
-	if err != nil {
-		t.Fatalf("装配守卫: %v", err)
-	}
-	t.Cleanup(g.Close)
+	g, _, loc := newGuardWithDir(t)
 	return g, loc
+}
+
+// requireNoEvicts 断言一段时间内没有新的拆流请求（注销后不得再回调）。
+func requireNoEvicts(t *testing.T, r *recorder) {
+	t.Helper()
+	time.Sleep(20 * time.Millisecond)
+	if got := r.count(); got != 0 {
+		t.Fatalf("注销后不应再拆流，实际 %d 次", got)
+	}
 }
 
 // TestOwnerChangeEvictsStreams 验证属主变化拆除该局全部流（同局多条流共享一条监听）。
@@ -142,8 +166,8 @@ func TestOwnerChangeEvictsStreams(t *testing.T) {
 	if n := loc.Count(); n != 1 {
 		t.Fatalf("同局应只建一条监听，实际 %d", n)
 	}
-	if got := loc.Prefix(0); got != "battle:b1" {
-		t.Fatalf("订阅前缀应为 battle:b1，实际 %q", got)
+	if got := loc.Prefix(0); got != "battle:" {
+		t.Fatalf("共享监听应是 PID 类型前缀级（battle:），实际 %q", got)
 	}
 	// 三条事件由同一条监听 goroutine 顺序处理：第三条的回调发生时前两条必已处理完，
 	// 故「各流恰好拆一次」可判定地证明「属主未变不拆 + 前缀相同的别局不拆」。
@@ -171,43 +195,56 @@ func TestOwnerRecordGoneEvicts(t *testing.T) {
 	awaitEvicts(t, rec, 1)
 }
 
-// TestUnregisterStopsWatch 验证该局最后一条流结束后监听被真 watcher 停止（不留后台 watch）。
-func TestUnregisterStopsWatch(t *testing.T) {
-	g, loc := newGuard(t)
-	un := g.Register(edge.StreamInfo{ID: "s-1", BattleID: "b1", Owner: "node-a"}, (&recorder{}).evict)
-	w := loc.Watcher(0)
+// TestUnregisterDropsSubscription 验证该局最后一条流结束后订阅被注销：不再收到事件、不重复
+// 注销；共享监听不按局关闭（其他局可能还在用），由适配层 Close 统一停掉。
+func TestUnregisterDropsSubscription(t *testing.T) {
+	g, dir, loc := newGuardWithDir(t)
+	rec := &recorder{}
+	un := g.Register(edge.StreamInfo{ID: "s-1", BattleID: "b1", Owner: "node-a"}, rec.evict)
 	un()
-	un() // 幂等：不得二次 Stop（etcd 实现重复 Stop 会 panic）
-	assertWatchStopped(t, loc, 0)
-	if n := w.Stops(); n != 1 {
-		t.Fatalf("监听应恰好停止一次，实际 %d", n)
+	un()                                                      // 幂等：不得二次注销/Stop（etcd 实现重复 Stop 会 panic）
+	loc.Watcher(0).Emit(ownerEvent(t, "battle:b1", "node-b")) // 已无订阅者：不应回调、不应 panic
+	requireNoEvicts(t, rec)
+	if n := loc.Watcher(0).Stops(); n != 0 {
+		t.Fatalf("单局注销不应停掉共享监听（其他局还在用），实际 Stop %d 次", n)
 	}
-	w.Emit(ownerEvent(t, "battle:b1", "node-b")) // 已无订阅者：不应 panic
+
+	dir.Close() // 适配层停机才停共享监听（另一个时机是空闲超时）
+	assertWatchStopped(t, loc, 0)
+	if n := loc.Watcher(0).Stops(); n != 1 {
+		t.Fatalf("共享监听应恰好停止一次，实际 %d", n)
+	}
 }
 
-// TestCloseStopsWatches 验证停机（Close）停掉全部在监听的局，不等流逐条结束。
-func TestCloseStopsWatches(t *testing.T) {
-	g, loc := newGuard(t)
-	unA := g.Register(edge.StreamInfo{ID: "s-1", BattleID: "b1", Owner: "node-a"}, (&recorder{}).evict)
-	unB := g.Register(edge.StreamInfo{ID: "s-2", BattleID: "b2", Owner: "node-a"}, (&recorder{}).evict)
-	defer unA()
-	defer unB()
+// TestCloseDropsSubscriptions 验证守卫停机（Close）注销全部局的订阅：不再回调；共享监听
+// 由适配层 Close 停止（接入层停机时装配层按此顺序调用）。
+func TestCloseDropsSubscriptions(t *testing.T) {
+	g, dir, loc := newGuardWithDir(t)
+	a, b := &recorder{}, &recorder{}
+	g.Register(edge.StreamInfo{ID: "s-1", BattleID: "b1", Owner: "node-a"}, a.evict)
+	g.Register(edge.StreamInfo{ID: "s-2", BattleID: "b2", Owner: "node-a"}, b.evict)
+	if n := loc.Count(); n != 1 {
+		t.Fatalf("两个局应共用 1 条监听（进程内单 watcher），实际 %d", n)
+	}
 	g.Close()
-	if n := loc.Count(); n != 2 {
-		t.Fatalf("两个局应各建一条监听，实际 %d", n)
-	}
-	for i := 0; i < loc.Count(); i++ {
-		assertWatchStopped(t, loc, i)
-	}
+	loc.Watcher(0).Emit(ownerEvent(t, "battle:b1", "node-b"), ownerEvent(t, "battle:b2", "node-b"))
+	requireNoEvicts(t, a)
+	requireNoEvicts(t, b)
+
+	dir.Close()
+	assertWatchStopped(t, loc, 0)
 }
 
 // TestWatchFailureKeepsStream 验证监听启动失败不阻断接入层（只记日志、流照常工作）。
 func TestWatchFailureKeepsStream(t *testing.T) {
-	g, _, err := newGuardWith(&testlocator.Locator{Err: errors.New("etcd 不可用")})
+	g, dir, err := newGuardWith(&testlocator.Locator{Err: errors.New("etcd 不可用")})
 	if err != nil {
 		t.Fatalf("装配守卫: %v", err)
 	}
-	t.Cleanup(g.Close)
+	t.Cleanup(func() {
+		g.Close()
+		dir.Close()
+	})
 	rec := &recorder{}
 	un := g.Register(edge.StreamInfo{ID: "s-1", BattleID: "b1", Owner: "node-a"}, rec.evict)
 	un()

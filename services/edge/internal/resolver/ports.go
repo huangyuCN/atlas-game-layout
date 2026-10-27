@@ -10,7 +10,8 @@ import (
 type Directory interface {
 	// OwnerNode 返回 PID 的属主节点 ID；查不到返回错误。
 	OwnerNode(ctx context.Context, pid string) (string, error)
-	// WatchOwner 监听 PID 的属主变化并回调**当前**属主（记录消失时为空串）；
+	// WatchOwner 订阅 PID 的属主变化并回调**当前**属主（记录消失时为空串）；
+	// 同类型订阅在实现内共享一条前缀级监听（注册/注销不触发扫描）；
 	// 返回的 cancel 幂等（接入层在该局最后一条流结束时调用）。
 	WatchOwner(ctx context.Context, pid string, onChange func(owner string)) (cancel func(), err error)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas/contrib/actor/types"
@@ -13,9 +14,12 @@ import (
 	"github.com/huangyuCN/atlas/registry"
 )
 
-// LocatorDirectory 把框架 locator（只读 actor 目录，etcd 实现）适配为 Directory。
+// LocatorDirectory 把框架 locator（只读 actor 目录，etcd/redis 实现）适配为 Directory。
+// 目录监听在进程内共享：同类型 PID 只有一个前缀级 Watch（见 watchHub），
+// 消费者注册/注销不触发扫描，避免 Redis 后端「每局一次 SCAN」被规模放大。
 type LocatorDirectory struct {
 	loc locator.Locator
+	hub *watchHub
 }
 
 // NewLocatorDirectory 构造目录适配器；loc 必须已带 /atlas/actors/<ns> 前缀
@@ -24,8 +28,16 @@ func NewLocatorDirectory(loc locator.Locator) (*LocatorDirectory, error) {
 	if loc == nil {
 		return nil, errors.New("resolver: actor 目录 locator 不能为空")
 	}
-	return &LocatorDirectory{loc: loc}, nil
+	return newLocatorDirectory(loc, DefaultWatchIdleTTL), nil
 }
+
+// newLocatorDirectory 构造目录适配器并指定共享监听的空闲回收时长（测试注入短时长）。
+func newLocatorDirectory(loc locator.Locator, idleTTL time.Duration) *LocatorDirectory {
+	return &LocatorDirectory{loc: loc, hub: newWatchHub(loc, idleTTL)}
+}
+
+// Close 停止共享目录监听并等待扇出 goroutine 退出（幂等；接入层停机时由装配层调用）。
+func (d *LocatorDirectory) Close() { d.hub.Close() }
 
 // OwnerNode 读取 PID 归属记录里的 owner_node（记录格式即 contrib/actor 的 ActorLocation）。
 func (d *LocatorDirectory) OwnerNode(ctx context.Context, pid string) (string, error) {
@@ -44,65 +56,14 @@ func (d *LocatorDirectory) OwnerNode(ctx context.Context, pid string) (string, e
 	return rec.GetOwnerNode(), nil
 }
 
-// WatchOwner 监听目录记录变化并回调当前属主（规格 §8：属主变更 → 接入层拆流）。
+// WatchOwner 订阅该 PID 的属主变化：同类型的所有订阅共享一条前缀级监听，
+// 事件按 key 精确分发（battle:b1 不收 battle:b10 的事件，两者前缀相同）。
 // 目录记录在租约续期时会被重写，故回调会重复触发；比较属主是否变化由调用方（guard）负责。
-// 监听按前缀建立，回调前按 key 精确过滤——PID 形如 battle:b1 与 battle:b10 前缀相同，
-// 不过滤会把别的对局的属主变化误当成自己的。
 //
-// 返回的 cancel 幂等且**必须**两件事一起做：取消派生 ctx（关掉客户端侧 watch 流）＋停掉
-// watcher（唤醒阻塞在 Next() 的监听 goroutine）——只 close 停止信号会按局泄漏 1 watch + 1 goroutine。
+// 返回的 cancel 幂等：只注销本消费者（该局无人订阅即丢弃条目），不按局关监听——
+// 共享监听在整类订阅归零且空闲超时后才关闭（DefaultWatchIdleTTL），再订阅时按需重建。
 func (d *LocatorDirectory) WatchOwner(ctx context.Context, pid string, onChange func(owner string)) (func(), error) {
-	parsed, err := types.ParsePID(pid)
-	if err != nil {
-		return nil, err
-	}
-	key := parsed.Key().String()
-	ctx, cancelWatch := context.WithCancel(ctx) // 客户端侧 watch 流挂在 ctx 上，取消它才算关掉监听
-	w, err := d.loc.Watch(ctx, locator.WatchOptions{
-		KeyPrefix: key, LocationBuilder: types.NewLocationBuilder(),
-	})
-	if err != nil {
-		cancelWatch()
-		return nil, fmt.Errorf("resolver: 监听目录 %s 失败: %w", pid, err)
-	}
-	stop := make(chan struct{})
-	var stopOnce sync.Once
-	stopWatch := func() { stopOnce.Do(func() { _ = w.Stop() }) } // etcd 实现重复 Stop 会 panic，故恰好一次
-	go func() {
-		defer stopWatch()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stop:
-				return
-			default:
-			}
-			events, err := w.Next()
-			if err != nil {
-				return // 监听终止（Stop 或 ctx 取消）：静默退出（接入层不再拆该局的流）
-			}
-			deliverOwner(events, key, onChange)
-		}
-	}()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			cancelWatch()
-			stopWatch()
-			close(stop)
-		})
-	}, nil
-}
-
-// deliverOwner 回调本局的属主变化：同一前缀下的别局事件（battle:b10 之于 battle:b1）按 key 精确过滤。
-func deliverOwner(events []locator.WatchEvent, key string, onChange func(owner string)) {
-	for _, ev := range events {
-		if ev.Key == nil || ev.Key.String() != key {
-			continue
-		}
-		onChange(ownerOfLocation(ev.Loc))
-	}
+	return d.hub.subscribe(ctx, pid, onChange)
 }
 
 // ownerOfLocation 从目录记录解出属主节点（类型不符或删除事件返回空串）。

@@ -39,12 +39,19 @@ func newActorDirectory(lc fx.Lifecycle, cfg *conf.Bootstrap,
 	if err != nil {
 		return nil, fmt.Errorf("app: 构造 actor 目录 locator 失败: %w", err)
 	}
-	// redis 后端会自建连接：挂到生命周期上，停机时关掉（etcd 后端复用注入的客户端，release 为 no-op）。
+	dir, err := resolver.NewLocatorDirectory(loc)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	// 停机顺序：先停进程内共享目录监听（扇出 goroutine 退出），再释放 locator 连接
+	// （redis 后端会自建连接，etcd 后端复用注入的客户端、release 为 no-op）。
 	lc.Append(fx.Hook{OnStop: func(context.Context) error {
+		dir.Close()
 		release()
 		return nil
 	}})
-	return resolver.NewLocatorDirectory(loc)
+	return dir, nil
 }
 
 // newFrameRegistry 装配帧面实例发现（battle 注册的 battle-frame 实例）。
