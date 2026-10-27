@@ -151,8 +151,15 @@ func newStreamBridge(rt *pkgactor.Runtime, reg *stream.Registry) *stream.Bridge 
 
 // newStreamRegistry 组装帧面直连注册表（含结束留档）：留档 TTL 由既有配置派生，不新增配置项——
 // 票据有效期 + 掉线窗口（见 stream.EndedTTL：票据过期后不再有任何合法帧 op 能指向该局）。
-func newStreamRegistry(cfg actor.Config) *stream.Registry {
-	return stream.NewRegistryWithTTL(stream.EndedTTL(cfg.TicketTTL, cfg.OfflineTimeout))
+//
+// 帧广播的载荷编码按 battle.frame_broadcast_protobuf 选择（缺省 protojson/ver=1，行为零变化）：
+// 打开时换成 protobuf 二进制 + 帧头 ver=2（编码与帧头必须自洽，由 stream.NewRegistryWithEncoding 校验）。
+func newStreamRegistry(cfg actor.Config) (*stream.Registry, error) {
+	ttl := stream.EndedTTL(cfg.TicketTTL, cfg.OfflineTimeout)
+	if !cfg.FrameBroadcastProtobuf {
+		return stream.NewRegistryWithTTL(ttl), nil
+	}
+	return stream.NewRegistryProtobuf(ttl)
 }
 
 // newFramePolicy 从战斗参数取帧面策略（掉线窗口）：数据报面空闲超时按它推导并在装配期校验

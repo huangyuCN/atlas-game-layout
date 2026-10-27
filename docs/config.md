@@ -98,6 +98,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法即失败 |
 | `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 60 帧 / 100ms（与硬编码常量逐字相同，行为零变化）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
 | `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
+| `battle.frame_broadcast_protobuf` | 无 | `false`（protojson / 帧头 ver=1，行为零变化） | `true` ⇒ 帧广播载荷切 protobuf 二进制 + 帧头 ver=2：同一广播实测 **1631 B → 465 B（≈3.5×）**，**帧数不变**（每连接每 tick 仍一次写）。**前置条件**：三端 SDK 都能解 ver=2 帧广播——当前 Go 直连 SDK 的解码与补帧基准写死 protojson，TS/C# 只把 `(payload, version)` 透传且补帧基准只认 ver=1，未升级的客户端会**静默丢弃**广播（语义见 §7.10） |
 | `battle.edge_endpoints` | 列表非空 + `transport` 非 `UNSPECIFIED` + 地址非空 + 面不重复 | **启动失败**（客户端拿到的接入层地址只有这一个来源） | 面枚举 `EDGE_TRANSPORT_{WS,KCP,UDP}`；**按面下发**、不要求三面齐全（只开 ws 也能启动） |
 | `battle.frame_advertise_host` | 无（整项缺失 = 回落） | 整项缺失 ⇒ 回落 `edge_endpoints` 的主机（**仅适合同机部署**） | 只填主机（不含端口、IPv6 不带方括号）；空白串/带端口/带方括号即启动失败；跨机部署**必须**显式配置（语义见 §7） |
 | `edge.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `battle.ticket_key` 同值 |
@@ -335,6 +336,25 @@ cat /proc/net/snmp | grep -A1 '^Udp:'     # UdpRcvbufErrors 即内核丢包计�
 - 申请失败（无权限、容器只读 sysctl）**只告警不阻断启动**，日志里会有
   「接入面收缓冲申请失败（内核按 net.core.rmem_max 限流…）」，此时必须按上面的办法抬上限；
 - 长期修法是「每面多个 socket + `SO_REUSEPORT` + 多读协程」，把单读循环的天花板解开（尚未实现）。
+
+### 7.10 帧广播载荷编码：`battle.frame_broadcast_protobuf`
+
+帧广播的**内容**（`battle.v1.FrameBroadcast`）一帧只编码一次、复用于该帧全部目标；可切换的只有
+**编码方式**（规范 §3.1 载荷编码协商：帧头 version 位自描述编码）：
+
+| 编码 | 帧头 ver | 同一广播体积 | 每帧编码开销（本机 10 目标基准） |
+|---|---|---|---|
+| protojson（缺省） | 1 | 1631 B | ≈12 µs/op、10520 B/op、163 allocs/op |
+| protobuf 二进制 | 2 | **465 B（≈1/3.5）** | ≈1.7 µs/op、784 B/op、12 allocs/op |
+
+- **只减包体、不减包数**：每连接每 tick 仍是一次写（写是必需的 syscall）。ws 面 41k pps ×
+  1546 B ≈ 603 Mbps 的链路占用，按包体降到 ≈1/3.5 后约 ≈172 Mbps，重传与 p99 随之缓解。
+- **不改任何消息字段**：收发两侧的 DTO 不变，变化只在帧头 version 位与载荷字节。
+- **开关是整节点粒度**（装配期一次决定，`stream.NewRegistryWithEncoding` 校验「编码 ↔ 版本」自洽），
+  缺省关闭即行为零变化。
+- **开启前提**：三端 SDK 都能解 ver=2 帧广播。现状：Go 直连 SDK 的 `OnFrame`/补帧基准写死
+  protojson；TS/C# 把 `(payload, version)` 原样交给上层但补帧基准只认 ver=1 ⇒ 未升级的客户端
+  会静默丢弃帧广播。客户端就绪后再打开。
 
 ## 8. 客户端版本门槛（gateway 登录入口专属）
 

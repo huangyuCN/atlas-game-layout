@@ -64,8 +64,9 @@ type Port interface {
 	// Push 向该连接推送一条 Notify 消息（由帧引擎现场编码）。
 	Push(c Conn, operation string, msg any) error
 	// PushRaw 向该连接推送一条**已编码**的 Notify 载荷：同一帧下发给多个目标时复用它，
-	// 免得逐目标重复编码（编码由调用方一次完成）。
-	PushRaw(c Conn, operation string, payload []byte) error
+	// 免得逐目标重复编码（编码由调用方一次完成）。ver 声明该载荷的编码版本并写进帧头
+	// （ver=1 protojson / ver=2 protobuf 二进制）——调用方保证 ver 与载荷编码自洽。
+	PushRaw(c Conn, operation string, payload []byte, ver uint8) error
 	// Close 关闭该连接（数据报面为移除对端）。
 	Close(c Conn) error
 }
@@ -76,6 +77,8 @@ type ConnServer interface {
 	Push(connID uint64, operation string, msg any) error
 	// PushRaw 按连接 ID 推送一条已编码载荷（不二次编码）。
 	PushRaw(connID uint64, operation string, payload []byte) error
+	// PushRawVersion 与 PushRaw 相同，但显式声明载荷编码版本（写入 Notify 帧头 ver 位）。
+	PushRawVersion(connID uint64, operation string, payload []byte, ver uint8) error
 	// CloseConn 主动关闭指定连接。
 	CloseConn(connID uint64) error
 }
@@ -91,9 +94,9 @@ func (p ConnPort) Push(c Conn, operation string, msg any) error {
 	return p.Srv.Push(c.ConnID, operation, msg)
 }
 
-// PushRaw 实现 Port：按连接 ID 推送已编码载荷（不二次编码）。
-func (p ConnPort) PushRaw(c Conn, operation string, payload []byte) error {
-	return p.Srv.PushRaw(c.ConnID, operation, payload)
+// PushRaw 实现 Port：按连接 ID 推送已编码载荷（不二次编码），帧头按 ver 声明编码版本。
+func (p ConnPort) PushRaw(c Conn, operation string, payload []byte, ver uint8) error {
+	return p.Srv.PushRawVersion(c.ConnID, operation, payload, ver)
 }
 
 // Close 实现 Port：按连接 ID 关闭。
@@ -105,6 +108,8 @@ type DatagramServer interface {
 	PushTo(peer string, operation string, msg any) error
 	// PushToRaw 按对端键推送一条已编码载荷（不二次编码）。
 	PushToRaw(peer string, operation string, payload []byte) error
+	// PushToRawVersion 与 PushToRaw 相同，但显式声明载荷编码版本（写入数据报帧头 ver 位）。
+	PushToRawVersion(peer string, operation string, payload []byte, ver uint8) error
 	// DropPeer 主动移除指定对端。
 	DropPeer(peer string) error
 }
@@ -120,9 +125,9 @@ func (p DatagramPort) Push(c Conn, operation string, msg any) error {
 	return p.Srv.PushTo(c.Peer, operation, msg)
 }
 
-// PushRaw 实现 Port：按对端键推送已编码载荷（不二次编码）。
-func (p DatagramPort) PushRaw(c Conn, operation string, payload []byte) error {
-	return p.Srv.PushToRaw(c.Peer, operation, payload)
+// PushRaw 实现 Port：按对端键推送已编码载荷（不二次编码），帧头按 ver 声明编码版本。
+func (p DatagramPort) PushRaw(c Conn, operation string, payload []byte, ver uint8) error {
+	return p.Srv.PushToRawVersion(c.Peer, operation, payload, ver)
 }
 
 // Close 实现 Port：移除对端（UDP 无连接语义）。

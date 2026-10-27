@@ -13,6 +13,7 @@ import (
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/transport"
+	"github.com/huangyuCN/atlas/transport/frame"
 	"github.com/huangyuCN/atlas/transport/frame/engine"
 )
 
@@ -27,6 +28,7 @@ type Registry struct {
 	ports     map[transport.Kind]Port  // 帧面类型 → 直连端口（装配期挂载）
 	ended     *EndedBook               // 结束留档：懒激活前拒绝迟到 op + 重连补投
 	encode    Encoder                  // 推送载荷编码器（默认 encodeJSON，测试注入计数钩子）
+	pushVer   uint8                    // 帧广播的载荷编码版本（默认 frame.Version=protojson；见 NewRegistryWithEncoding）
 }
 
 // endpointRef 是端点反查项：断开事件据此找到玩家与对局（对局用于把消息投给正确的 actor）。
@@ -53,7 +55,35 @@ func NewRegistryWithTTL(ttl time.Duration) *Registry {
 		ports:     make(map[transport.Kind]Port),
 		ended:     NewEndedBook(ttl),
 		encode:    encodeJSON,
+		pushVer:   frame.Version,
 	}
+}
+
+// NewRegistryWithEncoding 构造空注册表并指定**帧广播**的载荷编码（装配期一次性决定）：
+// enc 与 ver 必须自洽（protojson → frame.Version、protobuf → frame.Version2），因为客户端
+// 只按帧头的 version 位判定编码方式，不自洽就会把载荷解错（或静默丢弃）。
+//
+// 缺省（NewRegistry / NewRegistryWithTTL）是 protojson + ver=1，行为零变化；切到 protobuf
+// 的前提是**三端 SDK 都能解 ver=2 帧广播**——当前 Go 直连 SDK 的 OnFrame 写死 protojson，
+// TS/C# 虽把 (payload, version) 原样交给上层但补帧基准只认 ver=1，故缺省不切换。
+func NewRegistryWithEncoding(ttl time.Duration, enc Encoder, ver uint8) (*Registry, error) {
+	if enc == nil {
+		return nil, errors.New("stream: 推送编码器为 nil")
+	}
+	if ver != frame.Version && ver != frame.Version2 {
+		return nil, fmt.Errorf("stream: 未知的载荷编码版本 %d（只接受 ver=1 protojson / ver=2 protobuf）", ver)
+	}
+	r := NewRegistryWithTTL(ttl)
+	r.encode = enc
+	r.pushVer = ver
+	return r, nil
+}
+
+// NewRegistryProtobuf 构造帧广播走 protobuf 二进制（帧头 ver=2）的注册表：
+// 等价于 NewRegistryWithEncoding(ttl, EncodeProtobuf, frame.Version2)，把编码与版本常量
+// 收在本包内（装配侧不必再引帧协议常量，杜绝两处版本号漂移）。
+func NewRegistryProtobuf(ttl time.Duration) (*Registry, error) {
+	return NewRegistryWithEncoding(ttl, EncodeProtobuf, frame.Version2)
 }
 
 // RecordEnded 实现 biz.SettleLedger：留档一局战斗的结算结果（墓碑 + 胜负 + 参战名单），
@@ -78,6 +108,9 @@ func (r *Registry) ReplayEnd(playerID string, c Conn) bool {
 		&battlev1.BattleEndNotify{BattleId: c.BattleID, WinnerPlayerId: winner})
 	return true
 }
+
+// PushVersion 返回帧广播载荷编码版本（ver=1 protojson / ver=2 protobuf）：装配校验与观测用。
+func (r *Registry) PushVersion() uint8 { return r.pushVer }
 
 // BindPort 挂载一类帧面的直连端口（装配期调用；nil 端口忽略）。
 func (r *Registry) BindPort(kind transport.Kind, p Port) {
@@ -256,10 +289,12 @@ func (r *Registry) push(playerID, operation string, msg any) error {
 	return r.pushConn(playerID, func(port Port, c Conn) error { return port.Push(c, operation, msg) })
 }
 
-// pushPayload 向玩家当前连接推送一条**已编码**载荷（同一帧复用的字节，不重复编码）。
+// pushPayload 向玩家当前连接推送一条**已编码**载荷（同一帧复用的字节，不重复编码），
+// 并把载荷编码版本一并交给端口写进帧头（ver 与载荷编码自洽，见 NewRegistryWithEncoding）。
 func (r *Registry) pushPayload(playerID, operation string, payload []byte) error {
+	ver := r.pushVer
 	return r.pushConn(playerID, func(port Port, c Conn) error {
-		return port.PushRaw(c, operation, payload)
+		return port.PushRaw(c, operation, payload, ver)
 	})
 }
 

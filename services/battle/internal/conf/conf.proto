@@ -76,6 +76,15 @@ message BattleConf {
   // 无限扩张会话，容量必须显式）。**小于实际成局人数会让多出来的玩家「进不去会话」**，
   // 故它与 matcher 的 MaxSide 必须一致或更大。
   optional int32 max_players = 9;
+  // frame_broadcast_protobuf 是帧广播**载荷编码**的切换开关（不配置 = false = protojson/ver=1）：
+  // 打开后帧广播按 protobuf 二进制（帧头 ver=2）下发，单帧体积约降到 1/3.5
+  // （实测同一广播 1631 B → 465 B；ws 面 41k pps 下 ≈603 Mbps → ≈172 Mbps）。
+  // **只改编码，不改任何消息字段，也不减少帧数**（每连接每 tick 仍是一次写）。
+  //
+  // 打开前必须确认**三端 SDK 都能解 ver=2 帧广播**（现状：Go 直连 SDK 的 OnFrame 与补帧基准
+  // 写死 protojson；TS/C# 把 (payload, version) 原样交给上层，但补帧基准只认 ver=1）——
+  // 未升级的客户端会静默丢弃帧广播（补帧进度也不推进）。客户端就绪前保持缺省即可零影响。
+  bool frame_broadcast_protobuf = 10;
 }
 
 message Bootstrap {

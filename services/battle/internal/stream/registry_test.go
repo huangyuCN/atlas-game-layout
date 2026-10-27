@@ -20,11 +20,12 @@ type pushRecord struct {
 	msg       any
 }
 
-// rawRecord 是一次**已编码载荷**推送的观测记录。
+// rawRecord 是一次**已编码载荷**推送的观测记录（version = 端口收到的载荷编码版本）。
 type rawRecord struct {
 	conn      Conn
 	operation string
 	payload   []byte
+	version   uint8
 }
 
 // fakePort 是记录推送与关闭的帧面端口：
@@ -47,12 +48,12 @@ func (p *fakePort) Push(c Conn, operation string, msg any) error {
 	return nil
 }
 
-// PushRaw 实现 Port：记录已编码载荷下发（failErr 命中时返回该错误）。
-func (p *fakePort) PushRaw(c Conn, operation string, payload []byte) error {
+// PushRaw 实现 Port：记录已编码载荷下发（含载荷编码版本；failErr 命中时返回该错误）。
+func (p *fakePort) PushRaw(c Conn, operation string, payload []byte, ver uint8) error {
 	if err := p.failure(c); err != nil {
 		return err
 	}
-	p.raw = append(p.raw, rawRecord{conn: c, operation: operation, payload: payload})
+	p.raw = append(p.raw, rawRecord{conn: c, operation: operation, payload: payload, version: ver})
 	return nil
 }
 

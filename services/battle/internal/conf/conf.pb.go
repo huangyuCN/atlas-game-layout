@@ -88,9 +88,18 @@ type BattleConf struct {
 	// 校验：1–64，显式 0/负值/超上限一律启动失败（0 不是「不限」：那会让一个病态名单
 	// 无限扩张会话，容量必须显式）。**小于实际成局人数会让多出来的玩家「进不去会话」**，
 	// 故它与 matcher 的 MaxSide 必须一致或更大。
-	MaxPlayers    *int32 `protobuf:"varint,9,opt,name=max_players,json=maxPlayers,proto3,oneof" json:"max_players,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	MaxPlayers *int32 `protobuf:"varint,9,opt,name=max_players,json=maxPlayers,proto3,oneof" json:"max_players,omitempty"`
+	// frame_broadcast_protobuf 是帧广播**载荷编码**的切换开关（不配置 = false = protojson/ver=1）：
+	// 打开后帧广播按 protobuf 二进制（帧头 ver=2）下发，单帧体积约降到 1/3.5
+	// （实测同一广播 1631 B → 465 B；ws 面 41k pps 下 ≈603 Mbps → ≈172 Mbps）。
+	// **只改编码，不改任何消息字段，也不减少帧数**（每连接每 tick 仍是一次写）。
+	//
+	// 打开前必须确认**三端 SDK 都能解 ver=2 帧广播**（现状：Go 直连 SDK 的 OnFrame 与补帧基准
+	// 写死 protojson；TS/C# 把 (payload, version) 原样交给上层，但补帧基准只认 ver=1）——
+	// 未升级的客户端会静默丢弃帧广播（补帧进度也不推进）。客户端就绪前保持缺省即可零影响。
+	FrameBroadcastProtobuf bool `protobuf:"varint,10,opt,name=frame_broadcast_protobuf,json=frameBroadcastProtobuf,proto3" json:"frame_broadcast_protobuf,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *BattleConf) Reset() {
@@ -184,6 +193,13 @@ func (x *BattleConf) GetMaxPlayers() int32 {
 		return *x.MaxPlayers
 	}
 	return 0
+}
+
+func (x *BattleConf) GetFrameBroadcastProtobuf() bool {
+	if x != nil {
+		return x.FrameBroadcastProtobuf
+	}
+	return false
 }
 
 type Bootstrap struct {
@@ -294,7 +310,7 @@ var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xee\x03\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xa8\x04\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -309,7 +325,9 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\x10tick_interval_ms\x18\a \x01(\x03H\x02R\x0etickIntervalMs\x88\x01\x01\x12)\n" +
 	"\x0eseat_window_ms\x18\b \x01(\x03H\x03R\fseatWindowMs\x88\x01\x01\x12$\n" +
 	"\vmax_players\x18\t \x01(\x05H\x04R\n" +
-	"maxPlayers\x88\x01\x01B\x17\n" +
+	"maxPlayers\x88\x01\x01\x128\n" +
+	"\x18frame_broadcast_protobuf\x18\n" +
+	" \x01(\bR\x16frameBroadcastProtobufB\x17\n" +
 	"\x15_frame_advertise_hostB\r\n" +
 	"\v_max_framesB\x13\n" +
 	"\x11_tick_interval_msB\x11\n" +

@@ -51,6 +51,10 @@ type Config struct {
 	// 窗口内对局时钟不推进：等全部参战者的帧连接建立（入座），或窗口到期即开打。
 	// 语义与配置见 battle_seating.go / conf.proto 的 seat_window_ms。
 	SeatWindow time.Duration
+	// FrameBroadcastProtobuf 是帧广播的载荷编码开关（false = protojson/ver=1，缺省；
+	// true = protobuf 二进制/ver=2）：只改编码，不改消息字段、不减少帧数。
+	// 语义与开启前提见 conf.proto 的 frame_broadcast_protobuf（三端 SDK 就绪才能开）。
+	FrameBroadcastProtobuf bool
 }
 
 // 默认战斗参数（示例竞速对局：10fps、5 格赛道、60 帧上限）。

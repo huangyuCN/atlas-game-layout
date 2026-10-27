@@ -30,7 +30,9 @@ const ticketKeyLen = 32
 //   - seat_window_ms 省略取 DefaultSeatWindow（3s），显式 0 表示**关闭入座窗口**（旧行为），
 //     负值/超上限失败（见 seatWindowOf）；
 //   - max_players 省略取 DefaultMaxPlayers（10，与 matcher 的 5v5 对齐），
-//     显式值必须落在 [1, MaxPlayersLimit]（见 maxPlayersOf）。
+//     显式值必须落在 [1, MaxPlayersLimit]（见 maxPlayersOf）；
+//   - frame_broadcast_protobuf 缺省 false（帧广播 protojson/ver=1，行为零变化），
+//     显式 true 切 protobuf/ver=2（只改编码；启用前提见 conf.proto 该字段注释）。
 func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out := actor.DefaultConfig()
 	b := cfg.GetBattle()
@@ -73,6 +75,7 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out.MaxFrames = frames
 	out.SeatWindow = window
 	out.MaxPlayers = players
+	out.FrameBroadcastProtobuf = b.GetFrameBroadcastProtobuf()
 	return out, nil
 }
 

@@ -38,6 +38,27 @@ type sinkAdapter struct {
 	mu     sync.Mutex
 	frames int
 	bytes  int
+	capt   []writtenFrame // 非 nil 时捕获每次写出的帧头版本与帧体副本（wire 断言用）
+}
+
+// writtenFrame 是一次写出的观测记录（帧头载荷编码版本 + 帧体副本）。
+type writtenFrame struct {
+	version uint8
+	body    []byte
+}
+
+// captureWrites 开启写帧捕获（基准/计数用例不调用：逐帧拷贝会污染分配口径）。
+func (a *sinkAdapter) captureWrites() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.capt = make([]writtenFrame, 0, 8)
+}
+
+// captured 返回已捕获的写出记录（未开启捕获时返回 nil）。
+func (a *sinkAdapter) captured() []writtenFrame {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]writtenFrame(nil), a.capt...)
 }
 
 // ReadFrame 阻塞到 stop 关闭后返回 io.EOF（测试/基准期间连接一直存活）。
@@ -47,10 +68,14 @@ func (a *sinkAdapter) ReadFrame(*sinkConn, int) (frame.Header, []byte, error) {
 }
 
 // WriteFrame 记录一次写出（帧数 + 字节数）后丢弃：写是必需的 syscall，这里只度量引擎侧开销。
-func (a *sinkAdapter) WriteFrame(_ *sinkConn, _ frame.Header, body []byte, _ int) error {
+// 开启捕获时另存帧头版本与帧体副本（wire 断言用）。
+func (a *sinkAdapter) WriteFrame(_ *sinkConn, h frame.Header, body []byte, _ int) error {
 	a.mu.Lock()
 	a.frames++
 	a.bytes += len(body)
+	if a.capt != nil {
+		a.capt = append(a.capt, writtenFrame{version: h.Version, body: append([]byte(nil), body...)})
+	}
 	a.mu.Unlock()
 	return nil
 }
