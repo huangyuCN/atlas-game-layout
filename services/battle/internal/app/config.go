@@ -25,8 +25,8 @@ const ticketKeyLen = 32
 //   - edge_endpoints 至少一面、面不重复、地址非空（见 edgeEndpointsOf）；
 //   - offline_timeout 省略取 DefaultOfflineTimeout（15s），显式 0 表示关闭掉线判定，
 //     负值/非法即失败（见 offlineTimeoutOf）；
-//   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（60）/ DefaultTickInterval（100ms），
-//     显式值越界即失败（见 frameLimitsOf）；
+//   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（6000，10fps 下 10 分钟）/
+//     DefaultTickInterval（100ms），显式值越界即失败（见 frameLimitsOf）；
 //   - seat_window_ms 省略取 DefaultSeatWindow（3s），显式 0 表示**关闭入座窗口**（旧行为），
 //     负值/超上限失败（见 seatWindowOf）；
 //   - max_players 省略取 DefaultMaxPlayers（10，与 matcher 的 5v5 对齐），
@@ -191,7 +191,7 @@ func offlineTimeoutOf(raw string) (time.Duration, error) {
 }
 
 // frameLimitsOf 解析局时长两件（battle.max_frames / battle.tick_interval_ms）：字段**缺失**
-// 取缺省（60 帧 / 100ms，与硬编码常量逐字相同 → 行为零变化）；**显式值**越界即启动失败。
+// 取缺省（6000 帧 = 10 分钟 / 100ms；取值依据见 actor.DefaultMaxFrames）；**显式值**越界即启动失败。
 // 缺省与显式 0 必须区分（proto 的 optional 就是为此存在）：前者是「没配」，后者是笔误。
 func frameLimitsOf(b *conf.BattleConf) (tickInterval int64, maxFrames uint64, err error) {
 	tickInterval, maxFrames = actor.DefaultTickInterval, actor.DefaultMaxFrames

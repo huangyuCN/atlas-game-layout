@@ -92,8 +92,9 @@ func startStack(ctx context.Context, mw middlewareAddrs, edgeWS, edgeUDP string,
 	return st, nil
 }
 
-// battleLimits 是压测用的对局参数覆盖。默认对局是「60 帧上限 + 5 步赛道」的示例竞速：
-// 不覆盖的话每局约 6 秒即结算并**关闭该局全部直连**，压测后半程全是失败调用。
+// battleLimits 是压测用的对局参数覆盖。默认对局是「6000 帧上限（≈10 分钟）+ 5 步赛道」的示例
+// 竞速：一局结算即**关闭该局全部直连**，若整轮压测长于单局寿命，后半程就全是失败调用，故压测
+// 把帧数上限拉到「本轮时长内不可能跑满」。
 type battleLimits struct {
 	maxFrames     uint64 // 帧数上限（压测取远大于时长内可产生的帧数）
 	snapshotEvery uint64 // 快照周期（帧）；0 = 用默认

@@ -101,7 +101,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `battle.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `edge.ticket_key` 同值，否则帧面全面拒票 |
 | `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
 | `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法即失败 |
-| `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 60 帧 / 100ms（与硬编码常量逐字相同，行为零变化）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
+| `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 6000 帧 / 100ms（= 10 分钟一局；60 帧只够 6 秒，见 §7.6 的取值依据）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
 | `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
 | `battle.frame_broadcast_protobuf` | 无 | `false`（protojson / 帧头 ver=1，行为零变化） | `true` ⇒ 帧广播载荷切 protobuf 二进制 + 帧头 ver=2：同一广播实测 **1631 B → 465 B（≈3.5×）**，**帧数不变**（每连接每 tick 仍一次写）。**前置条件**：三端 SDK 都能解 ver=2 帧广播——当前 Go 直连 SDK 的解码与补帧基准写死 protojson，TS/C# 只把 `(payload, version)` 透传且补帧基准只认 ver=1，未升级的客户端会**静默丢弃**广播（语义见 §7.10） |
 | `battle.edge_endpoints` | 列表非空 + `transport` 非 `UNSPECIFIED` + 地址非空 + 面不重复 | **启动失败**（客户端拿到的接入层地址只有这一个来源） | 面枚举 `EDGE_TRANSPORT_{WS,KCP,UDP}`；**按面下发**、不要求三面齐全（只开 ws 也能启动） |
@@ -249,20 +249,26 @@ go build -o /tmp/loadtest ./scripts/loadtest
 
 ### 7.6 局时长可配（`battle.max_frames` / `battle.tick_interval_ms`）
 
-单局寿命 = `max_frames` × `tick_interval_ms`。两者**缺省即现值**（60 × 100ms ≈ 6s）——不配置时
-装配结果与硬编码常量逐字相同，行为零变化。此前这两个值是 `services/battle/internal/actor`
-里的常量，导致「单局内跑一段 8s 静默窗口」在物理上不可达（局先结束了）。
+单局寿命 = `max_frames` × `tick_interval_ms`。两者**整项不配置即取缺省**：6000 帧 × 100ms =
+**10 分钟一局**。这两个值原来是 `services/battle/internal/actor` 里的常量，导致「单局内跑一段 8s
+静默窗口」在物理上不可达（局先结束了）。
+
+**缺省为什么是 6000 而不是 60**：真实对局时长 5–15 分钟 ⇒ 3000–9000 帧，6000 取区间中位。
+旧缺省 60 只够 6 秒（60 × 100ms），对局刚开打就结算——压测/联调时端上看到的全是「对局已结束」，
+会被误判为**对局异常结束**（几轮压测数据因此全部作废）。**这个数字有口径，不是随手挑的**：
+调整前先确认对局时长口径，并同步 `services/battle/internal/conf/conf.proto`、
+`services/battle/configs/config.yaml` 与本节的注释与表格。
 
 | 配置 | 形态 | 缺省 | 校验（违反即**启动失败**，与 `offline_timeout` 同风格） |
 |---|---|---|---|
-| `battle.max_frames` | `optional int64`（帧数） | 60 | `>0` 且 `≤ 20000`；显式 `0`/负值/超上限报错 |
+| `battle.max_frames` | `optional int64`（帧数） | 6000（10fps 下 10 分钟） | `>0` 且 `≤ 20000`；显式 `0`/负值/超上限报错 |
 | `battle.tick_interval_ms` | `optional int64`（**毫秒整数**） | 100 | `>0` 且 `≤ 1000`；显式 `0`/负值/超上限报错 |
 
 - **为什么是毫秒整数而不是 `google.protobuf.Duration`**：本文件既有的两个时长字段
   （`ticket_ttl` / `offline_timeout`）都是「字符串 + `time.ParseDuration`」，全仓无任何
   `Duration` 用法；毫秒整数与 `protobuf/configs/server.proto` 的数值风格一致，且免去
   `Duration` 秒/纳秒双字段的误配。
-- **为什么用 `optional`**：proto3 裸标量区分不出「未配置」与「显式 0」。缺省必须保持现值，
+- **为什么用 `optional`**：proto3 裸标量区分不出「未配置」与「显式 0」。未配置要取缺省（6000 帧），
   而显式 `0` 是笔误——两者语义必须分开（同 `battle.frame_advertise_host` 的写法）。
 - **上限依据**：
   - `max_frames ≤ 20000`：按 2 人局每帧 ≈238B 估算（每帧每玩家一条 `lockstep.Input` ≈112B 含
@@ -275,13 +281,16 @@ go build -o /tmp/loadtest ./scripts/loadtest
     被空闲超时误判掉线。
 - **调大之后的连带约束**：局变长不等于可以不保活。数据报面（KCP/UDP）仍按空闲读超时判活，
   客户端必须以 **≤ `offline_timeout/3`** 的周期发送帧或 `Ping`（见 §7.3）。
-- **长局验收**（8s 静默窗口）：把 `max_frames` 调到 `300`（30s 一局），用 Go SDK 的
-  `examples/directloop -idle-hold 8s` 断言「静默期不被判出局 + 仍收帧 + 静默后仍能补帧」。
+- **长局验收**（8s 静默窗口）：缺省 6000 帧（10 分钟）本身就足以跑完 8s 静默窗口，**无需再调**
+  `max_frames`；若要一个「整局只剩几十秒」的加速回归口径，可显式配 `300`（30s 一局，**只是示例、
+  不是缺省**），用 Go SDK 的 `examples/directloop -idle-hold 8s` 断言
+  「静默期不被判出局 + 仍收帧 + 静默后仍能补帧」。
 
 ### 7.7 坐满再开打（`battle.seat_window_ms` / `battle.max_players`）
 
 成局到开打之间原来没有缝：`Admit`（开局 + 出票）一返回，lockstep 会话时钟就开始走，而客户端
-从收到成局通知到建连、握手、发出首帧要 1–2s——这段时间被算进单局寿命（缺省 60 帧 × 100ms ≈ 6s），
+从收到成局通知到建连、握手、发出首帧要 1–2s——这段时间被算进单局寿命（当时的缺省 60 帧 ×
+100ms ≈ 6s；现缺省 6000 帧 = 10 分钟，但「成局即开打」仍会把这 1–2s 白算进局内），
 于是晚到玩家拿到的是 `BATTLE_ENDED`（压测一轮实测 9,986 次）。
 
 现在成局后先打开**入座窗口**：会话挂起（帧号停在 0，不产生任何对局时间），等参战者的帧连接建立。

@@ -57,11 +57,17 @@ type Config struct {
 	FrameBroadcastProtobuf bool
 }
 
-// 默认战斗参数（示例竞速对局：10fps、5 格赛道、60 帧上限）。
+// 默认战斗参数（示例竞速对局：10fps、5 格赛道、帧数上限见 DefaultMaxFrames）。
 const (
-	DefaultTickInterval  = int64(100 * time.Millisecond)
-	DefaultTrackLen      = int32(5)
-	DefaultMaxFrames     = uint64(60)
+	DefaultTickInterval = int64(100 * time.Millisecond)
+	DefaultTrackLen     = int32(5)
+	// DefaultMaxFrames 是单局帧数上限的缺省值（6000 帧 = 100ms 一帧 ⇒ 10 分钟一局）。
+	//
+	// 为什么是 6000：真实对局时长 5–15 分钟 ⇒ 3000–9000 帧，6000 落在区间中位。旧值 60
+	// （6 秒一局）不是「短一点」而是错档——对局刚开打就结算，压测端看到的全是「对局已结束」，
+	// 几轮数据因此全部作废；它不是随手挑的数字，改动前先确认对局时长口径。
+	// 上限由 MaxFramesLimit（20000 帧 ≈ 33 分钟）约束，缺省与上限之间留有调大空间。
+	DefaultMaxFrames     = uint64(6000)
 	DefaultSnapshotEvery = uint64(10)
 	// DefaultMaxPlayers 是每局会话容量的缺省值（10 人）：casual 规则集单侧上限 5
 	// （matcher 的 MaxSide=5）故一局最多 10 人。旧值 2 只够示例双人对局——5v5 成局后

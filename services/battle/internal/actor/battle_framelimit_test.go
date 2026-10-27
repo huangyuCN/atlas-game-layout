@@ -12,25 +12,29 @@ import (
 )
 
 // TestBattleActorMaxFramesConfigurable 验证「局时长可配」真正接到帧引擎：
-// 同一套 actor 装配，只把 MaxFrames 从缺省 60 提到 120，则在第 60 帧**不结算**、
-// 第 120 帧才按位置领先者结算。这是「配置项只落在结构体里、没接到 lockstep 会话」的反证。
+// 同一套 actor 装配，显式把 MaxFrames 设为 120 后，在第 60 帧**不结算**、第 120 帧才按位置
+// 领先者结算。这是「配置项只落在结构体里、没接到 lockstep 会话」的反证。
+//
+// 120/60 是本用例自己的帧数，**不引用 DefaultMaxFrames**：缺省值是生产口径（6000 帧 ≈10 分钟），
+// 与本用例要验证的「显式配置生效」无关；跟着缺省跑既会白跑 6000 帧，也会在缺省再调整时静默失效。
 //
 // 赛道取 1000（远大于帧数上限），保证胜负只由帧数上限决定；p-b 每帧前进 1 格领先。
 func TestBattleActorMaxFramesConfigurable(t *testing.T) {
+	const halfWay, frameLimit uint64 = 60, 120
 	cfg := testBattleConfig()
 	cfg.TrackLen = 1000
-	cfg.MaxFrames = 120
+	cfg.MaxFrames = frameLimit
 	env := newBattleEnvWith(t, cfg)
 	ctx := context.Background()
 	seedAndJoin(t, env, ctx)
 
-	// 跑满缺省的 60 帧：旧口径下此时早已结算，新口径下必须还活着。
-	sendFrameRange(t, env, ctx, 1, DefaultMaxFrames)
-	waitFrameBroadcast(t, env, DefaultMaxFrames)
-	assertNotSettled(t, env, DefaultMaxFrames)
+	// 跑到半程：上限生效（120）时此时必须还活着；若上限被忽略成 60，这里已经结算。
+	sendFrameRange(t, env, ctx, 1, halfWay)
+	waitFrameBroadcast(t, env, halfWay)
+	assertNotSettled(t, env, halfWay)
 
-	// 继续跑到 120 帧：帧数上限到点，位置领先者（p-b）判胜。
-	sendFrameRange(t, env, ctx, DefaultMaxFrames+1, 120)
+	// 继续跑到上限：帧数上限到点，位置领先者（p-b）判胜。
+	sendFrameRange(t, env, ctx, halfWay+1, frameLimit)
 	waitSettled(t, env)
 	env.publisher.mu.Lock()
 	ev := env.publisher.ev

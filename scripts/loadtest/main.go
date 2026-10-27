@@ -134,7 +134,7 @@ func parseFlags() loadRun {
 	edgeWS := flag.String("edge-ws", "127.0.0.1:7400", "接入层 WS 面监听地址")
 	edgeUDP := flag.String("edge-udp", "127.0.0.1:7401", "接入层 UDP 面监听地址")
 	total := flag.Duration("total-timeout", 10*time.Minute, "整轮压测的兜底超时")
-	maxFrames := flag.Uint64("max-frames", 100000, "对局帧数上限覆盖（默认 60 会在 6 秒后结算并关闭直连，压测必须拉高）")
+	maxFrames := flag.Uint64("max-frames", 100000, "对局帧数上限覆盖（缺省 6000 帧 ≈10 分钟；一局结算会关闭直连，压测取时长内跑不满的值）")
 	snapEvery := flag.Uint64("snapshot-every", 1000, "对局快照周期覆盖（帧；0 = 用默认 10）")
 	flag.Parse()
 	if *transport != "ws" && *transport != "udp" {
