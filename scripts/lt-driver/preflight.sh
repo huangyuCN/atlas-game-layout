@@ -98,7 +98,10 @@ R "sha256sum $B2/bin/battle 2>/dev/null | sed 's/^/  /'"
 
 hr "9/10 端口与健康"
 R "ss -ltn | grep -E ':(9001|7100|7101|7102|9200|9201|9280|9480)\b' | sed 's/^/  /'" || true
-health="$(R "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9480/health" 2>/dev/null)"
+# 健康端点可能只绑服务端 LAN 地址（不是 127.0.0.1）：先试回环，再试服务端第一个 IP。
+health="$(R "for h in 127.0.0.1 \$(hostname -I | awk '{print \$1}'); do \
+  c=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://\$h:9480/health); \
+  if [ \"\$c\" = 200 ]; then echo \$c; break; fi; done" 2>/dev/null)"
 [ "$health" = "200" ] && ok "网关 /health 200" || bad "网关 /health=${health:-连不上}"
 
 hr "10/10 判据汇总"

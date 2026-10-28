@@ -113,6 +113,8 @@ func NewFrameOps(invoker core.ActorInvoker, conn FrameConn, ticketKey []byte, op
 func NewFrameServers(cfg *conf.Bootstrap, ops *frameops.Handler, policy FramePolicy, life *stream.Bridge,
 	opts ...FrameOption) (FrameServers, error) {
 	deps := frameDepsOf(opts)
+	// 控制类 op 标记在构造后、任何连接到达前完成，故全程生效（安全依据见 controlOps）。
+	ctrl := controlOps()
 	var out FrameServers
 	kcpSrv, err := newDatagramFace(datagramFace[*configspb.Server_KCP, *kcpt.Server, kcpt.ServerOption]{
 		field: "server.kcp", conf: cfg.GetServer().GetKcp(), kind: transport.KindKCP,
@@ -126,6 +128,7 @@ func NewFrameServers(cfg *conf.Bootstrap, ops *frameops.Handler, policy FramePol
 		if err := registerFace(ops, "KCP", kcpSrv.Subscribe, deps.metrics); err != nil {
 			return FrameServers{}, err
 		}
+		kcpSrv.MarkControl(ctrl...)
 		out.Faces.KCP, out.KCP = kcpSrv, kcpSrv
 	}
 	udpSrv, err := newDatagramFace(datagramFace[*configspb.Server_UDP, *udpt.Server, udpt.ServerOption]{
@@ -150,9 +153,32 @@ func NewFrameServers(cfg *conf.Bootstrap, ops *frameops.Handler, policy FramePol
 		if err := registerFace(ops, "WS", wsSrv.Subscribe, deps.metrics); err != nil {
 			return FrameServers{}, err
 		}
+		wsSrv.MarkControl(ctrl...)
 		out.Faces.WS, out.WS = wsSrv, wsSrv
 	}
 	return out, nil
+}
+
+// controlOps 返回帧面上走快速通道的控制类 op（只读/幂等，满足 engine.MarkControl 契约：
+// handler 可与在途批并发、回执可越过在途批）。
+//
+// 只标 SyncFrames：它仅向会话 Ask 一次补帧信息（ReconnectRequest）、不写任何状态，
+// 重复投递结果一致；回执按帧头 Seq 配对，越过在途批不影响客户端一问一答。
+//
+// 刻意不标：
+//   - JoinBattle：会 JoinSession（写成员集合、触发上线事件）并承担「回执 current_frame
+//     与后续补帧的先后语义」，重复/并发投递不幂等；
+//   - SendFrameInput：写入类（输入聚合），必须保持与批的顺序语义；
+//   - Ping：Tell 无回执，标记不会降低任何可观测延迟，只会额外占住读循环。
+//
+// op 名从注解路由表按方法名取，避免手写完整方法名与生成物漂移。
+func controlOps() []string {
+	for op, entry := range battlev1.BattleServiceRouteTable {
+		if entry.Method == "SyncFrames" {
+			return []string{op}
+		}
+	}
+	return nil
 }
 
 // datagramConf 是数据报帧面配置的最小读数（KCP/UDP 两个配置消息均满足）；
