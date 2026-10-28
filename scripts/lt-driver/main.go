@@ -53,7 +53,26 @@ type report struct {
 
 	Handshake latency `json:"handshake_rtt_ms"`
 	Probe     latency `json:"frame_rtt_ms"`
-	Downlink  latency `json:"broadcast_downlink_ms"`
+	Downlink  latency `json:"broadcast_downlink_ms"` // 未校正：含两端时钟差
+
+	// 时钟校正（每轮开始/结束各测一次）：
+	// Δ = 压测端 - 服务端；校正后 = 未校正 - Δ。漂移 >5ms 时该轮判不可用。
+	ClockSource        string  `json:"clock_source"`
+	ClockSSH           string  `json:"clock_ssh"`
+	ClockOffsetStartMS float64 `json:"clock_offset_start_ms"`
+	ClockOffsetEndMS   float64 `json:"clock_offset_end_ms"`
+	ClockOffsetDriftMS float64 `json:"clock_offset_drift_ms"`
+	ClockOffsetUsedMS  float64 `json:"clock_offset_used_ms"`
+	ClockUncertaintyMS float64 `json:"clock_uncertainty_ms"`
+	ClockRTTMS         float64 `json:"clock_rtt_ms"`
+	ClockNTPClientMS   float64 `json:"ntp_offset_client_ms"`
+	ClockNTPServerMS   float64 `json:"ntp_offset_server_ms"`
+	ClockRoundUsable   bool    `json:"clock_round_usable"`
+	ClockNote          string  `json:"clock_note,omitempty"`
+
+	DownlinkCorrected   latency `json:"broadcast_downlink_corrected_ms"`
+	DialDownCorrected   latency `json:"dial_broadcast_downlink_corrected_ms"`
+	SteadyDownCorrected latency `json:"steady_broadcast_downlink_corrected_ms"`
 
 	DialS       float64 `json:"dial_phase_s"`
 	SteadyS     float64 `json:"steady_window_s"`
@@ -111,6 +130,7 @@ type loadRun struct {
 	queue          queueCfg
 	pump           pumpCfg
 	hello          helloPolicy
+	clockSSH       string // 服务端 SSH 目标（测 Δ 用；空 = 只读两端 NTP）
 }
 
 func main() {
@@ -160,6 +180,8 @@ func parseFlags() loadRun {
 	battleUDP := flag.String("battle-udp", "", "battle UDP 帧端口（-via direct 用）")
 	rateEvery := flag.Duration("rate-every", 5*time.Second, "上行包速率采样间隔（压测端 pps 时间线）")
 	total := flag.Duration("total-timeout", 10*time.Minute, "整轮压测的兜底超时")
+	clockSSH := flag.String("clock-ssh", "ubuntu@10.10.1.23",
+		"服务端 SSH 目标：轮首/轮尾各测一次双端时钟差 Δ（空 = 只读两端 NTP，精度低）")
 	flag.Parse()
 	if *transport != "ws" && *transport != "udp" && *transport != "kcp" {
 		fatalf("未知 -transport %q（ws|udp|kcp）", *transport)
@@ -180,8 +202,9 @@ func parseFlags() loadRun {
 		totalTimeout: *total, via: *via, transport: *transport, steady: *steady, rateEvery: *rateEvery,
 		gateway: *gateway, edgeWS: *edgeWS, edgeUDP: *edgeUDP, edgeKCP: *edgeKCP,
 		battleWS: *battleWS, battleUDP: *battleUDP,
-		queue: qc,
-		pump:  pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
+		queue:    qc,
+		clockSSH: *clockSSH,
+		pump:     pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
 		hello: helloPolicy{
 			timeout: *helloTimeout, attempts: *helloAttempts, backoff: *helloBackoff,
 			unavailableBackoff: *helloUnavail,
@@ -206,6 +229,9 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 		out.battles, out.matched, len(ps), perBattleActual(out.matched, out.battles))
 
 	active := matchedPlayers(ps)
+	clkStart := measureClock(cfg.clockSSH)
+	fmt.Printf("[时钟] 轮首 Δ(压测端-服务端)=%.2fms（源 %s，最小 RTT %.1fms）\n",
+		clkStart.Offset, clkStart.Source, clkStart.RTT)
 	dialStart := time.Now()
 	dialCtx, dialCancel := context.WithTimeout(ctx, cfg.connectTimeout)
 	connected, failed := dialAndJoin(dialCtx, active, cfg)
@@ -225,8 +251,11 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 	pumpAll(pumpCtx, active, cfg.pump)
 	pumpCancel()
 	elapsed := time.Since(start)
+	clkEnd := measureClock(cfg.clockSSH)
+	fmt.Printf("[时钟] 轮尾 Δ(压测端-服务端)=%.2fms（源 %s，最小 RTT %.1fms）\n",
+		clkEnd.Offset, clkEnd.Source, clkEnd.RTT)
 	win := windows{dialStart: dialStart, dialEnd: dialEnd, pumpEnd: time.Now(), steady: cfg.steady}
-	rep := collect(active, cfg, out.battles, failed, elapsed, win)
+	rep := collect(active, cfg, out.battles, failed, elapsed, win, summarizeClock(clkStart, clkEnd))
 	rep.Rates = rates()
 	rep.QueueConc = cfg.queue.conc
 	rep.QueueRTT = queueRTT(ps)
@@ -349,7 +378,7 @@ func dialAndJoin(ctx context.Context, ps []*loadPlayer, cfg loadRun) (int, int) 
 }
 
 // collect 汇总全部连接的样本与计数，并把探针/下行样本切成「建流窗口 vs 稳态窗口」两段。
-func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Duration, win windows) *report {
+func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Duration, win windows, clk clockSummary) *report {
 	rep := &report{
 		Via: cfg.via, Transport: cfg.transport, Gateway: cfg.gateway, EdgeWS: cfg.edgeWS, EdgeKCP: cfg.edgeKCP,
 		PlayersWant: cfg.players, PerBattleWant: cfg.perBattle, Battles: battles, ConnectFailed: failed,
@@ -385,6 +414,15 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 	rep.SteadyProbe = summarize(pr.window(steadyFrom, win.pumpEnd))
 	rep.SteadyDown = summarize(dl.window(steadyFrom, win.pumpEnd))
 	rep.PerBattleReal = perBattleActual(rep.PlayersMatched, battles)
+	rep.ClockSource, rep.ClockSSH = clk.Source, cfg.clockSSH
+	rep.ClockOffsetStartMS, rep.ClockOffsetEndMS = clk.DeltaStart, clk.DeltaEnd
+	rep.ClockOffsetDriftMS, rep.ClockOffsetUsedMS = clk.Drift, clk.Used
+	rep.ClockUncertaintyMS, rep.ClockRTTMS = clk.Uncertainty, clk.RTT
+	rep.ClockNTPClientMS, rep.ClockNTPServerMS = clk.NTPClient, clk.NTPServer
+	rep.ClockRoundUsable, rep.ClockNote = clk.Usable, clk.Note
+	rep.DownlinkCorrected = correctLatency(rep.Downlink, clk.Used)
+	rep.DialDownCorrected = correctLatency(rep.DialDown, clk.Used)
+	rep.SteadyDownCorrected = correctLatency(rep.SteadyDown, clk.Used)
 	return rep
 }
 
@@ -405,8 +443,11 @@ func printReport(r *report) {
 		r.Handshake.P50, r.Handshake.P95, r.Handshake.P99, r.Handshake.Count)
 	fmt.Printf("      SyncFrames 往返 p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
 		r.Probe.P50, r.Probe.P95, r.Probe.P99, r.Probe.Count)
-	fmt.Printf("      帧广播下行 p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
+	fmt.Printf("      帧广播下行（未校正）p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
 		r.Downlink.P50, r.Downlink.P95, r.Downlink.P99, r.Downlink.Count)
+	fmt.Printf("      帧广播下行（校正 Δ=%+.2fms，漂移 %.2fms，不确定度 ±%.2fms）p50=%.2f p95=%.2f p99=%.2f；轮次可用=%v\n",
+		r.ClockOffsetUsedMS, r.ClockOffsetDriftMS, r.ClockUncertaintyMS,
+		r.DownlinkCorrected.P50, r.DownlinkCorrected.P95, r.DownlinkCorrected.P99, r.ClockRoundUsable)
 	fmt.Printf("分段 建流窗口 %.1fs：探针 p99=%.2f（n=%d）；稳态末 %.1fs：探针 p99=%.2f（n=%d）\n",
 		r.DialS, r.DialProbe.P99, r.DialProbe.Count, r.SteadyS, r.SteadyProbe.P99, r.SteadyProbe.Count)
 	out, err := json.Marshal(r)
