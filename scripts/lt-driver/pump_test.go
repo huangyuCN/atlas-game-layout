@@ -77,7 +77,7 @@ func (f *ctxHonoringFrame) Close() error { return nil }
 //
 // 旧实现在此红：pumpAll 等 wg.Wait()，卡住的那条连接让整轮永远收不了尾。
 func TestPumpAllReturnsAtDurationWhenCallHangs(t *testing.T) {
-	p := &loadPlayer{frame: newHangingFrame()}
+	p := &loadPlayer{frame: newHangingFrame(), probe: newProbeSet(false)}
 	start := time.Now()
 	pumpAll(context.Background(), []*loadPlayer{p}, pumpCfg{
 		pps: 100, probe: time.Hour, duration: 50 * time.Millisecond, callTimeout: 20 * time.Millisecond,
@@ -90,7 +90,7 @@ func TestPumpAllReturnsAtDurationWhenCallHangs(t *testing.T) {
 
 // TestPumpStopsSendingAtDuration 验证正常形态：到点即停止发送，上行计数不再增长。
 func TestPumpStopsSendingAtDuration(t *testing.T) {
-	p := &loadPlayer{frame: &countingFrame{}}
+	p := &loadPlayer{frame: &countingFrame{}, probe: newProbeSet(false)}
 	pumpAll(context.Background(), []*loadPlayer{p}, pumpCfg{pps: 200, probe: time.Hour, duration: 60 * time.Millisecond})
 	sent := p.inputs.Load()
 	if sent == 0 {
@@ -106,7 +106,7 @@ func TestPumpStopsSendingAtDuration(t *testing.T) {
 // 而不是无限等待（到点仍能自然收尾）。
 func TestPumpHonorsCallTimeout(t *testing.T) {
 	f := &ctxHonoringFrame{}
-	p := &loadPlayer{frame: f}
+	p := &loadPlayer{frame: f, probe: newProbeSet(false)}
 	start := time.Now()
 	pumpAll(context.Background(), []*loadPlayer{p}, pumpCfg{
 		pps: 1, probe: 10 * time.Millisecond, duration: 80 * time.Millisecond, callTimeout: 20 * time.Millisecond,

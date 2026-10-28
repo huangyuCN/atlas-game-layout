@@ -22,14 +22,18 @@ type samples struct {
 	xs []sample
 }
 
-// add 记录一次延迟样本（非正值忽略：未打点或时钟回拨都不该污染分位数）。
-func (s *samples) add(d time.Duration) {
+// add 记录一次延迟样本（打点时刻取当前时刻）。
+func (s *samples) add(d time.Duration) { s.addAt(d, time.Now()) }
+
+// addAt 记录一次延迟样本并显式给出打点时刻（探针要按**发出/收到时刻**切窗，不能取「入统时刻」）。
+// 非正值忽略：未打点或时钟回拨都不该污染分位数。
+func (s *samples) addAt(d time.Duration, at time.Time) {
 	if d <= 0 {
 		return
 	}
 	ms := float64(d.Microseconds()) / 1000
 	s.mu.Lock()
-	s.xs = append(s.xs, sample{at: time.Now(), ms: ms})
+	s.xs = append(s.xs, sample{at: at, ms: ms})
 	s.mu.Unlock()
 }
 

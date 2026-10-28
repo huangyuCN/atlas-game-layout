@@ -102,13 +102,15 @@ type loadPlayer struct {
 	framesV2   atomic.Int64  // 帧广播中以 ver=2（protobuf）到达的条数
 	decodeFail atomic.Int64  // 推送解码失败数（含未知版本与解码错误）
 	lastFrame  atomic.Uint64 // 已见到的最新帧号（补帧探针据此请求增量，避免回执无限增大）
+	firstFrame atomic.Uint64 // 首个见到的广播帧号（广播缺口的分母起点）
+	srvFrame   atomic.Uint64 // 服务端权威帧号（探针回执的 current_frame 最大值）
 	outs       atomic.Int64  // 出局通知数（压测中必须为 0：不误判掉线）
 	failures   atomic.Int64  // 帧链路失败次数（连接失败/调用失败）
 
-	handshake *samples // 入局（JoinBattle）往返
-	probe     *samples // SyncFrames 探针往返
-	downlink  *samples // 帧广播下行（服务端 server_time → 收到）
-	queue     *samples // 入池（EnterMatchQueue）往返：入池阶段的单票 RTT
+	handshake *samples  // 入局（JoinBattle）往返
+	probe     *probeSet // SyncFrames 探针：结果分类 + 两套分位（probe.go）
+	downlink  *samples  // 帧广播下行（服务端 server_time → 收到）
+	queue     *samples  // 入池（EnterMatchQueue）往返：入池阶段的单票 RTT
 }
 
 // newLoadPlayer 建立业务会话（注册/登录）并挂接成局通知；帧连接在拿到票据后另建。
@@ -129,7 +131,7 @@ func newLoadPlayer(ctx context.Context, gatewayTCP, tag string) (*loadPlayer, er
 		tag: tag, sess: sess, biz: cli,
 		ops:       gamev1opclient.NewPlayerService(sess),
 		started:   make(chan *gamev1.MatchStartedNotify, 4),
-		handshake: &samples{}, probe: &samples{}, downlink: &samples{}, queue: &samples{},
+		handshake: &samples{}, probe: newProbeSet(true), downlink: &samples{}, queue: &samples{},
 	}
 	cli.On(gamev1opclient.PlayerServicePushOps.MatchStartedNotify, p.watch)
 	if err := p.registerLogin(ctx); err != nil {
@@ -304,6 +306,8 @@ func (p *loadPlayer) onNotifyVersion(ver uint8, operation string, payload []byte
 			if cur := f.GetFrameId(); cur > p.lastFrame.Load() {
 				p.lastFrame.Store(cur)
 			}
+			// 首帧只记一次：广播缺口的起点（与探针回执里的服务端帧号配对算「应到帧数」）。
+			p.firstFrame.CompareAndSwap(0, f.GetFrameId())
 		}
 		if st := fb.GetFrame().GetServerTime(); st != nil {
 			p.downlink.add(time.Since(st.AsTime()))
@@ -414,14 +418,24 @@ func (p *loadPlayer) sendInput(ctx context.Context, seq uint64) {
 // probeOnce 发一次 SyncFrames 探针并记录往返（这是帧面上唯一稳定的「往返延迟」样本来源：
 // SendFrameInput 是 Tell 无回执，帧广播只有单向时间戳）。
 //
+// 每次探针都记**发出时刻 / 收到时刻 / 结果分类**（probe.go）：超时与「慢但成功」必须分开，
+// 否则「p99 高」永远分不清是服务端慢还是探针到点放弃。
+//
 // LastSeenFrame 取**已见到的最新帧号**（增量补帧，与 SDK 的重连补帧语义一致）：
 // 若恒填 0，回执会带全部历史帧——数据报面上该回执会超过接入层单包上限（16KiB）被丢弃，
 // 客户端就永远等不到回执（表现为帧面「卡死」）。
 func (p *loadPlayer) probeOnce(ctx context.Context) error {
-	start := time.Now()
+	sent := time.Now()
 	var sync battlev1.SyncFramesReply
 	err := p.frame.Invoke(ctx, battlev1opclient.BattleServiceProtocolOps.SyncFrames,
 		&battlev1.SyncFramesReq{BattleId: p.battleID, LastSeenFrame: p.lastFrame.Load()}, &sync)
+	recv := time.Now()
+	outcome, errKind := classifyProbe(err)
+	p.probe.addRec(probeRec{
+		Tag: p.tag, Sent: sent, Recv: recv,
+		MS:      float64(recv.Sub(sent).Microseconds()) / 1000,
+		Outcome: outcome, ErrKind: errKind,
+	})
 	if err != nil {
 		p.failures.Add(1)
 		frameErrLog(p.tag, "probe", err)
@@ -430,7 +444,9 @@ func (p *loadPlayer) probeOnce(ctx context.Context) error {
 	if cur := sync.GetCurrentFrame(); cur > p.lastFrame.Load() {
 		p.lastFrame.Store(cur)
 	}
-	p.probe.add(time.Since(start))
+	if cur := sync.GetCurrentFrame(); cur > p.srvFrame.Load() {
+		p.srvFrame.Store(cur)
+	}
 	return nil
 }
 

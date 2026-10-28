@@ -52,8 +52,26 @@ type report struct {
 	Rates []ratePoint `json:"rate_samples"`
 
 	Handshake latency `json:"handshake_rtt_ms"`
-	Probe     latency `json:"frame_rtt_ms"`
+	Probe     latency `json:"frame_rtt_ms"` // 仅成功样本（口径与历史各轮一致）
 	Downlink  latency `json:"broadcast_downlink_ms"` // 未校正：含两端时钟差
+
+	// 探针结果分类（把「超时」与「慢但成功」分开，见 probe.go）：
+	// 成功率低 ⇒ 分位数被「超时」主导；成功率高而 p99 仍高 ⇒ 服务端真的慢。
+	ProbeTotal      int            `json:"probe_total"`
+	ProbeOK         int            `json:"probe_ok"`
+	ProbeTimeout    int            `json:"probe_timeout"`
+	ProbeError      int            `json:"probe_error"`
+	ProbeSuccessPct float64        `json:"probe_success_pct"`
+	ProbeErrKinds   map[string]int `json:"probe_err_kinds,omitempty"`
+	ProbeOKLatency  latency        `json:"probe_ok_rtt_ms"`     // 仅成功样本 = 真实服务时延
+	ProbeAllLatency latency        `json:"probe_all_rtt_ms"`    // 含超时（超时按实际等待计）
+	ProbeTimeoutMS  latency        `json:"probe_timeout_wait_ms"` // 超时样本的等待时长
+
+	// 广播成功率（收没收到）：分母是服务端权威帧号，不是实收条数。
+	BroadcastReceived   int64   `json:"broadcast_received_frames"`
+	BroadcastExpect     int64   `json:"broadcast_expected_frames"`
+	BroadcastMissing    int64   `json:"broadcast_missing_frames"`
+	BroadcastSuccessPct float64 `json:"broadcast_success_pct"`
 
 	// 时钟校正（每轮开始/结束各测一次）：
 	// Δ = 压测端 - 服务端；校正后 = 未校正 - Δ。漂移 >5ms 时该轮判不可用。
@@ -182,7 +200,13 @@ func parseFlags() loadRun {
 	total := flag.Duration("total-timeout", 10*time.Minute, "整轮压测的兜底超时")
 	clockSSH := flag.String("clock-ssh", "ubuntu@10.10.1.23",
 		"服务端 SSH 目标：轮首/轮尾各测一次双端时钟差 Δ（空 = 只读两端 NTP，精度低）")
+	probeLog := flag.String("probe-log", "",
+		"逐条探针记录落盘路径（NDJSON：发出/收到时刻、结果分类、err 类型）；空 = 不落盘")
+	probeLogEveryFlag := flag.Int("probe-log-every", 1, "逐条探针记录的抽样间隔（每 N 条落 1 条）")
 	flag.Parse()
+	// 探针落盘开关必须在建连接前就位（loadPlayer 创建时据此决定是否保留逐条记录）。
+	probeLogPath = *probeLog
+	probeLogEvery.Store(int64(max(*probeLogEveryFlag, 1)))
 	if *transport != "ws" && *transport != "udp" && *transport != "kcp" {
 		fatalf("未知 -transport %q（ws|udp|kcp）", *transport)
 	}
@@ -260,7 +284,27 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 	rep.QueueConc = cfg.queue.conc
 	rep.QueueRTT = queueRTT(ps)
 	out.attachPhases(rep)
+	dumpProbeRecords(active)
 	return rep, nil
+}
+
+// dumpProbeRecords 把本轮全部连接的逐条探针记录落盘（-probe-log 未配置时什么都不做）。
+func dumpProbeRecords(ps []*loadPlayer) {
+	if probeLogPath == "" {
+		return
+	}
+	sets := make([]*probeSet, 0, len(ps))
+	for _, p := range ps {
+		if p != nil {
+			sets = append(sets, p.probe)
+		}
+	}
+	n, err := dumpProbeLog(probeLogPath, sets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[探针] 逐条记录落盘失败（%s）: %v\n", probeLogPath, err)
+		return
+	}
+	fmt.Printf("[探针] 逐条记录 %d 条 → %s\n", n, probeLogPath)
 }
 
 // startRateSampler 每 interval 采一次「自压测开始以来的累计上行数」并算出窗口 pps；
@@ -384,7 +428,7 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 		PlayersWant: cfg.players, PerBattleWant: cfg.perBattle, Battles: battles, ConnectFailed: failed,
 		DurationS: elapsed.Seconds(),
 	}
-	hs, pr, dl := &samples{}, &samples{}, &samples{}
+	hs, pr, dl := &samples{}, newProbeSet(false), &samples{}
 	for _, p := range ps {
 		if p.frame == nil {
 			continue
@@ -398,20 +442,34 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 		hs.merge(p.handshake)
 		pr.merge(p.probe)
 		dl.merge(p.downlink)
+		// 广播成功率：分母取服务端权威帧号（探针回执的 current_frame），分子取实收条数。
+		if first := p.firstFrame.Load(); first > 0 {
+			want, missing := broadcastGap(first, p.srvFrame.Load(), uint64(p.broadcasts.Load()))
+			rep.BroadcastReceived += int64(p.broadcasts.Load())
+			rep.BroadcastExpect += int64(want)
+			rep.BroadcastMissing += int64(missing)
+		}
+	}
+	if rep.BroadcastExpect > 0 {
+		rep.BroadcastSuccessPct = float64(rep.BroadcastExpect-rep.BroadcastMissing) * 100 / float64(rep.BroadcastExpect)
 	}
 	if secs := elapsed.Seconds(); secs > 0 {
 		rep.InputPPS = float64(rep.Inputs) / secs
 		rep.BroadcastPPS = float64(rep.Broadcasts) / secs
 	}
 	rep.Handshake = summarize(hs.sorted())
-	rep.Probe = summarize(pr.sorted())
+	sum := pr.summary()
+	rep.Probe = sum.OKLatency // 历史口径：只含成功样本（与 probe.add 仅在 err==nil 时调用一致）
+	rep.ProbeTotal, rep.ProbeOK, rep.ProbeTimeout, rep.ProbeError = sum.Total, sum.OK, sum.Timeout, sum.Errors
+	rep.ProbeSuccessPct, rep.ProbeErrKinds = sum.SuccessPct, sum.ErrKinds
+	rep.ProbeOKLatency, rep.ProbeAllLatency, rep.ProbeTimeoutMS = sum.OKLatency, sum.AllLatency, sum.TimeoutWait
 	rep.Downlink = summarize(dl.sorted())
 	rep.DialS = win.dialEnd.Sub(win.dialStart).Seconds()
 	rep.SteadyS = win.steady.Seconds()
-	rep.DialProbe = summarize(pr.window(win.dialStart, win.dialEnd))
+	rep.DialProbe = summarize(pr.okWindow(win.dialStart, win.dialEnd))
 	rep.DialDown = summarize(dl.window(win.dialStart, win.dialEnd))
 	steadyFrom := win.pumpEnd.Add(-win.steady)
-	rep.SteadyProbe = summarize(pr.window(steadyFrom, win.pumpEnd))
+	rep.SteadyProbe = summarize(pr.okWindow(steadyFrom, win.pumpEnd))
 	rep.SteadyDown = summarize(dl.window(steadyFrom, win.pumpEnd))
 	rep.PerBattleReal = perBattleActual(rep.PlayersMatched, battles)
 	rep.ClockSource, rep.ClockSSH = clk.Source, cfg.clockSSH
@@ -443,6 +501,17 @@ func printReport(r *report) {
 		r.Handshake.P50, r.Handshake.P95, r.Handshake.P99, r.Handshake.Count)
 	fmt.Printf("      SyncFrames 往返 p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
 		r.Probe.P50, r.Probe.P95, r.Probe.P99, r.Probe.Count)
+	// 探针三行：分类（成功/超时/其它错误 + 成功率）→ 仅成功样本分位 → 含超时分位。
+	// 只有「成功率 ≥95% 且成功样本 p99 仍高」才能判服务端真的慢；否则分位被超时主导。
+	fmt.Printf("      探针：成功 %d、超时 %d、其它错误 %d、成功率 %.2f%%（总数 %d；报错类型 %s）\n",
+		r.ProbeOK, r.ProbeTimeout, r.ProbeError, r.ProbeSuccessPct, r.ProbeTotal, errKindText(r.ProbeErrKinds))
+	fmt.Printf("      探针（仅成功样本，真实服务时延）p50=%.2f p95=%.2f p99=%.2f max=%.2f（n=%d）\n",
+		r.ProbeOKLatency.P50, r.ProbeOKLatency.P95, r.ProbeOKLatency.P99, r.ProbeOKLatency.Max, r.ProbeOKLatency.Count)
+	fmt.Printf("      探针（含超时，超时按其实际等待计）p50=%.2f p95=%.2f p99=%.2f max=%.2f（n=%d）；超时等待 p50=%.0f max=%.0f\n",
+		r.ProbeAllLatency.P50, r.ProbeAllLatency.P95, r.ProbeAllLatency.P99, r.ProbeAllLatency.Max,
+		r.ProbeAllLatency.Count, r.ProbeTimeoutMS.P50, r.ProbeTimeoutMS.Max)
+	fmt.Printf("      广播：实收 %d / 应到 %d，成功率 %.2f%%，缺口 %d 帧（分母=服务端 current_frame）\n",
+		r.BroadcastReceived, r.BroadcastExpect, r.BroadcastSuccessPct, r.BroadcastMissing)
 	fmt.Printf("      帧广播下行（未校正）p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
 		r.Downlink.P50, r.Downlink.P95, r.Downlink.P99, r.Downlink.Count)
 	fmt.Printf("      帧广播下行（校正 Δ=%+.2fms，漂移 %.2fms，不确定度 ±%.2fms）p50=%.2f p95=%.2f p99=%.2f；轮次可用=%v\n",
