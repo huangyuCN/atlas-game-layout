@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/huangyuCN/atlas/contrib/edge"
-	"github.com/huangyuCN/atlas/encoding"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame"
 	"github.com/huangyuCN/atlas/transport/frame/engine"
@@ -269,9 +268,13 @@ func (a edgeUDPAdapter) RemoteAddr(c *edgeUDPConn) string {
 
 // dialEdgeUDP 建立一条经接入层 UDP 面的帧连接（票据同时进 hello 段与逐帧会话槽）。
 func dialEdgeUDP(ctx context.Context, addr, slot string, ticket []byte, hello helloPolicy) (frameClient, error) {
+	codec, err := uplinkCodec()
+	if err != nil {
+		return nil, err
+	}
 	cli, err := engine.NewStreamClient[*edgeUDPConn](
 		edgeUDPAdapter{addr: addr, ticket: ticket, hello: hello},
-		engine.WithClientCodec[*edgeUDPConn](encoding.GetCodec("json")),
+		engine.WithClientCodec[*edgeUDPConn](codec),
 		engine.WithClientKind[*edgeUDPConn](transport.KindUDP),
 		engine.WithClientSessionProvider[*edgeUDPConn](func() string { return slot }),
 		engine.WithClientIdleTimeout[*edgeUDPConn](30*time.Second),

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
+	getlog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/registry"
 	"github.com/huangyuCN/atlas/selector"
 )
@@ -59,6 +60,7 @@ type Planner struct {
 	mu     sync.Mutex
 	nodes  []selector.Node // 候选快照（本机优先过滤后的结果）
 	loaded time.Time       // 快照建立时刻
+	warned int             // 上次快照的候选数（候选集塌成 1 时只告警一次，见 warnSole）
 
 	turn uint64 // 轮询游标（锁内自增：与快照读取同域，避免两次读取跨越一次快照切换）
 }
@@ -173,7 +175,25 @@ func (p *Planner) candidates(ctx context.Context) []selector.Node {
 	p.mu.Lock()
 	p.nodes, p.loaded = nodes, p.now()
 	p.mu.Unlock()
+	p.warnSole(nodes)
 	return nodes
+}
+
+// warnSole 在候选集**只剩一台**时打一条 WARN（只在候选数变化时打，避免每 TTL 刷一行）。
+//
+// 为什么值得一条告警：轮询在单候选上退化成「本批对局全落这一台」，而选点代码本身完全
+// 看不出错——500 局里 486 局同台这种偏斜，根因几乎总是候选集塌了（实例 id 缺省导致同名键
+// 被顶掉、注册冲突、帧面过滤把某台摘掉）。把候选集大小做成可观测信号，下次直接看 WARN。
+func (p *Planner) warnSole(nodes []selector.Node) {
+	p.mu.Lock()
+	changed := p.warned != len(nodes)
+	p.warned = len(nodes)
+	p.mu.Unlock()
+	if !changed || len(nodes) != 1 {
+		return
+	}
+	getlog.GetLogger().Warn("matcher: battle 候选集只有 1 台——轮询退化为本批对局全落这一台",
+		"service", p.service, "instance", nodes[0].Address())
 }
 
 // nodesOf 把注册实例映射为选点节点：地址取 grpc 面端点主机（host:port），

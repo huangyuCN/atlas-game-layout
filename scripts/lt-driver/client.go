@@ -231,11 +231,17 @@ func (p *loadPlayer) dialFrame(ctx context.Context, o dialOpts) error {
 
 // dialFrameByOpts 按「经接入层/直连 × WS/UDP」四象限建立帧连接。
 func dialFrameByOpts(ctx context.Context, o dialOpts, slot string, ticket []byte) (frameClient, error) {
+	// 四种帧连接形态统一走 ver=2 二进制上行（codec 决定请求帧头的 ver 位，
+	// 见框架 engine.StreamClient.requestVersion），避免有的形态还发 protojson。
+	codec, err := uplinkCodec()
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case o.via == "edge" && o.transport == "ws":
 		hdr := http.Header{}
 		hdr.Set(edge.TicketHeaderKey, slot)
-		cli, err := wst.NewClient(ctx, "ws://"+o.edgeWS+"/",
+		cli, err := wst.NewClient(ctx, "ws://"+o.edgeWS+"/", wst.WithCodec(codec),
 			wst.WithClientSessionProvider(func() string { return slot }), wst.ClientHeader(hdr))
 		if err != nil {
 			return nil, err
@@ -246,14 +252,15 @@ func dialFrameByOpts(ctx context.Context, o dialOpts, slot string, ticket []byte
 	case o.via == "edge" && o.transport == "kcp":
 		return dialEdgeKCP(ctx, o.edgeKCP, slot, ticket, o.hello)
 	case o.via == "direct" && o.transport == "ws":
-		cli, err := wst.NewClient(ctx, "ws://"+o.battleWS+"/",
+		cli, err := wst.NewClient(ctx, "ws://"+o.battleWS+"/", wst.WithCodec(codec),
 			wst.WithClientSessionProvider(func() string { return slot }))
 		if err != nil {
 			return nil, err
 		}
 		return wsFrameClient{cli: cli}, nil
 	case o.via == "direct" && o.transport == "udp":
-		cli, err := udpt.NewClient(o.battleUDP, udpt.WithClientSessionProvider(func() string { return slot }))
+		cli, err := udpt.NewClient(o.battleUDP, udpt.WithCodec(codec),
+			udpt.WithClientSessionProvider(func() string { return slot }))
 		if err != nil {
 			return nil, err
 		}

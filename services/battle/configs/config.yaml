@@ -29,6 +29,10 @@ actor:
   # 否则目录写入正常、接入层却查不到属主（表现为大量 backend_unavailable）。
   # redis 后端强制 quiesce_grace >= replication_lag：续租写不 WAIT，切主会丢最后一段续租写，
   # 保护窗不覆盖复制滞后就会双活（装配期校验，违反即启动失败）。详见 docs/config.md §11。
+  # 目录后端显式写死 etcd（缺省即 etcd；显式声明便于与 edge 侧对齐复核，也与 preflight 的
+  # 「directory=etcd 双 battle 注册」体检项一一对应）。切 redis 时两侧必须同时改。
+  directory:
+    backend: etcd
   # directory:
   #   backend: redis
   #   quiesce_grace: 5s

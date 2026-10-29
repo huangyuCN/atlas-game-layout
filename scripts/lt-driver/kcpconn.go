@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/huangyuCN/atlas/contrib/edge"
-	"github.com/huangyuCN/atlas/encoding"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame"
 	"github.com/huangyuCN/atlas/transport/frame/engine"
@@ -123,9 +122,13 @@ func (a edgeKCPAdapter) RemoteAddr(c *edgeKCPConn) string {
 
 // dialEdgeKCP 建立一条经接入层 KCP 面的帧连接（票据同时进 hello 段与逐帧会话槽）。
 func dialEdgeKCP(ctx context.Context, addr, slot string, ticket []byte, hello helloPolicy) (frameClient, error) {
+	codec, err := uplinkCodec()
+	if err != nil {
+		return nil, err
+	}
 	cli, err := engine.NewStreamClient[*edgeKCPConn](
 		edgeKCPAdapter{addr: addr, ticket: ticket, hello: hello},
-		engine.WithClientCodec[*edgeKCPConn](encoding.GetCodec("json")),
+		engine.WithClientCodec[*edgeKCPConn](codec),
 		engine.WithClientKind[*edgeKCPConn](transport.KindKCP),
 		engine.WithClientSessionProvider[*edgeKCPConn](func() string { return slot }),
 		engine.WithClientIdleTimeout[*edgeKCPConn](30*time.Second),

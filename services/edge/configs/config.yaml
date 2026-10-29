@@ -12,6 +12,11 @@ runtime:
   namespace: test
 # actor 段：接入层只读其中的 directory（目录后端选择）。**必须与 battle 配成同一个后端**，
 # 否则按 etcd 前缀去查 Redis 目录（或反之）永远查不到属主。缺段 = etcd（保持现网行为）。
+# 目录后端显式写死 etcd（与 battle/game 同值；接入层只读侧必须与托管方一致，
+# 否则表现为「写入正常、接入层查不到属主」→ 大量 backend_unavailable）。
+actor:
+  directory:
+    backend: etcd
 # actor:
 #   directory:
 #     backend: redis
