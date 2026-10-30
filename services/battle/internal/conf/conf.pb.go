@@ -102,8 +102,15 @@ type BattleConf struct {
 	// 写死 protojson；TS/C# 把 (payload, version) 原样交给上层，但补帧基准只认 ver=1）——
 	// 未升级的客户端会静默丢弃帧广播（补帧进度也不推进）。客户端就绪前保持缺省即可零影响。
 	FrameBroadcastProtobuf bool `protobuf:"varint,10,opt,name=frame_broadcast_protobuf,json=frameBroadcastProtobuf,proto3" json:"frame_broadcast_protobuf,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// edge_instances 是接入层**实例列表**（多实例部署用；每实例一组「传输面 → 地址」）：
+	// 出票时按 player_id 哈希从列表里选一个实例下发给该玩家，**同一玩家恒定同一实例**
+	// （数据报面的 flow 状态因此不跨实例漂移；换实例不改票、不改签名）。
+	//   - 列表只有一个元素时行为与单实例完全相同（等价于 edge_endpoints 简写）；
+	//   - 与 edge_endpoints **互斥**（两者都配即启动失败，避免地址来源二义）；
+	//   - 每个实例至少一面、面不重复、地址非空（与 edge_endpoints 同一套校验）。
+	EdgeInstances []*EdgeInstance `protobuf:"bytes,11,rep,name=edge_instances,json=edgeInstances,proto3" json:"edge_instances,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BattleConf) Reset() {
@@ -206,6 +213,68 @@ func (x *BattleConf) GetFrameBroadcastProtobuf() bool {
 	return false
 }
 
+func (x *BattleConf) GetEdgeInstances() []*EdgeInstance {
+	if x != nil {
+		return x.EdgeInstances
+	}
+	return nil
+}
+
+// EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。
+type EdgeInstance struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name 是实例标识（只进日志/排障，不下发给客户端，不参与选择；可空）。
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// endpoints 是该实例的各传输面地址（至少一面、面不重复、地址非空）。
+	Endpoints     []*v1.EdgeEndpoint `protobuf:"bytes,2,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EdgeInstance) Reset() {
+	*x = EdgeInstance{}
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EdgeInstance) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EdgeInstance) ProtoMessage() {}
+
+func (x *EdgeInstance) ProtoReflect() protoreflect.Message {
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EdgeInstance.ProtoReflect.Descriptor instead.
+func (*EdgeInstance) Descriptor() ([]byte, []int) {
+	return file_services_battle_internal_conf_conf_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *EdgeInstance) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *EdgeInstance) GetEndpoints() []*v1.EdgeEndpoint {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
+}
+
 type Bootstrap struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Runtime  *configs.Runtime       `protobuf:"bytes,1,opt,name=runtime,proto3" json:"runtime,omitempty"`
@@ -226,7 +295,7 @@ type Bootstrap struct {
 
 func (x *Bootstrap) Reset() {
 	*x = Bootstrap{}
-	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[1]
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -238,7 +307,7 @@ func (x *Bootstrap) String() string {
 func (*Bootstrap) ProtoMessage() {}
 
 func (x *Bootstrap) ProtoReflect() protoreflect.Message {
-	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[1]
+	mi := &file_services_battle_internal_conf_conf_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -251,7 +320,7 @@ func (x *Bootstrap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Bootstrap.ProtoReflect.Descriptor instead.
 func (*Bootstrap) Descriptor() ([]byte, []int) {
-	return file_services_battle_internal_conf_conf_proto_rawDescGZIP(), []int{1}
+	return file_services_battle_internal_conf_conf_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Bootstrap) GetRuntime() *configs.Runtime {
@@ -314,7 +383,7 @@ var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xa8\x04\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xea\x04\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -331,12 +400,16 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\vmax_players\x18\t \x01(\x05H\x04R\n" +
 	"maxPlayers\x88\x01\x01\x128\n" +
 	"\x18frame_broadcast_protobuf\x18\n" +
-	" \x01(\bR\x16frameBroadcastProtobufB\x17\n" +
+	" \x01(\bR\x16frameBroadcastProtobuf\x12@\n" +
+	"\x0eedge_instances\x18\v \x03(\v2\x19.battle.conf.EdgeInstanceR\redgeInstancesB\x17\n" +
 	"\x15_frame_advertise_hostB\r\n" +
 	"\v_max_framesB\x13\n" +
 	"\x11_tick_interval_msB\x11\n" +
 	"\x0f_seat_window_msB\x0e\n" +
-	"\f_max_players\"\x91\x03\n" +
+	"\f_max_players\"Y\n" +
+	"\fEdgeInstance\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x125\n" +
+	"\tendpoints\x18\x02 \x03(\v2\x17.battle.v1.EdgeEndpointR\tendpoints\"\x91\x03\n" +
 	"\tBootstrap\x120\n" +
 	"\aruntime\x18\x01 \x01(\v2\x16.atlas.configs.RuntimeR\aruntime\x123\n" +
 	"\bregistry\x18\x02 \x01(\v2\x17.atlas.configs.RegistryR\bregistry\x12-\n" +
@@ -359,34 +432,37 @@ func file_services_battle_internal_conf_conf_proto_rawDescGZIP() []byte {
 	return file_services_battle_internal_conf_conf_proto_rawDescData
 }
 
-var file_services_battle_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_services_battle_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_services_battle_internal_conf_conf_proto_goTypes = []any{
 	(*BattleConf)(nil),            // 0: battle.conf.BattleConf
-	(*Bootstrap)(nil),             // 1: battle.conf.Bootstrap
-	(*v1.EdgeEndpoint)(nil),       // 2: battle.v1.EdgeEndpoint
-	(*configs.Runtime)(nil),       // 3: atlas.configs.Runtime
-	(*configs.Registry)(nil),      // 4: atlas.configs.Registry
-	(*configs.Server)(nil),        // 5: atlas.configs.Server
-	(*configs.Data)(nil),          // 6: atlas.configs.Data
-	(*configs.Log)(nil),           // 7: atlas.configs.Log
-	(*configs.Observability)(nil), // 8: atlas.configs.Observability
-	(*configs.Actor)(nil),         // 9: atlas.configs.Actor
+	(*EdgeInstance)(nil),          // 1: battle.conf.EdgeInstance
+	(*Bootstrap)(nil),             // 2: battle.conf.Bootstrap
+	(*v1.EdgeEndpoint)(nil),       // 3: battle.v1.EdgeEndpoint
+	(*configs.Runtime)(nil),       // 4: atlas.configs.Runtime
+	(*configs.Registry)(nil),      // 5: atlas.configs.Registry
+	(*configs.Server)(nil),        // 6: atlas.configs.Server
+	(*configs.Data)(nil),          // 7: atlas.configs.Data
+	(*configs.Log)(nil),           // 8: atlas.configs.Log
+	(*configs.Observability)(nil), // 9: atlas.configs.Observability
+	(*configs.Actor)(nil),         // 10: atlas.configs.Actor
 }
 var file_services_battle_internal_conf_conf_proto_depIdxs = []int32{
-	2, // 0: battle.conf.BattleConf.edge_endpoints:type_name -> battle.v1.EdgeEndpoint
-	3, // 1: battle.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
-	4, // 2: battle.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
-	5, // 3: battle.conf.Bootstrap.server:type_name -> atlas.configs.Server
-	6, // 4: battle.conf.Bootstrap.data:type_name -> atlas.configs.Data
-	7, // 5: battle.conf.Bootstrap.log:type_name -> atlas.configs.Log
-	8, // 6: battle.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
-	0, // 7: battle.conf.Bootstrap.battle:type_name -> battle.conf.BattleConf
-	9, // 8: battle.conf.Bootstrap.actor:type_name -> atlas.configs.Actor
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	3,  // 0: battle.conf.BattleConf.edge_endpoints:type_name -> battle.v1.EdgeEndpoint
+	1,  // 1: battle.conf.BattleConf.edge_instances:type_name -> battle.conf.EdgeInstance
+	3,  // 2: battle.conf.EdgeInstance.endpoints:type_name -> battle.v1.EdgeEndpoint
+	4,  // 3: battle.conf.Bootstrap.runtime:type_name -> atlas.configs.Runtime
+	5,  // 4: battle.conf.Bootstrap.registry:type_name -> atlas.configs.Registry
+	6,  // 5: battle.conf.Bootstrap.server:type_name -> atlas.configs.Server
+	7,  // 6: battle.conf.Bootstrap.data:type_name -> atlas.configs.Data
+	8,  // 7: battle.conf.Bootstrap.log:type_name -> atlas.configs.Log
+	9,  // 8: battle.conf.Bootstrap.observability:type_name -> atlas.configs.Observability
+	0,  // 9: battle.conf.Bootstrap.battle:type_name -> battle.conf.BattleConf
+	10, // 10: battle.conf.Bootstrap.actor:type_name -> atlas.configs.Actor
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_services_battle_internal_conf_conf_proto_init() }
@@ -401,7 +477,7 @@ func file_services_battle_internal_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_services_battle_internal_conf_conf_proto_rawDesc), len(file_services_battle_internal_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

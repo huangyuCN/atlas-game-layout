@@ -53,6 +53,7 @@ export interface EdgeEndpoint {
 export interface BattleTicketEntry {
   playerId?: string; // battle.v1.BattleTicketEntry.player_id
   ticket?: string // base64; // battle.v1.BattleTicketEntry.ticket
+  endpoints?: EdgeEndpoint[]; // battle.v1.BattleTicketEntry.endpoints
 }
 
 export interface IssueEntryTicketReply {

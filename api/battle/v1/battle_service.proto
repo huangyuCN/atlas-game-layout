@@ -89,7 +89,8 @@ enum EdgeTransport {
 }
 
 // EdgeEndpoint 是接入层某个传输面的对外地址（host:port）。
-// 地址的唯一来源是 battle 配置（edge_endpoints），matcher 只搬运、不重组。
+// 地址的唯一来源是 battle 配置（edge_instances / 单实例简写 edge_endpoints），
+// matcher 只搬运、不重组。
 message EdgeEndpoint {
   EdgeTransport transport = 1;
   string address = 2;
@@ -100,11 +101,18 @@ message EdgeEndpoint {
 message BattleTicketEntry {
   string player_id = 1;
   bytes ticket = 2;
+  // endpoints 是**该玩家被选中的接入层实例**的各传输面地址（多实例按 player_id 哈希选取：
+  // 同一玩家恒定同一实例，数据报面的会话状态因此不跨实例漂移）。票据本身不含地址——
+  // 票的密文与签名不随实例数变化（换实例不改票）。
+  // 空 = 旧服务端未下发（客户端回落到回执/事件的 endpoints 列表）。
+  repeated EdgeEndpoint endpoints = 3;
 }
 
-// IssueEntryTicketReply 出票回执：接入层各传输面地址（唯一来源是 battle 配置
-// edge_endpoints；至少一面、面不重复、地址非空）、按参战名单逐人签发的票据、
+// IssueEntryTicketReply 出票回执：接入层各传输面地址、按参战名单逐人签发的票据、
 // 以及全部票据统一的过期时刻。
+//
+// endpoints 是**实例列表的首个实例**（单实例部署即全部实例）的面列表：仅作旧客户端的
+// 兜底来源。多实例下每个玩家应读自己那张票条目里的 endpoints（见 BattleTicketEntry）。
 message IssueEntryTicketReply {
   repeated EdgeEndpoint endpoints = 1;
   repeated BattleTicketEntry tickets = 2;

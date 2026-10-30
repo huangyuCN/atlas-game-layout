@@ -80,6 +80,14 @@ message Edge {
   // 超出的连接会被**静默拒绝**（客户端表现为 WS 重置/建流慢）——2026-10-26 诊断里 4096 场景
   // 的 666 条重置正是 `3430 ≈ 1024(桶深) + 200(rate) × 12s`。
   int32 new_conn_burst = 12;
+  // socket_recv_buffer 是数据报面**监听 socket** 的接收缓冲（字节，SO_RCVBUF）；
+  // 0 = 框架缺省 1048576（1 MiB）。
+  // 内核缺省 net.core.rmem_default 只有 208 KiB 量级，10–20k pps 下读循环一被调度延迟
+  // 就静默丢包（UdpRcvbufErrors 累加 ⇒ 客户端重传/补帧直至判掉线）。
+  // 申请是否生效由 net.core.rmem_max 决定（内核会截断），故部署侧必须把它抬到 ≥ 本值；
+  // 申请失败只告警、不阻断启动（见 docs/config.md §7.9）。不建议超过 2 MiB：更大的缓冲
+  // 会把丢包换成排队积压。
+  int32 socket_recv_buffer = 13;
 }
 
 // Bootstrap 是 edge 服务的启动配置。

@@ -8,6 +8,7 @@
 package actor
 
 import (
+	"hash/crc32"
 	"sort"
 	"time"
 
@@ -46,6 +47,7 @@ func (b *BattleActor) IssueEntryTicket(_ core.ActorContext, _ *battlev1.IssueEnt
 func (b *BattleActor) signTickets(players []string) (*battlev1.IssueEntryTicketReply, error) {
 	now := time.Now()
 	expiresAt := now.Add(b.cfg.TicketTTL)
+	instances := b.cfg.edgeInstances()
 	tickets := make([]*battlev1.BattleTicketEntry, 0, len(players))
 	for _, playerID := range players {
 		raw, err := ticket.Encode(ticket.Ticket{
@@ -59,14 +61,41 @@ func (b *BattleActor) signTickets(players []string) (*battlev1.IssueEntryTicketR
 		if err != nil {
 			return nil, errorv1.ErrInternal("战斗 %s 为玩家 %s 出票失败: %v", b.battleID, playerID, err)
 		}
-		tickets = append(tickets, &battlev1.BattleTicketEntry{PlayerId: playerID, Ticket: raw})
+		// 逐人下发**被选中实例**的面列表：同一玩家恒定同一实例（哈希确定、跨进程一致），
+		// 数据报面的 flow 状态因此不跨实例漂移；票据本身不含地址（换实例不改票、不改签名）。
+		tickets = append(tickets, &battlev1.BattleTicketEntry{
+			PlayerId:  playerID,
+			Ticket:    raw,
+			Endpoints: edgeInstanceOf(instances, playerID),
+		})
 	}
 	return &battlev1.IssueEntryTicketReply{
-		// 接入层地址的唯一来源是本 actor 的配置（只读，故回执与配置共用同一份面列表）。
-		Endpoints:       b.cfg.EdgeEndpoints,
+		// 回执级 endpoints 取**首个实例**（单实例部署 = 全部）：仅作旧客户端的兜底。
+		Endpoints:       instances[0],
 		Tickets:         tickets,
 		ExpiresAtUnixMs: expiresAt.UnixMilli(),
 	}, nil
+}
+
+// edgeInstances 返回接入层实例列表：未配多实例时把 EdgeEndpoints 视作唯一实例
+// （单实例行为与改造前一致，不强制改配置）。
+func (c Config) edgeInstances() [][]*battlev1.EdgeEndpoint {
+	if len(c.EdgeInstances) > 0 {
+		return c.EdgeInstances
+	}
+	return [][]*battlev1.EdgeEndpoint{c.EdgeEndpoints}
+}
+
+// edgeInstanceOf 按 player_id 从实例列表里选一个实例，返回其面列表。
+//
+// 选择必须**确定性且跨进程一致**：同一玩家换节点、换对局、掉线重连都要落到同一实例，
+// 否则数据报面的会话状态（flow-id / 探活 / 接管）会跨实例漂移，表现为「重连后下行收不到」。
+// 因此用 CRC32（IEEE）而非 Go 的 map 哈希（后者每进程随机种子）。
+func edgeInstanceOf(instances [][]*battlev1.EdgeEndpoint, playerID string) []*battlev1.EdgeEndpoint {
+	if len(instances) == 0 {
+		return nil
+	}
+	return instances[int(crc32.ChecksumIEEE([]byte(playerID))%uint32(len(instances)))]
 }
 
 // roster 返回参战名单的稳定快照（按 player_id 升序，回执顺序可复现、便于比对）。

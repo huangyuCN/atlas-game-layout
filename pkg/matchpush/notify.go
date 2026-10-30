@@ -26,17 +26,28 @@ func NotifyFor(ev *matcherv1.MatchStartedEvent, playerID string) (*gamev1.MatchS
 	if ev == nil || playerID == "" || !inRoster(ev.GetPlayerIds(), playerID) {
 		return nil, false
 	}
-	raw, ok := ticketOf(ev.GetBattleTickets(), playerID)
+	entry, ok := ticketOf(ev.GetBattleTickets(), playerID)
 	if !ok {
 		return nil, false
 	}
 	return &gamev1.MatchStartedNotify{
-		MatchId:      ev.GetMatchId(),
-		BattleId:     ev.GetBattleId(),
-		PlayerIds:    append([]string(nil), ev.GetPlayerIds()...), // 拷贝：通知与事件不共享底层数组
-		Endpoints:    append([]*battlev1.EdgeEndpoint(nil), ev.GetBattleEndpoints()...),
-		BattleTicket: raw,
+		MatchId:   ev.GetMatchId(),
+		BattleId:  ev.GetBattleId(),
+		PlayerIds: append([]string(nil), ev.GetPlayerIds()...), // 拷贝：通知与事件不共享底层数组
+		// 面列表取**该玩家自己的票条目**里的实例地址（多实例下逐人不同：按 player_id 哈希选定，
+		// 同一玩家恒定同一接入层实例 ⇒ 数据报面粘性）；旧服务端未下发时回落到事件级列表。
+		Endpoints:    append([]*battlev1.EdgeEndpoint(nil), endpointsOf(entry, ev)...),
+		BattleTicket: entry.GetTicket(),
 	}, true
+}
+
+// endpointsOf 返回该玩家应拨的接入层面列表：优先票条目里的实例地址（多实例逐人不同），
+// 缺失时回落到事件级列表（旧服务端/单实例）。
+func endpointsOf(entry *battlev1.BattleTicketEntry, ev *matcherv1.MatchStartedEvent) []*battlev1.EdgeEndpoint {
+	if eps := entry.GetEndpoints(); len(eps) > 0 {
+		return eps
+	}
+	return ev.GetBattleEndpoints()
 }
 
 // inRoster 报告玩家是否在参战名单里（名单是事件权威来源，不在名单不予下发）。
@@ -49,11 +60,12 @@ func inRoster(playerIDs []string, playerID string) bool {
 	return false
 }
 
-// ticketOf 取出该玩家的票据密文：无票或空票都视为无票（空票不可用于连接）。
-func ticketOf(entries []*battlev1.BattleTicketEntry, playerID string) ([]byte, bool) {
+// ticketOf 取出该玩家的票条目（连同逐人接入层地址）：无票或空票都视为无票
+// （空票不可用于连接）。
+func ticketOf(entries []*battlev1.BattleTicketEntry, playerID string) (*battlev1.BattleTicketEntry, bool) {
 	for _, entry := range entries {
 		if entry.GetPlayerId() == playerID && len(entry.GetTicket()) > 0 {
-			return entry.GetTicket(), true
+			return entry, true
 		}
 	}
 	return nil, false

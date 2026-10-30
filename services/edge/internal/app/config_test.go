@@ -39,7 +39,8 @@ func validEdgeConfig() *conf.Bootstrap {
 			},
 			FrameService: "battle-frame",
 			MaxStreams:   32, IdleTimeout: "45s", NewConnRate: 7, NewConnBurst: 4, MaxPerIp: 3,
-			DialTimeout: "2s", ProbeAfter: "10s", ProbeTimeout: "3s",
+			SocketRecvBuffer: 1 << 20,
+			DialTimeout:      "2s", ProbeAfter: "10s", ProbeTimeout: "3s",
 		},
 	}
 }
@@ -71,6 +72,9 @@ func TestProxyConfigMapsEdgeSection(t *testing.T) {
 	}
 	if cfg.NewConnBurst != 4 {
 		t.Fatalf("new_conn_burst 应映射为 4（桶深与速率解耦），实际 %d", cfg.NewConnBurst)
+	}
+	if cfg.SocketRecvBuffer != 1<<20 {
+		t.Fatalf("socket_recv_buffer 应映射为 1 MiB，实际 %d", cfg.SocketRecvBuffer)
 	}
 	if cfg.IdleTimeout != 45*time.Second || cfg.DialTimeout != 2*time.Second {
 		t.Fatalf("时长映射不对: idle=%v dial=%v", cfg.IdleTimeout, cfg.DialTimeout)

@@ -36,14 +36,18 @@ import (
 
 // Config 是战斗装配参数（Props 工厂用）。
 type Config struct {
-	TickInterval  int64                    // 帧间隔（纳秒）
-	TrackLen      int32                    // 赛道长度（胜负判定）
-	MaxFrames     uint64                   // 帧数上限
-	SnapshotEvery uint64                   // 快照周期（帧）
-	MaxPlayers    int                      // 每局会话容量（0 = 不限）
-	TicketTTL     time.Duration            // 入场票据有效期（默认 DefaultTicketTTL）
-	EdgeEndpoints []*battlev1.EdgeEndpoint // 接入层「传输面 → 地址」列表（回填进 IssueEntryTicketReply）
-	TicketKey     []byte                   // 入场票据 AEAD 密钥（32 字节；装配期由配置 base64 解码校验）
+	TickInterval  int64         // 帧间隔（纳秒）
+	TrackLen      int32         // 赛道长度（胜负判定）
+	MaxFrames     uint64        // 帧数上限
+	SnapshotEvery uint64        // 快照周期（帧）
+	MaxPlayers    int           // 每局会话容量（0 = 不限）
+	TicketTTL     time.Duration // 入场票据有效期（默认 DefaultTicketTTL）
+	// EdgeEndpoints 是接入层「传输面 → 地址」列表（单实例简写；回填进 IssueEntryTicketReply）。
+	EdgeEndpoints []*battlev1.EdgeEndpoint
+	// EdgeInstances 是接入层实例列表（每实例一组面地址）：出票时按 player_id 哈希选其一，
+	// 同一玩家恒定同一实例（数据报面会话状态不跨实例漂移）。空 = 把 EdgeEndpoints 当唯一实例。
+	EdgeInstances [][]*battlev1.EdgeEndpoint
+	TicketKey     []byte // 入场票据 AEAD 密钥（32 字节；装配期由配置 base64 解码校验）
 	// OfflineTimeout 是掉线判定窗口（规格 §9.2；≤0 = 关闭掉线判定，仅供测试/特例）。
 	// 数据报面帧面的空闲读超时按它推导（1/3）并在装配期校验，见 server.FramePolicy。
 	OfflineTimeout time.Duration

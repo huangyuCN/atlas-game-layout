@@ -89,6 +89,21 @@ message BattleConf {
   // 写死 protojson；TS/C# 把 (payload, version) 原样交给上层，但补帧基准只认 ver=1）——
   // 未升级的客户端会静默丢弃帧广播（补帧进度也不推进）。客户端就绪前保持缺省即可零影响。
   bool frame_broadcast_protobuf = 10;
+  // edge_instances 是接入层**实例列表**（多实例部署用；每实例一组「传输面 → 地址」）：
+  // 出票时按 player_id 哈希从列表里选一个实例下发给该玩家，**同一玩家恒定同一实例**
+  // （数据报面的 flow 状态因此不跨实例漂移；换实例不改票、不改签名）。
+  //   - 列表只有一个元素时行为与单实例完全相同（等价于 edge_endpoints 简写）；
+  //   - 与 edge_endpoints **互斥**（两者都配即启动失败，避免地址来源二义）；
+  //   - 每个实例至少一面、面不重复、地址非空（与 edge_endpoints 同一套校验）。
+  repeated EdgeInstance edge_instances = 11;
+}
+
+// EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。
+message EdgeInstance {
+  // name 是实例标识（只进日志/排障，不下发给客户端，不参与选择；可空）。
+  string name = 1;
+  // endpoints 是该实例的各传输面地址（至少一面、面不重复、地址非空）。
+  repeated battle.v1.EdgeEndpoint endpoints = 2;
 }
 
 message Bootstrap {

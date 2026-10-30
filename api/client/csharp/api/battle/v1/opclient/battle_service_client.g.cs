@@ -138,6 +138,9 @@ public sealed class BattleTicketEntry
     [JsonPropertyName("ticket")]
     public byte[]? Ticket { get; set; }
 
+    [JsonPropertyName("endpoints")]
+    public List<EdgeEndpoint>? Endpoints { get; set; }
+
 }
 
 /// <summary>IssueEntryTicketReply DTO（protojson JSON 语义）。</summary>

@@ -567,7 +567,8 @@ func (x *IssueEntryTicketReq) GetBattleId() string {
 }
 
 // EdgeEndpoint 是接入层某个传输面的对外地址（host:port）。
-// 地址的唯一来源是 battle 配置（edge_endpoints），matcher 只搬运、不重组。
+// 地址的唯一来源是 battle 配置（edge_instances / 单实例简写 edge_endpoints），
+// matcher 只搬运、不重组。
 type EdgeEndpoint struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Transport     EdgeTransport          `protobuf:"varint,1,opt,name=transport,proto3,enum=battle.v1.EdgeTransport" json:"transport,omitempty"`
@@ -623,9 +624,14 @@ func (x *EdgeEndpoint) GetAddress() string {
 // BattleTicketEntry 是单个参战玩家的入场票据（player_id 与票内身份一致）。
 // 票据为 AEAD 密文（contrib/edge/ticket），接入层与 battle 共持同一把 32 字节密钥。
 type BattleTicketEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PlayerId      string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
-	Ticket        []byte                 `protobuf:"bytes,2,opt,name=ticket,proto3" json:"ticket,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	PlayerId string                 `protobuf:"bytes,1,opt,name=player_id,json=playerId,proto3" json:"player_id,omitempty"`
+	Ticket   []byte                 `protobuf:"bytes,2,opt,name=ticket,proto3" json:"ticket,omitempty"`
+	// endpoints 是**该玩家被选中的接入层实例**的各传输面地址（多实例按 player_id 哈希选取：
+	// 同一玩家恒定同一实例，数据报面的会话状态因此不跨实例漂移）。票据本身不含地址——
+	// 票的密文与签名不随实例数变化（换实例不改票）。
+	// 空 = 旧服务端未下发（客户端回落到回执/事件的 endpoints 列表）。
+	Endpoints     []*EdgeEndpoint `protobuf:"bytes,3,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -674,9 +680,18 @@ func (x *BattleTicketEntry) GetTicket() []byte {
 	return nil
 }
 
-// IssueEntryTicketReply 出票回执：接入层各传输面地址（唯一来源是 battle 配置
-// edge_endpoints；至少一面、面不重复、地址非空）、按参战名单逐人签发的票据、
+func (x *BattleTicketEntry) GetEndpoints() []*EdgeEndpoint {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
+}
+
+// IssueEntryTicketReply 出票回执：接入层各传输面地址、按参战名单逐人签发的票据、
 // 以及全部票据统一的过期时刻。
+//
+// endpoints 是**实例列表的首个实例**（单实例部署即全部实例）的面列表：仅作旧客户端的
+// 兜底来源。多实例下每个玩家应读自己那张票条目里的 endpoints（见 BattleTicketEntry）。
 type IssueEntryTicketReply struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Endpoints       []*EdgeEndpoint        `protobuf:"bytes,1,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
@@ -936,10 +951,11 @@ const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"`\n" +
 	"\fEdgeEndpoint\x126\n" +
 	"\ttransport\x18\x01 \x01(\x0e2\x18.battle.v1.EdgeTransportR\ttransport\x12\x18\n" +
-	"\aaddress\x18\x02 \x01(\tR\aaddress\"H\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\"\x7f\n" +
 	"\x11BattleTicketEntry\x12\x1b\n" +
 	"\tplayer_id\x18\x01 \x01(\tR\bplayerId\x12\x16\n" +
-	"\x06ticket\x18\x02 \x01(\fR\x06ticket\"\xb3\x01\n" +
+	"\x06ticket\x18\x02 \x01(\fR\x06ticket\x125\n" +
+	"\tendpoints\x18\x03 \x03(\v2\x17.battle.v1.EdgeEndpointR\tendpoints\"\xb3\x01\n" +
 	"\x15IssueEntryTicketReply\x125\n" +
 	"\tendpoints\x18\x01 \x03(\v2\x17.battle.v1.EdgeEndpointR\tendpoints\x126\n" +
 	"\atickets\x18\x02 \x03(\v2\x1c.battle.v1.BattleTicketEntryR\atickets\x12+\n" +
@@ -1025,31 +1041,32 @@ var file_api_battle_v1_battle_service_proto_depIdxs = []int32{
 	17, // 3: battle.v1.SyncFramesReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
 	19, // 4: battle.v1.SyncFramesReply.missed:type_name -> atlas.game.lockstep.FrameInputs
 	0,  // 5: battle.v1.EdgeEndpoint.transport:type_name -> battle.v1.EdgeTransport
-	10, // 6: battle.v1.IssueEntryTicketReply.endpoints:type_name -> battle.v1.EdgeEndpoint
-	11, // 7: battle.v1.IssueEntryTicketReply.tickets:type_name -> battle.v1.BattleTicketEntry
-	20, // 8: battle.v1.FrameBroadcast.frame:type_name -> atlas.game.lockstep.LockstepFrame
-	1,  // 9: battle.v1.PlayerOutNotify.reason:type_name -> battle.v1.PlayerOutReason
-	2,  // 10: battle.v1.BattleService.JoinBattle:input_type -> battle.v1.JoinBattleReq
-	4,  // 11: battle.v1.BattleService.SendFrameInput:input_type -> battle.v1.FrameInputReq
-	6,  // 12: battle.v1.BattleService.SyncFrames:input_type -> battle.v1.SyncFramesReq
-	8,  // 13: battle.v1.BattleService.Ping:input_type -> battle.v1.PingReq
-	21, // 14: battle.v1.BattleService.Create:input_type -> battle.v1.CreateBattleRequest
-	22, // 15: battle.v1.BattleService.Admit:input_type -> battle.v1.AdmitBattleReq
-	23, // 16: battle.v1.BattleService.GetState:input_type -> battle.v1.GetStateReq
-	9,  // 17: battle.v1.BattleService.IssueEntryTicket:input_type -> battle.v1.IssueEntryTicketReq
-	3,  // 18: battle.v1.BattleService.JoinBattle:output_type -> battle.v1.JoinBattleReply
-	24, // 19: battle.v1.BattleService.SendFrameInput:output_type -> google.protobuf.Empty
-	7,  // 20: battle.v1.BattleService.SyncFrames:output_type -> battle.v1.SyncFramesReply
-	24, // 21: battle.v1.BattleService.Ping:output_type -> google.protobuf.Empty
-	25, // 22: battle.v1.BattleService.Create:output_type -> battle.v1.CreateBattleReply
-	12, // 23: battle.v1.BattleService.Admit:output_type -> battle.v1.IssueEntryTicketReply
-	26, // 24: battle.v1.BattleService.GetState:output_type -> battle.v1.GetStateReply
-	12, // 25: battle.v1.BattleService.IssueEntryTicket:output_type -> battle.v1.IssueEntryTicketReply
-	18, // [18:26] is the sub-list for method output_type
-	10, // [10:18] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 6: battle.v1.BattleTicketEntry.endpoints:type_name -> battle.v1.EdgeEndpoint
+	10, // 7: battle.v1.IssueEntryTicketReply.endpoints:type_name -> battle.v1.EdgeEndpoint
+	11, // 8: battle.v1.IssueEntryTicketReply.tickets:type_name -> battle.v1.BattleTicketEntry
+	20, // 9: battle.v1.FrameBroadcast.frame:type_name -> atlas.game.lockstep.LockstepFrame
+	1,  // 10: battle.v1.PlayerOutNotify.reason:type_name -> battle.v1.PlayerOutReason
+	2,  // 11: battle.v1.BattleService.JoinBattle:input_type -> battle.v1.JoinBattleReq
+	4,  // 12: battle.v1.BattleService.SendFrameInput:input_type -> battle.v1.FrameInputReq
+	6,  // 13: battle.v1.BattleService.SyncFrames:input_type -> battle.v1.SyncFramesReq
+	8,  // 14: battle.v1.BattleService.Ping:input_type -> battle.v1.PingReq
+	21, // 15: battle.v1.BattleService.Create:input_type -> battle.v1.CreateBattleRequest
+	22, // 16: battle.v1.BattleService.Admit:input_type -> battle.v1.AdmitBattleReq
+	23, // 17: battle.v1.BattleService.GetState:input_type -> battle.v1.GetStateReq
+	9,  // 18: battle.v1.BattleService.IssueEntryTicket:input_type -> battle.v1.IssueEntryTicketReq
+	3,  // 19: battle.v1.BattleService.JoinBattle:output_type -> battle.v1.JoinBattleReply
+	24, // 20: battle.v1.BattleService.SendFrameInput:output_type -> google.protobuf.Empty
+	7,  // 21: battle.v1.BattleService.SyncFrames:output_type -> battle.v1.SyncFramesReply
+	24, // 22: battle.v1.BattleService.Ping:output_type -> google.protobuf.Empty
+	25, // 23: battle.v1.BattleService.Create:output_type -> battle.v1.CreateBattleReply
+	12, // 24: battle.v1.BattleService.Admit:output_type -> battle.v1.IssueEntryTicketReply
+	26, // 25: battle.v1.BattleService.GetState:output_type -> battle.v1.GetStateReply
+	12, // 26: battle.v1.BattleService.IssueEntryTicket:output_type -> battle.v1.IssueEntryTicketReply
+	19, // [19:27] is the sub-list for method output_type
+	11, // [11:19] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_api_battle_v1_battle_service_proto_init() }

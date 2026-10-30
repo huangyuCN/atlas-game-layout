@@ -93,6 +93,9 @@ type Options struct {
 	// EdgeEndpoints 是接入层「传输面 → 地址」列表（随成局推送下发）。
 	// **必填**：至少一面、面不重复、地址非空，违反即装配失败（见 app.newActorConfig）。
 	EdgeEndpoints []*battlev1.EdgeEndpoint
+	// EdgeInstances 是接入层**实例列表**（多实例部署用）：出票时按玩家哈希选其一；
+	// nil = 把 EdgeEndpoints 视作唯一实例（单实例行为与改造前一致）。
+	EdgeInstances []*conf.EdgeInstance
 	// FrameAddrs 覆盖三个直连帧面的监听地址：nil = 三面各起随机端口（与 gRPC 面同口径）；
 	// 非 nil 时按字段启用（空串 = 该面不启用）——-mode direct 脚本据此只开所选传输面。
 	FrameAddrs *FrameAddrs
@@ -228,6 +231,7 @@ func newBootstrap(o Options) (*conf.Bootstrap, error) {
 			TicketKey:     o.TicketKey,
 			TicketTtl:     o.TicketTTL,
 			EdgeEndpoints: o.EdgeEndpoints,
+			EdgeInstances: o.EdgeInstances,
 		},
 	}, nil
 }

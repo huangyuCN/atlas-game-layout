@@ -54,6 +54,9 @@ func proxyConfig(cfg *conf.Bootstrap, res edge.Resolver, collector metrics.Colle
 		// 可能小于一次开服的并发建连数，超出的连接会被静默拒绝（2026-10-26 诊断 §3.2）。
 		NewConnBurst: int(ec.GetNewConnBurst()),
 		MaxPerIP:     int(ec.GetMaxPerIp()),
+		// socket_recv_buffer 是数据报面监听 socket 的接收缓冲字节数（0 = 框架缺省 1 MiB）：
+		// 内核缺省只有 208 KiB 量级，高 pps 下读循环一被调度延迟就静默丢包（docs/config.md §7.9）。
+		SocketRecvBuffer: int(ec.GetSocketRecvBuffer()),
 	}
 	if err := applyTimings(&out, ec); err != nil {
 		return edge.Config{}, err

@@ -105,12 +105,14 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
 | `battle.frame_broadcast_protobuf` | 无 | `false`（protojson / 帧头 ver=1，行为零变化） | `true` ⇒ 帧广播载荷切 protobuf 二进制 + 帧头 ver=2：同一广播实测 **1631 B → 465 B（≈3.5×）**，**帧数不变**（每连接每 tick 仍一次写）。**前置条件**：三端 SDK 都能解 ver=2 帧广播——当前 Go 直连 SDK 的解码与补帧基准写死 protojson，TS/C# 只把 `(payload, version)` 透传且补帧基准只认 ver=1，未升级的客户端会**静默丢弃**广播（语义见 §7.10） |
 | `battle.edge_endpoints` | 列表非空 + `transport` 非 `UNSPECIFIED` + 地址非空 + 面不重复 | **启动失败**（客户端拿到的接入层地址只有这一个来源） | 面枚举 `EDGE_TRANSPORT_{WS,KCP,UDP}`；**按面下发**、不要求三面齐全（只开 ws 也能启动） |
+| `battle.edge_instances` / `edge_endpoints` | 每个实例至少一面、面不重复、地址非空；**两者互斥** | **启动失败**（地址来源必须唯一） | 多实例：`edge_instances` 是「实例 → 面列表」列表，出票时按 `player_id` 哈希选其一（同一玩家恒定同一实例 ⇒ 数据报面粘性）；**单元素与 `edge_endpoints` 简写等价**（见 §7.11） |
 | `battle.frame_advertise_host` | 无（整项缺失 = 回落） | 整项缺失 ⇒ 回落 `edge_endpoints` 的主机（**仅适合同机部署**） | 只填主机（不含端口、IPv6 不带方括号）；空白串/带端口/带方括号即启动失败；跨机部署**必须**显式配置（语义见 §7） |
 | `edge.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `battle.ticket_key` 同值 |
 | `edge.frame_service` | 无 | — | 空 ⇒ `battle-frame`（battle 注册的帧面实例服务名） |
 | `edge.actor_namespace` | 无 | — | 空 ⇒ 取 `runtime.namespace`（**不是**注册键前缀路径）；必须与 battle 同值，否则查不到属主 |
 | `edge.listeners` | 至少一面，且 `name`/`network`/`addr`/`carrier` 齐备 | **启动失败**（`edge.listeners 不能为空`） | `name` 必须与 battle 帧面实例元数据里的端口键（`ws`/`kcp`/`udp`）一致；KCP/UDP 面只能配 `CARRIER_DATAGRAM`（框架不允许数据报面配 `stream_hello`），WS 面配 `CARRIER_WS_UPGRADE` |
-| `edge.max_streams` / `edge.idle_timeout` / `edge.max_per_ip` | 无 | — | 空/非正 ⇒ 框架缺省（并发流 `1024` / 空闲回收 `60s` / 不限每 IP 连接数） |
+| `edge.max_streams` / `edge.idle_timeout` / `edge.max_per_ip` | 无 | — | 空/非正 ⇒ 框架缺省（并发流 `1024` / 空闲回收 `60s` / 不限每 IP 连接数）；**`max_per_ip` 在 NAT/压测下必须调高**（见 §7.8） |
+| `edge.socket_recv_buffer` | 无 | — | 空/`0` ⇒ 框架缺省 **1 MiB**（`transport.DefaultSocketReadBuffer`）；申请失败只告警（见 §7.9） |
 | `edge.new_conn_rate` / `edge.new_conn_burst` | 无 | — | 空/非正 ⇒ 不限制速率 / 桶深取 `max(new_conn_rate, 1024)`；**两者语义不同**（每秒补充 vs 瞬时桶深，见 §7.8） |
 | `edge.dial_timeout` / `edge.probe_after` / `edge.probe_timeout` | 无 | — | 空 ⇒ 框架缺省（拨号与握手读取 `5s`；探活触发取 `idle_timeout`、等待回应取触发时长的一半、下限 `50ms`） |
 
@@ -174,6 +176,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | 项 | 给谁用 | 填什么 | 缺失时 |
 |---|---|---|---|
 | `battle.edge_endpoints` | **客户端**（随成局通知下发） | 接入层各面的对外地址（host:port） | **启动失败**（客户端无面可连） |
+| `battle.edge_instances` / `edge_endpoints` | 每个实例至少一面、面不重复、地址非空；**两者互斥** | **启动失败**（地址来源必须唯一） | 多实例：`edge_instances` 是「实例 → 面列表」列表，出票时按 `player_id` 哈希选其一（同一玩家恒定同一实例 ⇒ 数据报面粘性）；**单元素与 `edge_endpoints` 简写等价**（见 §7.11） |
 | `battle.frame_advertise_host` | **接入层**（battle 注册 `battle-frame` 帧面实例时报的主机） | 只填本节点对外可达的**主机**（不含端口） | 回落 `edge_endpoints` 的主机——**仅适合同机部署**；跨机部署不配会让接入层拿自己的地址去拨后端（现象是连不上后端且极难定位） |
 
 端口既不写死也不进票据：接入层从 `battle-frame` 实例元数据里读各面**已绑定**的真实端口
@@ -331,22 +334,37 @@ go build -o /tmp/loadtest ./scripts/loadtest
 剩余的 666 条即被限流拒绝——**数字对得上，就不再需要怀疑 TCP/WS 层损坏**。
 
 取值建议：`burst ≥ 一次开服/大规模重连的并发建连数`（本模板 `max_streams: 4096` ⇒ 取 `5000` 留余量），
-`rate ≥ 峰值人/秒`。两者同值是合理起点：速率上限不变，只是允许一次性突发到桶深。
+`rate ≥ 峰值人/秒`。两者同值是合理起点：速率上限不变，只是允许一次性突发到桶深。模板缺省
+`new_conn_rate: 5000` / `new_conn_burst: 5000`（旧缺省 200 + 桶深 1024 曾在 4096 人一轮里
+把 666 条连接静默拒掉）。
 
-### 7.9 数据报面收缓冲：生产必须把 `net.core.rmem_max` 抬到 ≥ 8 MiB
+**同一族还有 `edge.max_per_ip`（每来源 IP 的并发流上限）**：模板取 `16`，对**真实玩家**（各自
+公网 IP）足够；但它按**出口 IP** 计数，所以两类场景必须显式调高，否则表现为「随机一部分人连不上」：
 
-接入层在 `ListenPacket` 之后对每个数据报面调用 `SetReadBuffer(8 MiB)`，但**能不能拿到由内核决定**：
-内核会把请求值截断到 `net.core.rmem_max`。默认值通常只有 208 KiB 量级（实测 `212992`），
-单读循环在 10–20k pps 下缓冲只够约 0.2 秒，一旦被调度延迟就**静默丢包**——表现为客户端重传/补帧、
-最终判掉线，而服务端日志里什么都看不到，只有内核计数器在涨：
+- **NAT / 运营商级 NAT（CGNAT）/ 网吧 / 办公室**：大量玩家共享同一个出口 IP，第 17 条流起被拒；
+- **压测**（单机模拟大量客户端）与**负载均衡做 SNAT**（真实 IP 未透传时全部玩家同一个源 IP）——
+  后者更危险：等于把 `max_per_ip` 当成全局并发上限用。LB 后必须启用 PROXY protocol 或
+  `externalTrafficPolicy: Local` 拿到真实客户端 IP，再按实测 p99.9 定值。
+
+### 7.9 数据报面收缓冲：`edge.socket_recv_buffer` 与 `net.core.rmem_max`
+
+接入层在 `ListenPacket` 之后对每个数据报面申请 `edge.socket_recv_buffer` 字节的接收缓冲
+（`SO_RCVBUF`，**缺省 1 MiB**，`0` = 取框架缺省），走与 battle 帧面同一份框架实现
+（`transport.SetSocketReadBuffer`）。**能不能拿到由内核决定**：内核会把请求值截断到
+`net.core.rmem_max`。该缺省通常只有 208 KiB 量级（实测 `212992`），单读循环在 10–20k pps 下
+缓冲只够约 0.2 秒，一旦被调度延迟就**静默丢包**——表现为客户端重传/补帧、最终判掉线，
+而服务端日志里什么都看不到，只有内核计数器在涨：
 
 ```bash
-sysctl net.core.rmem_max                  # 现状（生产要求 ≥ 8388608）
+sysctl net.core.rmem_max                  # 现状（生产要求 ≥ socket_recv_buffer，缺省 1048576）
 ss -u -a -n | grep 7102                   # Recv-Q 持续非 0 也说明读不动
 cat /proc/net/snmp | grep -A1 '^Udp:'     # UdpRcvbufErrors 即内核丢包计数（只增不减）
 ```
 
-- **生产必须**：`net.core.rmem_max ≥ 8388608`（8 MiB），否则本项等于没设；
+- **生产必须**：`net.core.rmem_max ≥ edge.socket_recv_buffer`（缺省 1 MiB），否则本项等于没设；
+- **不要一味放大**：把内核默认值直接拉到 8 MiB 的对照轮里，丢包降到 0.16% 但探针 p99 反而
+  恶化到 170ms——大缓冲把「丢包」换成了**排队积压**。1 MiB 是吸收抖动与不积压之间的折中，
+  不建议超过 2 MiB；
 - 申请失败（无权限、容器只读 sysctl）**只告警不阻断启动**，日志里会有
   「接入面收缓冲申请失败（内核按 net.core.rmem_max 限流…）」，此时必须按上面的办法抬上限；
 - 长期修法是「每面多个 socket + `SO_REUSEPORT` + 多读协程」，把单读循环的天花板解开（尚未实现）。
@@ -369,6 +387,25 @@ cat /proc/net/snmp | grep -A1 '^Udp:'     # UdpRcvbufErrors 即内核丢包计�
 - **开启前提**：三端 SDK 都能解 ver=2 帧广播。现状：Go 直连 SDK 的 `OnFrame`/补帧基准写死
   protojson；TS/C# 把 `(payload, version)` 原样交给上层但补帧基准只认 ver=1 ⇒ 未升级的客户端
   会静默丢弃帧广播。客户端就绪后再打开。
+
+### 7.11 多实例接入层：出票按玩家哈希选实例
+
+接入层本身无状态、可水平扩多实例，但**数据报面的会话状态在实例内存里**（flow-id、探活、接管语义），
+所以一个玩家在整局里必须始终落到同一个实例：`battle.edge_instances` 配多个实例时，battle 出票时按
+`player_id` 哈希（CRC32-IEEE，**跨进程确定**，不用 Go map 哈希）选一个，把**该实例的面列表**写进
+该玩家的票条目（`BattleTicketEntry.endpoints`）；matcher 只搬运、网关按人下发，因此 `MatchStartedNotify`
+逐人不同。要点：
+
+| 事项 | 语义 |
+|---|---|
+| 选择键 | `player_id`（不是 battle_id、不是匹配批次）：同一玩家换对局/重连/换节点都落同一实例 |
+| 票内容 | **不变**：票据仍是 AEAD(玩家 + 对局 + 发行/过期时刻)，不含地址；换实例不改票、不改签名 |
+| 单实例 | `edge_instances` 只配一个（或继续用 `edge_endpoints` 简写）= 行为与改造前完全一致 |
+| 回执级 `endpoints` | `IssueEntryTicketReply.endpoints` 取**首个实例**的面列表，仅作旧客户端兜底；多实例下每个玩家应读自己票条目里的 `endpoints` |
+| 迁移/缩容 | 实例数变化会改变哈希映射（`hash % N`），在局玩家**不会**被迁移——务必按「排空旧实例再缩」操作（见 §7 的 drain 口径） |
+
+> 为什么不做一致性哈希/虚拟节点：当前是「出票时选一次、整局不变」的静态绑定，6–8 个实例下
+> `hash % N` 的分布已足够均匀；引入环哈希只会让缩容时的重映射更难解释，且仍需排空。
 
 ## 8. 客户端版本门槛（gateway 登录入口专属）
 

@@ -51,7 +51,7 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	if err != nil {
 		return out, err
 	}
-	endpoints, err := edgeEndpointsOf(b.GetEdgeEndpoints())
+	instances, err := edgeInstancesOf(b)
 	if err != nil {
 		return out, err
 	}
@@ -70,7 +70,9 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out.TicketKey = key
 	out.TicketTTL = ttl
 	out.OfflineTimeout = offline
-	out.EdgeEndpoints = endpoints
+	// 单实例兼容字段取首个实例：旧代码/旧客户端读它即得「第一实例的面列表」。
+	out.EdgeEndpoints = instances[0]
+	out.EdgeInstances = instances
 	out.TickInterval = tick
 	out.MaxFrames = frames
 	out.SeatWindow = window
@@ -155,6 +157,41 @@ func edgeEndpointsOf(list []*battlev1.EdgeEndpoint) ([]*battlev1.EdgeEndpoint, e
 		}
 		seen[transport] = struct{}{}
 		out = append(out, &battlev1.EdgeEndpoint{Transport: transport, Address: ep.GetAddress()})
+	}
+	return out, nil
+}
+
+// edgeInstancesOf 解析接入层实例列表并逐实例校验：
+//   - edge_instances 与 edge_endpoints **互斥**（都配即失败，避免「地址来源二义」）；
+//   - 未配 edge_instances 时把 edge_endpoints 视作**唯一实例**（单实例行为与改造前完全一致）；
+//   - 每个实例按 edge_endpoints 同一套规则校验（至少一面、面不重复、地址非空）。
+func edgeInstancesOf(b *conf.BattleConf) ([][]*battlev1.EdgeEndpoint, error) {
+	list := b.GetEdgeInstances()
+	if len(list) == 0 {
+		eps, err := edgeEndpointsOf(b.GetEdgeEndpoints())
+		if err != nil {
+			return nil, err
+		}
+		return [][]*battlev1.EdgeEndpoint{eps}, nil
+	}
+	if len(b.GetEdgeEndpoints()) > 0 {
+		return nil, fmt.Errorf("app: battle.edge_instances 与 battle.edge_endpoints 互斥" +
+			"（多实例请只配 edge_instances；单实例可继续用 edge_endpoints 简写）")
+	}
+	out := make([][]*battlev1.EdgeEndpoint, 0, len(list))
+	names := make(map[string]struct{}, len(list))
+	for i, inst := range list {
+		if name := inst.GetName(); name != "" {
+			if _, dup := names[name]; dup {
+				return nil, fmt.Errorf("app: battle.edge_instances 实例名重复: %s（name 只进日志/排障，必须唯一）", name)
+			}
+			names[name] = struct{}{}
+		}
+		eps, err := edgeEndpointsOf(inst.GetEndpoints())
+		if err != nil {
+			return nil, fmt.Errorf("app: battle.edge_instances[%d]（%s）: %w", i, inst.GetName(), err)
+		}
+		out = append(out, eps)
 	}
 	return out, nil
 }

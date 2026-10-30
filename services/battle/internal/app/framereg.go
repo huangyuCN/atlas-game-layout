@@ -119,7 +119,7 @@ func NewFrameRegistrar(reg registry.Registrar, faces server.FrameFaces, cfg *con
 //     的 IPv6 字面量一律报错——不静默截断、不静默回落（「配了没生效」比启动失败更贵）。
 func frameAdvertiseHostOf(b *conf.BattleConf) (string, error) {
 	if b.FrameAdvertiseHost == nil {
-		return edgeHost(b.GetEdgeEndpoints())
+		return edgeHost(edgeAdvertiseEndpoints(b))
 	}
 	raw := strings.TrimSpace(*b.FrameAdvertiseHost)
 	if raw == "" {
@@ -132,6 +132,15 @@ func frameAdvertiseHostOf(b *conf.BattleConf) (string, error) {
 		return "", fmt.Errorf("app: battle.frame_advertise_host 的 IPv6 字面量不要带方括号（实际 %q）", raw)
 	}
 	return raw, nil
+}
+
+// edgeAdvertiseEndpoints 是帧面主机回落的地址来源：多实例取**首个实例**的面列表
+// （同机部署下各实例同主机；跨机部署必须显式配 frame_advertise_host）。
+func edgeAdvertiseEndpoints(b *conf.BattleConf) []*battlev1.EdgeEndpoint {
+	if list := b.GetEdgeInstances(); len(list) > 0 {
+		return list[0].GetEndpoints()
+	}
+	return b.GetEdgeEndpoints()
 }
 
 // edgeHost 是帧面主机的**回落**来源：取接入层地址列表里的主机。仅在

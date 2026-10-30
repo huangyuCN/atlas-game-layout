@@ -210,6 +210,23 @@ battle:
   #      （接入层与 battle 跑在同一主机）。
   #   3) 跨机部署**必须显式配置**：否则注册出去的端点会指向接入层主机，接入层会拿自己的地址
   #      去拨后端（表现为连不上后端，且极难定位）。
+  # edge_instances 是接入层**实例列表**（多实例部署用）：出票时按 player_id 哈希从列表里选一个，
+  # **同一玩家恒定同一实例**（数据报面 flow 状态不跨实例漂移；票本身不含地址，换实例不改票）。
+  #   - 与 edge_endpoints **互斥**：两者都配即启动失败（地址来源必须唯一）；
+  #   - 只配一个实例 = 行为与上面的 edge_endpoints 简写完全相同（迁移零风险）；
+  #   - 每实例至少一面、面不重复、地址非空（校验规则与 edge_endpoints 同一套）。
+  # 示例（两实例、各三面）：
+  # edge_instances:
+  #   - name: edge-1
+  #     endpoints:
+  #       - { transport: EDGE_TRANSPORT_WS,  address: "10.10.9.36:7100" }
+  #       - { transport: EDGE_TRANSPORT_KCP, address: "10.10.9.36:7101" }
+  #       - { transport: EDGE_TRANSPORT_UDP, address: "10.10.9.36:7102" }
+  #   - name: edge-2
+  #     endpoints:
+  #       - { transport: EDGE_TRANSPORT_WS,  address: "10.10.9.37:7100" }
+  #       - { transport: EDGE_TRANSPORT_KCP, address: "10.10.9.37:7101" }
+  #       - { transport: EDGE_TRANSPORT_UDP, address: "10.10.9.37:7102" }
   frame_advertise_host: "10.10.9.36"
 
 # 可观测性：OTLP 链路导出端点（必须带 scheme：grpc/grpcs/http/https；空或不配 = noop 不导出）

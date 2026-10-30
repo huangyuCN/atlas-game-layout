@@ -39,6 +39,8 @@ type Options struct {
 	// Resolver 是可选注入点：非空时用它覆盖「actor 目录 + 帧面实例发现」的默认装配
 	//（测试与嵌入式部署用；nil = 走 etcd 目录 + 注册中心发现）。
 	Resolver edge.Resolver
+	// SocketRecvBuffer 是数据报面监听 socket 的接收缓冲字节数（0 = 框架缺省 1 MiB）。
+	SocketRecvBuffer int
 	// MaxStreams/NewConnRate/MaxPerIP 是资源保护参数（0 = 框架缺省/不限制）。
 	MaxStreams  int
 	NewConnRate int
@@ -149,11 +151,12 @@ func newBootstrap(o Options) (*conf.Bootstrap, error) {
 		listeners = defaultListeners()
 	}
 	ec := &conf.Edge{
-		TicketKey:    base64.StdEncoding.EncodeToString(o.TicketKey),
-		MaxStreams:   int32(o.MaxStreams),
-		NewConnRate:  int32(o.NewConnRate),
-		NewConnBurst: int32(o.NewConnBurst),
-		MaxPerIp:     int32(o.MaxPerIP),
+		TicketKey:        base64.StdEncoding.EncodeToString(o.TicketKey),
+		MaxStreams:       int32(o.MaxStreams),
+		NewConnRate:      int32(o.NewConnRate),
+		NewConnBurst:     int32(o.NewConnBurst),
+		MaxPerIp:         int32(o.MaxPerIP),
+		SocketRecvBuffer: int32(o.SocketRecvBuffer),
 	}
 	if o.IdleTimeout > 0 {
 		ec.IdleTimeout = o.IdleTimeout.String()
