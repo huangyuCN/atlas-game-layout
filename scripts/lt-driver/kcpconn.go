@@ -13,6 +13,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/huangyuCN/atlas/contrib/edge"
@@ -36,8 +39,25 @@ const (
 )
 
 // edgeKCPConn 是一条经接入层 KCP 面的连接（flow-id 已就绪，KCP 会话跑在其上）。
+//
+// done 是连接的「停止信号」：Close 先关它，所有阻塞点据此退出。
+// 没有它就是现场那条 bug——读协程只看得到会话层的错误，而会话关闭在读侧是
+// 可以无限重放的（每次 Read 立刻返回同一个错误），读循环于是永不退出。
 type edgeKCPConn struct {
 	sess *kcpgo.UDPSession
+	udp  *net.UDPConn  // 底层 UDP socket：kcp-go 对调用方传入的 PacketConn 不做 Close，必须由我们关
+	done chan struct{} // 停止信号：Close 时先关，读循环凭它无条件退出
+	once sync.Once     // 停止信号只广播一次
+}
+
+// stopped 报告连接是否已进入关闭流程。
+func (c *edgeKCPConn) stopped() bool {
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // edgeKCPAdapter 实现 engine.ClientAdapter[*edgeKCPConn]：拨号 = 接入层 hello + 建 KCP 会话。
@@ -62,29 +82,90 @@ func (a edgeKCPAdapter) Dial(ctx context.Context) (*edgeKCPConn, error) {
 		return nil, fmt.Errorf("建立 KCP 会话失败（接入层=%s）: %w", a.addr, err)
 	}
 	applyBattleKCPDefaults(sess)
-	return &edgeKCPConn{sess: sess}, nil
+	logKCPParams()
+	return &edgeKCPConn{sess: sess, udp: udpConn, done: make(chan struct{})}, nil
 }
 
 // applyBattleKCPDefaults 把 battle 侧缺省 KCP 参数应用到会话（缺省值见文件头常量）。
+// 压测可经环境变量覆盖（LT_KCP_NODELAY/INTERVAL/RESEND/NC/SNDWND/RCVWND）用于参数扫描：
+// KCP 是端到端会话，两端参数必须同档，故驱动必须能跟随 battle 配置切换。
 func applyBattleKCPDefaults(sess *kcpgo.UDPSession) {
-	sess.SetNoDelay(kcpNoDelay, kcpInterval, kcpResend, kcpNC)
-	sess.SetWindowSize(kcpSndWnd, kcpRcvWnd)
+	sess.SetNoDelay(envInt("LT_KCP_NODELAY", kcpNoDelay), envInt("LT_KCP_INTERVAL", kcpInterval), envInt("LT_KCP_RESEND", kcpResend), envInt("LT_KCP_NC", kcpNC))
+	sess.SetWindowSize(envInt("LT_KCP_SNDWND", kcpSndWnd), envInt("LT_KCP_RCVWND", kcpRcvWnd))
 	sess.SetMtu(kcpMTU)
 	sess.SetACKNoDelay(true)
 	sess.SetWriteDelay(false)
 }
 
+// envInt 读整数环境变量，缺失或非法时返回缺省值。
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// kcpParamsOnce 保证生效参数只打印一次。
+var kcpParamsOnce sync.Once
+
+// logKCPParams 打印本轮生效的 KCP 参数，便于报告标注。
+func logKCPParams() {
+	kcpParamsOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "kcp-params nodelay=%d interval=%d resend=%d nc=%d sndwnd=%d rcvwnd=%d mtu=%d\n",
+			envInt("LT_KCP_NODELAY", kcpNoDelay), envInt("LT_KCP_INTERVAL", kcpInterval), envInt("LT_KCP_RESEND", kcpResend),
+			envInt("LT_KCP_NC", kcpNC), envInt("LT_KCP_SNDWND", kcpSndWnd), envInt("LT_KCP_RCVWND", kcpRcvWnd), kcpMTU)
+	})
+}
+
+// errKCPStopped 表示连接已进入关闭流程（驱动侧停止信号已广播）。
+// 它与会话错误同属「读循环必须退出」的终态，绝不能被归成坏帧。
+var errKCPStopped = errors.New("lt-driver: kcp 连接已关闭")
+
 // ReadFrame 从 KCP 会话读一个完整帧（帧引擎读取循环调用；字节流语义，帧边界由帧头长度切分）。
+//
+// 错误分类是**收尾能不能走完**的关键：引擎 readLoop 对 engine.ErrBadFrame 是软跳过
+// （continue，不退出循环），对其余错误才 FailAll + Invalidate + 退出。而 KCP 会话在
+// 「已关闭 / 读超时」时会**立刻**重放同一个错误——若归成坏帧，读循环就以满核空转、
+// 永不退出（现场 900% CPU、上万协程停在 ReadFrame 的直接原因）。故这些错误必须上抛。
 func (a edgeKCPAdapter) ReadFrame(c *edgeKCPConn, maxBodySize int) (frame.Header, []byte, error) {
 	hdr, body, err := frame.ReadInto(c.sess, maxBodySize)
 	if err != nil {
-		// 会话关闭/对端 EOF 原样上抛（读循环据此退出）；其余按坏帧处理。
-		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return frame.Header{}, nil, err
-		}
-		return frame.Header{}, nil, fmt.Errorf("%w: %w", engine.ErrBadFrame, err)
+		return frame.Header{}, nil, classifyKCPReadErr(c, err)
+	}
+	// 关闭竞态：帧已到但连接正在收尾，同样按终态退出（body 归池）。
+	if c.stopped() {
+		frame.PutBuf(body)
+		return frame.Header{}, nil, errKCPStopped
 	}
 	return hdr, body, nil
+}
+
+// classifyKCPReadErr 把一次读错误分成「终态」与「坏帧」两类。
+//
+// 终态：连接已进入关闭流程，或会话已不可再用（EOF / 对端关闭 / 读超时）——原样上抛，
+// 读循环据此退出并让上层重连。
+// 坏帧：连接还活着、只是这一条字节流解不出合法帧头——包成 engine.ErrBadFrame 软跳过。
+func classifyKCPReadErr(c *edgeKCPConn, err error) error {
+	if c.stopped() || kcpReadIsTerminal(err) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", engine.ErrBadFrame, err)
+}
+
+// kcpReadIsTerminal 判定读错误是否属于「会话不可再用」的终态。
+//
+// 三个来源：对端 EOF（io.EOF / io.ErrUnexpectedEOF）、本地关闭（net.ErrClosed /
+// io.ErrClosedPipe，kcp-go 在 die 关闭后就是这样返回的）、读超时（引擎的 idle 检测，
+// kcp-go 的 timeoutError 实现了 net.Error）。
+func kcpReadIsTerminal(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // WriteFrame 编码整帧后以**单个 KCP 消息**写入（不额外加 flow-id：前缀由 flowPacketConn 在
@@ -109,8 +190,30 @@ func (a edgeKCPAdapter) SetWriteDeadline(c *edgeKCPConn, t time.Time) error {
 	return c.sess.SetWriteDeadline(t)
 }
 
-// Close 关闭 KCP 会话（底层 UDP socket 由进程退出回收）。
-func (a edgeKCPAdapter) Close(c *edgeKCPConn) error { return c.sess.Close() }
+// Close 收尾 KCP 连接，顺序**不可颠倒**：先停读协程，再关会话，最后关底层 socket。
+//
+//  1. 关 done —— 读循环据此把任何后续错误判为终态，而不再当坏帧继续空转；
+//  2. 把读截止时间拨到过去 —— 打断仍阻塞在 sess.Read 里的读协程（KCP 的 Read 不听
+//     ctx，只能靠截止时间唤醒）；
+//  3. 关会话 —— kcp-go 退掉 die，它自己的会话协程随之退出；
+//  4. 关底层 UDP socket —— kcp-go 对调用方传入的 PacketConn 不做 Close（ownConn=false），
+//     不关就会留下一个永远阻塞在 Read 上的 socket 读协程（每连接泄漏一个）。
+//
+// 幂等：重复调用不再重复广播停止信号。
+func (a edgeKCPAdapter) Close(c *edgeKCPConn) error {
+	if c == nil || c.sess == nil {
+		return nil
+	}
+	c.once.Do(func() {
+		close(c.done) // 1. 广播停止信号（之前的阻塞点都在等它）
+		_ = c.sess.SetReadDeadline(time.Now())
+	})
+	_ = c.sess.Close() // 3. 关会话
+	if c.udp != nil {
+		_ = c.udp.Close() // 4. 关底层 socket
+	}
+	return nil
+}
 
 // RemoteAddr 返回对端地址文本（取不到时回退接入层地址）。
 func (a edgeKCPAdapter) RemoteAddr(c *edgeKCPConn) string {

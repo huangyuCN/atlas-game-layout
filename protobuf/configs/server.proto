@@ -162,6 +162,10 @@ message Server {
     string write_timeout = 12;
     // max_conns 是最大并发连接数；0 = 不限。
     int32 max_conns = 13;
+    // socket_recv_buffer 是监听 socket 的接收缓冲（字节，SO_RCVBUF）；0 = 框架默认 1 MiB。
+    // 显式设置是为了避开内核默认 208 KiB —— 帧面在 10k+ pps 下会静默丢包（表现为 RTO 重传、
+    // 探针 p99 恶化）。不建议超过 2 MiB：更大的缓冲会把丢包换成排队积压。
+    int32 socket_recv_buffer = 14;
   }
   // UDP 是 UDP 战斗通道启动参数（不可靠、低延迟）。
   message UDP {
@@ -177,6 +181,9 @@ message Server {
     string idle_timeout = 5;
     // max_peers 是最大对端数；0 = 不限。
     int32 max_peers = 6;
+    // socket_recv_buffer 是监听 socket 的接收缓冲（字节，SO_RCVBUF）；0 = 框架默认 1 MiB。
+    // 语义与 KCP 的同名字段一致（背压与丢包折中，不建议超过 2 MiB）。
+    int32 socket_recv_buffer = 7;
   }
   GRPC grpc = 1;
   HTTP http = 2;

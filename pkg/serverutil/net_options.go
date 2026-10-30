@@ -217,6 +217,9 @@ func KCPOptions(c *configspb.Server_KCP) ([]kcpt.ServerOption, error) {
 		{"server.kcp.max_body_size", c.GetMaxBodySize(), func(n int) kcpt.ServerOption {
 			return kcpt.WithMaxBodySize(n)
 		}},
+		{"server.kcp.socket_recv_buffer", int64(c.GetSocketRecvBuffer()), func(n int) kcpt.ServerOption {
+			return kcpt.WithSocketReadBuffer(n)
+		}},
 	}, opts)
 	if err != nil {
 		return nil, err
@@ -250,6 +253,9 @@ func UDPOptions(c *configspb.Server_UDP) ([]udpt.ServerOption, error) {
 			return udpt.WithMaxBodySize(n)
 		}},
 		{"server.udp.max_peers", int64(c.GetMaxPeers()), udpt.WithMaxPeers},
+		{"server.udp.socket_recv_buffer", int64(c.GetSocketRecvBuffer()), func(n int) udpt.ServerOption {
+			return udpt.WithSocketReadBuffer(n)
+		}},
 	}, opts)
 	if err != nil {
 		return nil, err

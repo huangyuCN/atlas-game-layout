@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -52,7 +53,7 @@ type report struct {
 	Rates []ratePoint `json:"rate_samples"`
 
 	Handshake latency `json:"handshake_rtt_ms"`
-	Probe     latency `json:"frame_rtt_ms"` // 仅成功样本（口径与历史各轮一致）
+	Probe     latency `json:"frame_rtt_ms"`          // 仅成功样本（口径与历史各轮一致）
 	Downlink  latency `json:"broadcast_downlink_ms"` // 未校正：含两端时钟差
 
 	// 探针结果分类（把「超时」与「慢但成功」分开，见 probe.go）：
@@ -63,8 +64,8 @@ type report struct {
 	ProbeError      int            `json:"probe_error"`
 	ProbeSuccessPct float64        `json:"probe_success_pct"`
 	ProbeErrKinds   map[string]int `json:"probe_err_kinds,omitempty"`
-	ProbeOKLatency  latency        `json:"probe_ok_rtt_ms"`     // 仅成功样本 = 真实服务时延
-	ProbeAllLatency latency        `json:"probe_all_rtt_ms"`    // 含超时（超时按实际等待计）
+	ProbeOKLatency  latency        `json:"probe_ok_rtt_ms"`       // 仅成功样本 = 真实服务时延
+	ProbeAllLatency latency        `json:"probe_all_rtt_ms"`      // 含超时（超时按实际等待计）
 	ProbeTimeoutMS  latency        `json:"probe_timeout_wait_ms"` // 超时样本的等待时长
 
 	// 广播成功率（收没收到）：分母是服务端权威帧号，不是实收条数。
@@ -274,6 +275,8 @@ func runLoad(ctx context.Context, cfg loadRun) (*report, error) {
 	pumpCtx, pumpCancel := context.WithTimeout(ctx, cfg.pump.duration)
 	pumpAll(pumpCtx, active, cfg.pump)
 	pumpCancel()
+	// 收尾前 goroutine 数：读循环若卡在「永远返回同一错误」上，这里会随连接数爆量（现场 21,170）。
+	fmt.Printf("[goroutine] 负载结束（关连接前）%d\n", runtime.NumGoroutine())
 	elapsed := time.Since(start)
 	clkEnd := measureClock(cfg.clockSSH)
 	fmt.Printf("[时钟] 轮尾 Δ(压测端-服务端)=%.2fms（源 %s，最小 RTT %.1fms）\n",
@@ -486,6 +489,9 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 
 // printReport 打印人读表格与末尾一行 JSON 汇总。
 func printReport(r *report) {
+	// 关闭后 goroutine 数：全部连接已 Close（runLoad 的 defer 先于本函数执行），
+	// 读循环都应已退出；此数不回落即说明仍有协程被卡住。
+	fmt.Printf("[goroutine] 关闭后 %d\n", runtime.NumGoroutine())
 	fmt.Printf("\n=== 压测结果（via=%s transport=%s 远程网关=%s）===\n", r.Via, r.Transport, r.Gateway)
 	fmt.Printf("连接：请求 %d 玩家 → 成局 %d 局（约 %.1f 人/局），建连成功 %d，失败 %d；负载时长 %.1fs\n",
 		r.PlayersWant, r.Battles, r.PerBattleReal, r.Connected, r.ConnectFailed, r.DurationS)

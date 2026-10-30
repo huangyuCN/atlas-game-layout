@@ -810,9 +810,13 @@ type Server_KCP struct {
 	// write_timeout 是单次写超时；空 = 不限。
 	WriteTimeout string `protobuf:"bytes,12,opt,name=write_timeout,json=writeTimeout,proto3" json:"write_timeout,omitempty"`
 	// max_conns 是最大并发连接数；0 = 不限。
-	MaxConns      int32 `protobuf:"varint,13,opt,name=max_conns,json=maxConns,proto3" json:"max_conns,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	MaxConns int32 `protobuf:"varint,13,opt,name=max_conns,json=maxConns,proto3" json:"max_conns,omitempty"`
+	// socket_recv_buffer 是监听 socket 的接收缓冲（字节，SO_RCVBUF）；0 = 框架默认 1 MiB。
+	// 显式设置是为了避开内核默认 208 KiB —— 帧面在 10k+ pps 下会静默丢包（表现为 RTO 重传、
+	// 探针 p99 恶化）。不建议超过 2 MiB：更大的缓冲会把丢包换成排队积压。
+	SocketRecvBuffer int32 `protobuf:"varint,14,opt,name=socket_recv_buffer,json=socketRecvBuffer,proto3" json:"socket_recv_buffer,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Server_KCP) Reset() {
@@ -936,6 +940,13 @@ func (x *Server_KCP) GetMaxConns() int32 {
 	return 0
 }
 
+func (x *Server_KCP) GetSocketRecvBuffer() int32 {
+	if x != nil {
+		return x.SocketRecvBuffer
+	}
+	return 0
+}
+
 // UDP 是 UDP 战斗通道启动参数（不可靠、低延迟）。
 type Server_UDP struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -950,9 +961,12 @@ type Server_UDP struct {
 	// idle_timeout 是对端空闲超时；空 = 不限。
 	IdleTimeout string `protobuf:"bytes,5,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
 	// max_peers 是最大对端数；0 = 不限。
-	MaxPeers      int32 `protobuf:"varint,6,opt,name=max_peers,json=maxPeers,proto3" json:"max_peers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	MaxPeers int32 `protobuf:"varint,6,opt,name=max_peers,json=maxPeers,proto3" json:"max_peers,omitempty"`
+	// socket_recv_buffer 是监听 socket 的接收缓冲（字节，SO_RCVBUF）；0 = 框架默认 1 MiB。
+	// 语义与 KCP 的同名字段一致（背压与丢包折中，不建议超过 2 MiB）。
+	SocketRecvBuffer int32 `protobuf:"varint,7,opt,name=socket_recv_buffer,json=socketRecvBuffer,proto3" json:"socket_recv_buffer,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Server_UDP) Reset() {
@@ -1027,11 +1041,18 @@ func (x *Server_UDP) GetMaxPeers() int32 {
 	return 0
 }
 
+func (x *Server_UDP) GetSocketRecvBuffer() int32 {
+	if x != nil {
+		return x.SocketRecvBuffer
+	}
+	return 0
+}
+
 var File_protobuf_configs_server_proto protoreflect.FileDescriptor
 
 const file_protobuf_configs_server_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotobuf/configs/server.proto\x12\ratlas.configs\"\x87\x15\n" +
+	"\x1dprotobuf/configs/server.proto\x12\ratlas.configs\"\xe3\x15\n" +
 	"\x06Server\x12.\n" +
 	"\x04grpc\x18\x01 \x01(\v2\x1a.atlas.configs.Server.GRPCR\x04grpc\x12.\n" +
 	"\x04http\x18\x02 \x01(\v2\x1a.atlas.configs.Server.HTTPR\x04http\x12+\n" +
@@ -1107,7 +1128,7 @@ const file_protobuf_configs_server_proto_rawDesc = "" +
 	"\rmax_body_size\x18\n" +
 	" \x01(\x03R\vmaxBodySize\x12\"\n" +
 	"\fsubprotocols\x18\v \x03(\tR\fsubprotocols\x12+\n" +
-	"\x03tls\x18\f \x01(\v2\x19.atlas.configs.Server.TLSR\x03tls\x1a\xab\x03\n" +
+	"\x03tls\x18\f \x01(\v2\x19.atlas.configs.Server.TLSR\x03tls\x1a\xd9\x03\n" +
 	"\x03KCP\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x1f\n" +
 	"\vblock_crypt\x18\x02 \x01(\tR\n" +
@@ -1126,7 +1147,8 @@ const file_protobuf_configs_server_proto_rawDesc = "" +
 	" \x01(\x03R\vmaxBodySize\x12!\n" +
 	"\fidle_timeout\x18\v \x01(\tR\vidleTimeout\x12#\n" +
 	"\rwrite_timeout\x18\f \x01(\tR\fwriteTimeout\x12\x1b\n" +
-	"\tmax_conns\x18\r \x01(\x05R\bmaxConns\x1a\xbb\x01\n" +
+	"\tmax_conns\x18\r \x01(\x05R\bmaxConns\x12,\n" +
+	"\x12socket_recv_buffer\x18\x0e \x01(\x05R\x10socketRecvBuffer\x1a\xe9\x01\n" +
 	"\x03UDP\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x1b\n" +
 	"\tpool_size\x18\x02 \x01(\x05R\bpoolSize\x12\x1f\n" +
@@ -1134,7 +1156,8 @@ const file_protobuf_configs_server_proto_rawDesc = "" +
 	"readBuffer\x12\"\n" +
 	"\rmax_body_size\x18\x04 \x01(\x03R\vmaxBodySize\x12!\n" +
 	"\fidle_timeout\x18\x05 \x01(\tR\vidleTimeout\x12\x1b\n" +
-	"\tmax_peers\x18\x06 \x01(\x05R\bmaxPeers\"P\n" +
+	"\tmax_peers\x18\x06 \x01(\x05R\bmaxPeers\x12,\n" +
+	"\x12socket_recv_buffer\x18\a \x01(\x05R\x10socketRecvBuffer\"P\n" +
 	"\aNetwork\x12\x0f\n" +
 	"\vNETWORK_TCP\x10\x00\x12\x10\n" +
 	"\fNETWORK_TCP4\x10\x01\x12\x10\n" +
