@@ -100,7 +100,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `server.kcp.idle_timeout` / `server.udp.idle_timeout`（battle） | 无（本服务按掉线窗口推导） | 空/`0s` ⇒ 取 `battle.offline_timeout / 3`（缺省 15s → 5s） | 显式值必须**严格小于** `battle.offline_timeout`，否则装配期启动失败（数据报面无关闭握手，掉线只能靠空闲读超时发现，见 §7） |
 | `battle.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `edge.ticket_key` 同值，否则帧面全面拒票 |
 | `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
-| `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法即失败 |
+| `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；它就是**「客户端静默判负容忍时间」**，合法区间 `[1s, 300s]`（**无感切网需 ≥15–20s**，与挂机占座的权衡见 §7.3）；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法/越界即失败 |
 | `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 6000 帧 / 100ms（= 10 分钟一局；60 帧只够 6 秒，见 §7.6 的取值依据）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
 | `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
 | `battle.frame_broadcast_protobuf` | 无 | `false`（protojson / 帧头 ver=1，行为零变化） | `true` ⇒ 帧广播载荷切 protobuf 二进制 + 帧头 ver=2：同一广播实测 **1631 B → 465 B（≈3.5×）**，**帧数不变**（每连接每 tick 仍一次写）。**前置条件**：三端 SDK 都能解 ver=2 帧广播——当前 Go 直连 SDK 的解码与补帧基准写死 protojson，TS/C# 只把 `(payload, version)` 透传且补帧基准只认 ver=1，未升级的客户端会**静默丢弃**广播（语义见 §7.10） |
@@ -185,6 +185,17 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 ### 7.3 `battle.offline_timeout` 与数据报面 `idle_timeout` 的推导
 
 - `battle.offline_timeout` 是掉线判定窗口（空 ⇒ 15s；显式 `0s` = **关闭**掉线判定，此时既不推导也不校验）。
+  它就是「**客户端静默多久判负**」的容忍时间（判定点：`services/battle/internal/actor/battle_offline.go`
+  的 `armOffline` → `onOfflineTimeout` → `eliminate`，**不写死在判定点**）。配置面校验落在
+  `[1s, 300s]`（`actor.MinOfflineTimeout` / `MaxOfflineTimeout`，越界/非法/负值一律启动失败；
+  亚秒窗口只允许测试直接设 `actor.Config.OfflineTimeout`，配置面拒绝）。
+- **无感切网口径**：客户端换网（Wi-Fi ↔ 4G）时旧链路静默，服务端要能容忍到新链路把包发上来。
+  实测切网本身 <10ms，但「对端感知 + NAT 映射重建 + 回座」的窗口是秒级，故**需要 ≥15–20s**：
+  配 `battle.offline_timeout: 20s` ⇒ 帧面空闲检测 6.7s（= 本值/3，只把连接踢掉并打点）、
+  判负在 26.7s；即「静默 10s 不判负」。缺省 15s（检测 5s + 判负 20s）同样覆盖该口径。
+- **与「挂机占座」的权衡**：窗口越长，离场玩家的座位被占得越久（掉线者不判负 ⇒ 对局不结算 ⇒
+  同局其他人陪着等，且 `seat_window_ms` 之外不再补人）。故上限取 300s：无感切网只需 15–20s，
+  再长是拿别人的对局时长换一个人的容错。窗口内回座（同票重连）会取消计时、不计判负。
 - **KCP/UDP 没有关闭握手**：掉线只能靠帧面空闲读超时发现，故 `server.kcp.idle_timeout` /
   `server.udp.idle_timeout` 未配置（或配 `0s`）时取 `offline_timeout / 3`（15s → 5s）；显式配置必须
   **严格小于** `offline_timeout`，否则装配期启动失败。WS/TCP 面有可靠 EOF，**继承底层缺省、不做推导**。

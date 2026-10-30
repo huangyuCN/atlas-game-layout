@@ -48,8 +48,10 @@ type Config struct {
 	// 同一玩家恒定同一实例（数据报面会话状态不跨实例漂移）。空 = 把 EdgeEndpoints 当唯一实例。
 	EdgeInstances [][]*battlev1.EdgeEndpoint
 	TicketKey     []byte // 入场票据 AEAD 密钥（32 字节；装配期由配置 base64 解码校验）
-	// OfflineTimeout 是掉线判定窗口（规格 §9.2；≤0 = 关闭掉线判定，仅供测试/特例）。
-	// 数据报面帧面的空闲读超时按它推导（1/3）并在装配期校验，见 server.FramePolicy。
+	// OfflineTimeout 是掉线判定窗口（规格 §9.2；≤0 = 关闭掉线判定，仅供测试/特例）：
+	// 它就是「客户端静默多久判负」的容忍时间（判定点见 battle_offline.go 的 armOffline）。
+	// 客户端静默不会立刻判负——先由帧面空闲读超时（按本值 1/3 推导，见 server.FramePolicy）
+	// 发现并打点，本窗口到点才出局；配置面限定 [MinOfflineTimeout, MaxOfflineTimeout]。
 	OfflineTimeout time.Duration
 	// SeatWindow 是成局后的**入座窗口**（≤0 = 关闭窗口，成局即开打——旧行为）。
 	// 窗口内对局时钟不推进：等全部参战者的帧连接建立（入座），或窗口到期即开打。
@@ -81,6 +83,14 @@ const (
 	MaxPlayersLimit = 64
 	// DefaultOfflineTimeout 是掉线判定窗口的缺省值（规格 §9.2：默认 15s，不写死在判定点）。
 	DefaultOfflineTimeout = 15 * time.Second
+	// MinOfflineTimeout 是掉线判定窗口的配置下限：亚秒窗口会先于任何有意义的往返被帧面空闲读
+	// 超时（本值的 1/3，见 server.datagramIdle）判掉，属于笔误，故配置面直接拒绝
+	// （测试要压缩时间请直接设 Config.OfflineTimeout，不经配置解析）。
+	MinOfflineTimeout = time.Second
+	// MaxOfflineTimeout 是掉线判定窗口的配置上限：300s 已是「挂机占座」的容忍顶。
+	// **无感切网只需 ≥15–20s**（切网 + 重连的实测口径）；配到分钟级只是让离场玩家的座位
+	// 被长期占住（掉线者不判负 ⇒ 对局不结算 ⇒ 同桌其他人陪着等），取舍见 docs/config.md §7.3。
+	MaxOfflineTimeout = 300 * time.Second
 	// DefaultSeatWindow 是成局后入座窗口的缺省值（3s）：客户端从收到成局通知到建连、
 	// 握手、首帧，实测 1–2s，留一倍余量；再长就等于「成局不开打」。
 	DefaultSeatWindow = 3 * time.Second

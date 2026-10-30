@@ -24,7 +24,7 @@ const ticketKeyLen = 32
 //   - ticket_ttl 省略取 DefaultTicketTTL，显式值必须能被 time.ParseDuration 解析且为正；
 //   - edge_endpoints 至少一面、面不重复、地址非空（见 edgeEndpointsOf）；
 //   - offline_timeout 省略取 DefaultOfflineTimeout（15s），显式 0 表示关闭掉线判定，
-//     负值/非法即失败（见 offlineTimeoutOf）；
+//     负值/非法/越出 [1s, 300s] 即失败（见 offlineTimeoutOf；它就是「客户端静默判负容忍时间」）；
 //   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（6000，10fps 下 10 分钟）/
 //     DefaultTickInterval（100ms），显式值越界即失败（见 frameLimitsOf）；
 //   - seat_window_ms 省略取 DefaultSeatWindow（3s），显式 0 表示**关闭入座窗口**（旧行为），
@@ -212,7 +212,11 @@ func ticketTTLOf(raw string) (time.Duration, error) {
 }
 
 // offlineTimeoutOf 解析掉线判定窗口（规格 §9.2）：空串取默认 15s；显式 0 表示关闭掉线判定
-// （合法特例：此时不推导也不校验数据报面空闲超时）；负值或非法即启动失败。
+// （合法特例：此时不推导也不校验数据报面空闲超时）；负值、非法或越出 [1s, 300s] 即启动失败。
+//
+// 范围校验的意义：这个值就是「客户端静默多久判负」的容忍时间（判定点见 battle_offline.go 的
+// armOffline，同一份配置驱动帧面检测窗口 = 本值/3）。亚秒值必然先被帧面空闲读超时误判，
+// 分钟级值等于挂机占座；无感切网只需要 ≥15–20s，取舍见 docs/config.md §7.3。
 func offlineTimeoutOf(raw string) (time.Duration, error) {
 	if raw == "" {
 		return actor.DefaultOfflineTimeout, nil
@@ -221,8 +225,16 @@ func offlineTimeoutOf(raw string) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("app: battle.offline_timeout 非法（time.ParseDuration 字符串，如 15s）: %w", err)
 	}
+	if d == 0 {
+		return 0, nil
+	}
 	if d < 0 {
 		return 0, fmt.Errorf("app: battle.offline_timeout 不得为负，实际 %s（0 表示关闭掉线判定）", raw)
+	}
+	if d < actor.MinOfflineTimeout || d > actor.MaxOfflineTimeout {
+		return 0, fmt.Errorf("app: battle.offline_timeout 必须落在 [%s, %s] 内，实际 %s"+
+			"（0 表示关闭掉线判定；无感切网只需 ≥15–20s，再长是挂机占座）",
+			actor.MinOfflineTimeout, actor.MaxOfflineTimeout, raw)
 	}
 	return d, nil
 }

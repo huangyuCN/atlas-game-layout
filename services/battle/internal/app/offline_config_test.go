@@ -19,10 +19,17 @@ func TestOfflineTimeoutConfig(t *testing.T) {
 	}{
 		{name: "缺省 15s", raw: "", want: actor.DefaultOfflineTimeout},
 		{name: "显式 15s", raw: "15s", want: 15 * time.Second},
-		{name: "显式毫秒级窗口", raw: "800ms", want: 800 * time.Millisecond},
+		// 无感切网口径：静默容忍必须能调到 ≥15–20s（20s 是「切网 + 重连」的实测上限）。
+		{name: "显式 20s（无感切网口径）", raw: "20s", want: 20 * time.Second},
+		{name: "下限 1s", raw: "1s", want: actor.MinOfflineTimeout},
+		{name: "上限 300s", raw: "300s", want: actor.MaxOfflineTimeout},
 		{name: "显式 0 关闭判定", raw: "0s", want: 0},
 		{name: "负值即失败", raw: "-1s", wantErr: true},
 		{name: "非法即失败", raw: "15", wantErr: true},
+		// 范围校验：低于下限/超上限一律启动失败（亚秒窗口只允许在测试里直接设 Config，
+		// 配置面拒绝——小于 1s 的窗口必然先被帧面空闲读超时误判，属于笔误）。
+		{name: "低于下限即失败", raw: "500ms", wantErr: true},
+		{name: "超上限即失败", raw: "301s", wantErr: true},
 	}
 	for _, c := range cases {
 		cfg := &conf.Bootstrap{Battle: &conf.BattleConf{
