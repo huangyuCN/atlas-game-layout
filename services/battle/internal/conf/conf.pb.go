@@ -109,8 +109,19 @@ type BattleConf struct {
 	//   - 与 edge_endpoints **互斥**（两者都配即启动失败，避免地址来源二义）；
 	//   - 每个实例至少一面、面不重复、地址非空（与 edge_endpoints 同一套校验）。
 	EdgeInstances []*EdgeInstance `protobuf:"bytes,11,rep,name=edge_instances,json=edgeInstances,proto3" json:"edge_instances,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// datagram_idle_timeout 是数据报面（KCP/UDP）的**空闲读超时**（time.ParseDuration 字符串，
+	// 如 30s）：它决定「连接静默多久后 battle 关闭该帧会话」，与 offline_timeout 解耦。
+	//   - 不配置 / 显式 0s：沿用 offline_timeout/3（缺省 15s → 5s，现行为零变化）；
+	//   - 显式值：必须落在 [1s, 600s]（低于 1s 属于笔误；600s 已是「掉线连接占住会话」的顶），
+	//     **允许 ≥ offline_timeout**——无感切网（断流后客户端换源端口、接入层接管）要求
+	//     `datagram_idle_timeout ≥ 最长断流时间`，否则 battle 会在断流期间先关掉会话，
+	//     之后接入层接管只是换了接入层这一段，battle 侧已无会话可续。
+	//
+	// 取舍：该值越大，掉线连接占用帧会话/座位的越久（判负要等到 idle 超时 + offline_timeout）；
+	// 与 offline_timeout 的配套口径见 docs/config.md §7.3。
+	DatagramIdleTimeout string `protobuf:"bytes,12,opt,name=datagram_idle_timeout,json=datagramIdleTimeout,proto3" json:"datagram_idle_timeout,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *BattleConf) Reset() {
@@ -218,6 +229,13 @@ func (x *BattleConf) GetEdgeInstances() []*EdgeInstance {
 		return x.EdgeInstances
 	}
 	return nil
+}
+
+func (x *BattleConf) GetDatagramIdleTimeout() string {
+	if x != nil {
+		return x.DatagramIdleTimeout
+	}
+	return ""
 }
 
 // EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。
@@ -383,7 +401,7 @@ var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xea\x04\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\x9e\x05\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -401,7 +419,8 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"maxPlayers\x88\x01\x01\x128\n" +
 	"\x18frame_broadcast_protobuf\x18\n" +
 	" \x01(\bR\x16frameBroadcastProtobuf\x12@\n" +
-	"\x0eedge_instances\x18\v \x03(\v2\x19.battle.conf.EdgeInstanceR\redgeInstancesB\x17\n" +
+	"\x0eedge_instances\x18\v \x03(\v2\x19.battle.conf.EdgeInstanceR\redgeInstances\x122\n" +
+	"\x15datagram_idle_timeout\x18\f \x01(\tR\x13datagramIdleTimeoutB\x17\n" +
 	"\x15_frame_advertise_hostB\r\n" +
 	"\v_max_framesB\x13\n" +
 	"\x11_tick_interval_msB\x11\n" +

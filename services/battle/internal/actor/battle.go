@@ -49,10 +49,15 @@ type Config struct {
 	EdgeInstances [][]*battlev1.EdgeEndpoint
 	TicketKey     []byte // 入场票据 AEAD 密钥（32 字节；装配期由配置 base64 解码校验）
 	// OfflineTimeout 是掉线判定窗口（规格 §9.2；≤0 = 关闭掉线判定，仅供测试/特例）：
-	// 它就是「客户端静默多久判负」的容忍时间（判定点见 battle_offline.go 的 armOffline）。
-	// 客户端静默不会立刻判负——先由帧面空闲读超时（按本值 1/3 推导，见 server.FramePolicy）
-	// 发现并打点，本窗口到点才出局；配置面限定 [MinOfflineTimeout, MaxOfflineTimeout]。
+	// 它就是「连接被判掉线后多久判负」的容忍时间（判定点见 battle_offline.go 的 armOffline）。
+	// 掉线由帧面空闲读超时发现（默认按本值 1/3 推导，可用 DatagramIdleTimeout 独立指定）；
+	// 发现后打点，本窗口到点才出局；配置面限定 [MinOfflineTimeout, MaxOfflineTimeout]。
 	OfflineTimeout time.Duration
+	// DatagramIdleTimeout 是数据报面（KCP/UDP）空闲读超时的独立配置（battle.datagram_idle_timeout
+	// 的生效值；0 = 未配置 ⇒ 沿用 OfflineTimeout/3，现行为零变化）。显式值允许 ≥ OfflineTimeout：
+	// 无感切网要求它 ≥ 最长断流时间（断流期间 battle 不能先关会话，否则接入层接管后无可续会话）。
+	// 配置面限定 [MinDatagramIdleTimeout, MaxDatagramIdleTimeout]。
+	DatagramIdleTimeout time.Duration
 	// SeatWindow 是成局后的**入座窗口**（≤0 = 关闭窗口，成局即开打——旧行为）。
 	// 窗口内对局时钟不推进：等全部参战者的帧连接建立（入座），或窗口到期即开打。
 	// 语义与配置见 battle_seating.go / conf.proto 的 seat_window_ms。
@@ -91,6 +96,13 @@ const (
 	// **无感切网只需 ≥15–20s**（切网 + 重连的实测口径）；配到分钟级只是让离场玩家的座位
 	// 被长期占住（掉线者不判负 ⇒ 对局不结算 ⇒ 同桌其他人陪着等），取舍见 docs/config.md §7.3。
 	MaxOfflineTimeout = 300 * time.Second
+	// MinDatagramIdleTimeout 是数据报面空闲读超时（battle.datagram_idle_timeout）的配置下限：
+	// 亚秒值必然先于任何有意义的往返触发，属于笔误，配置面直接拒绝。
+	MinDatagramIdleTimeout = time.Second
+	// MaxDatagramIdleTimeout 是数据报面空闲读超时的配置上限：600s 已是「掉线连接占住会话」的顶。
+	// **无感切网只需 ≥ 最长断流时间（实测 10–20s）**；再长只是让掉线连接的会话/座位多占几分钟
+	// （判负要等到 idle 超时 + offline_timeout），取舍见 docs/config.md §7.3。
+	MaxDatagramIdleTimeout = 600 * time.Second
 	// DefaultSeatWindow 是成局后入座窗口的缺省值（3s）：客户端从收到成局通知到建连、
 	// 握手、首帧，实测 1–2s，留一倍余量；再长就等于「成局不开打」。
 	DefaultSeatWindow = 3 * time.Second

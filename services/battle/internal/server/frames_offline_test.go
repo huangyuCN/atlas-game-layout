@@ -17,8 +17,9 @@ func testRecorder() *stream.Bridge {
 // testPolicy 返回默认帧面策略（掉线窗口 15s，与 battle 配置缺省一致）。
 func testPolicy() FramePolicy { return FramePolicy{OfflineTimeout: 15 * time.Second} }
 
-// TestDatagramIdleDerivation 验证数据报面空闲读超时的推导与硬校验（规格 §9.2 硬约束①）：
-// 未配置取 offline_timeout/3（缺省 15s → 5s）；显式配置必须严格小于掉线窗口，否则装配失败。
+// TestDatagramIdleDerivation 验证**帧面级**空闲读超时的推导与硬校验（规格 §9.2 硬约束①）：
+// battle.datagram_idle_timeout 未配置时，帧面级显式配置必须严格小于掉线窗口，否则装配失败；
+// 都未配置取 offline_timeout/3（缺省 15s → 5s）。
 func TestDatagramIdleDerivation(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -36,7 +37,7 @@ func TestDatagramIdleDerivation(t *testing.T) {
 		{name: "关闭掉线判定时显式配置原样保留", configured: 30 * time.Second, offline: 0, want: 30 * time.Second},
 	}
 	for _, c := range cases {
-		got, err := datagramIdle(c.configured, c.offline)
+		got, err := datagramIdle(FramePolicy{OfflineTimeout: c.offline}, c.configured)
 		if c.wantErr {
 			if err == nil {
 				t.Fatalf("%s：竟然推导成功（idle=%s）", c.name, got)

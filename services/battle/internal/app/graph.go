@@ -162,10 +162,14 @@ func newStreamRegistry(cfg actor.Config) (*stream.Registry, error) {
 	return stream.NewRegistryProtobuf(ttl)
 }
 
-// newFramePolicy 从战斗参数取帧面策略（掉线窗口）：数据报面空闲超时按它推导并在装配期校验
-// （用生效值而非配置文件原文——嵌入式形态可用 fx.Decorate 覆盖窗口，两处必须同源）。
+// newFramePolicy 从战斗参数取帧面策略（掉线窗口 + 数据报面静默检测独立值）：数据报面空闲超时
+// 按两者在装配期定值并校验（用生效值而非配置文件原文——嵌入式形态可用 fx.Decorate 覆盖，
+// 两处必须同源）。
 func newFramePolicy(cfg actor.Config) server.FramePolicy {
-	return server.FramePolicy{OfflineTimeout: cfg.OfflineTimeout}
+	return server.FramePolicy{
+		OfflineTimeout:      cfg.OfflineTimeout,
+		DatagramIdleTimeout: cfg.DatagramIdleTimeout,
+	}
 }
 
 // newFrameMetrics 构造帧面观测出口（P1-4）：票据 hook 与 op 包装共用同一份句柄缓存。

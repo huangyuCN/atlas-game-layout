@@ -19,6 +19,7 @@ import (
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/contrib/actor/frameops"
 	"github.com/huangyuCN/atlas/contrib/actor/relay"
+	atlaslog "github.com/huangyuCN/atlas/log"
 	"github.com/huangyuCN/atlas/transport"
 	"github.com/huangyuCN/atlas/transport/frame/engine"
 	kcpt "github.com/huangyuCN/atlas/transport/kcp"
@@ -37,10 +38,16 @@ type FrameFaces struct {
 }
 
 // FramePolicy 是帧面的掉线检测策略参数（规格 §9.2 硬约束①）：数据报面（KCP/UDP）没有
-// 关闭握手，掉线只能靠空闲读超时发现，故其 idle_timeout 按本策略推导并在装配期硬校验。
+// 关闭握手，掉线只能靠空闲读超时发现，故其 idle_timeout 按本策略确定并在装配期硬校验。
 type FramePolicy struct {
 	// OfflineTimeout 是掉线判定窗口（≤0 = 关闭掉线判定：不推导、不校验数据报面空闲超时）。
 	OfflineTimeout time.Duration
+	// DatagramIdleTimeout 是数据报面空闲读超时的**独立配置**（battle.datagram_idle_timeout
+	// 的生效值；0 = 未配置 ⇒ 沿用 OfflineTimeout/3，现行为零变化）。
+	// 显式值允许 ≥ OfflineTimeout：无感切网要求该值 ≥ 最长断流时间（断流期间 battle 不能
+	// 先关会话，否则接入层接管后 battle 侧已无会话可续）；代价是掉线连接占用会话更久。
+	// 显式值与帧面级 server.<face>.idle_timeout 同时配置且不一致时装配失败（避免来源二义）。
+	DatagramIdleTimeout time.Duration
 }
 
 // FrameServers 是帧面集合：具体类型供装配使用，值组供 atlas.App 统一启停
@@ -226,7 +233,22 @@ func newDatagramFace[C datagramConf, S any, O any](f datagramFace[C, S, O], poli
 	if err != nil {
 		return zero, fmt.Errorf("server: %s 帧面: %w", f.field, err)
 	}
+	// 打印**进程生效值**（不是配置原文）：排障/验收据此确认 idle 与 offline 的最终口径。
+	if len(opts) > 0 {
+		atlaslog.Info("battle: 数据报面空闲读超时生效",
+			"face", f.field,
+			"idle_timeout", datagramIdleOf(policy, configured).String(),
+			"offline_timeout", policy.OfflineTimeout.String(),
+			"battle_datagram_idle_timeout", policy.DatagramIdleTimeout.String())
+	}
 	return f.build(conf, append(opts, f.withLife(connHook(life, f.kind)))...)
+}
+
+// datagramIdleOf 返回生效的空闲读超时（仅用于日志；调用前 datagramIdle 已校验通过，
+// 此处不会再出错——错误已在装配路径返回）。
+func datagramIdleOf(policy FramePolicy, configured time.Duration) time.Duration {
+	idle, _ := datagramIdle(policy, configured)
+	return idle
 }
 
 // newWebSocketFace 构造 WS 帧面（未启用返回 nil，由 serverutil 处理）：
@@ -257,9 +279,10 @@ func registerFace(ops *frameops.Handler, name string, subscribe frameroute.Regis
 }
 
 // datagramOptions 返回数据报面的空闲读超时选项（规格 §9.2 硬约束①）：
-// 未配置即取 offline_timeout/3（缺省 15s → 5s），显式配置必须严格小于掉线窗口。
+// battle.datagram_idle_timeout 未配置时取 offline_timeout/3（缺省 15s → 5s）；
+// 显式配置以独立值为准（可 ≥ 掉线窗口，见 FramePolicy.DatagramIdleTimeout）。
 func datagramOptions[O any](policy FramePolicy, configured time.Duration, withIdle func(time.Duration) O) ([]O, error) {
-	idle, err := datagramIdle(configured, policy.OfflineTimeout)
+	idle, err := datagramIdle(policy, configured)
 	if err != nil {
 		return nil, err
 	}
@@ -269,10 +292,25 @@ func datagramOptions[O any](policy FramePolicy, configured time.Duration, withId
 	return []O{withIdle(idle)}, nil
 }
 
-// datagramIdle 返回数据报面生效的空闲读超时：未配置取掉线窗口的 1/3；
-// 显式配置必须严格小于掉线窗口，否则报错（该错误在装配期即让进程启动失败）。
-// 掉线判定关闭（offline ≤ 0）时不推导也不校验，显式配置原样保留。
-func datagramIdle(configured, offline time.Duration) (time.Duration, error) {
+// datagramIdle 返回数据报面生效的空闲读超时（优先级从高到低）：
+//  1. battle.datagram_idle_timeout（policy.DatagramIdleTimeout > 0）：独立值，原样生效，
+//     **不要求小于掉线窗口**——无感切网需要它 ≥ 最长断流时间；与帧面级显式配置冲突时报错。
+//  2. 帧面级 server.<face>.idle_timeout（configured > 0）：沿用旧口径，必须严格小于掉线窗口
+//     （KCP/UDP 无关闭握手，只能靠空闲读超时发现掉线）。
+//  3. 都未配置：取 offline_timeout/3；掉线判定关闭（offline ≤ 0）时不推导（返回 0）。
+//
+// 返回的错误在装配期即让进程启动失败（不静默放过，避免「配了没生效」）。
+func datagramIdle(policy FramePolicy, configured time.Duration) (time.Duration, error) {
+	offline := policy.OfflineTimeout
+	if policy.DatagramIdleTimeout > 0 {
+		if configured > 0 && configured != policy.DatagramIdleTimeout {
+			return 0, fmt.Errorf("数据报面 idle_timeout 来源二义："+
+				"battle.datagram_idle_timeout=%s 与帧面级 idle_timeout=%s 同时配置且不一致"+
+				"（只保留一处：独立配置优先，帧面级仅在未配独立值时生效）",
+				policy.DatagramIdleTimeout, configured)
+		}
+		return policy.DatagramIdleTimeout, nil
+	}
 	if offline <= 0 {
 		return configured, nil
 	}
@@ -281,7 +319,8 @@ func datagramIdle(configured, offline time.Duration) (time.Duration, error) {
 	}
 	if configured >= offline {
 		return 0, fmt.Errorf("数据报面 idle_timeout=%s 必须小于 battle.offline_timeout=%s"+
-			"（KCP/UDP 无关闭握手，只能靠空闲读超时发现掉线；否则掉线事件会迟到缺省的 120s，掉线策略形同虚设）",
+			"（KCP/UDP 无关闭握手，只能靠空闲读超时发现掉线；否则掉线事件会迟到缺省的 120s，掉线策略形同虚设；"+
+			"无感切网请改用 battle.datagram_idle_timeout）",
 			configured, offline)
 	}
 	return configured, nil

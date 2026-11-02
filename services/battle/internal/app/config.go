@@ -24,7 +24,10 @@ const ticketKeyLen = 32
 //   - ticket_ttl 省略取 DefaultTicketTTL，显式值必须能被 time.ParseDuration 解析且为正；
 //   - edge_endpoints 至少一面、面不重复、地址非空（见 edgeEndpointsOf）；
 //   - offline_timeout 省略取 DefaultOfflineTimeout（15s），显式 0 表示关闭掉线判定，
-//     负值/非法/越出 [1s, 300s] 即失败（见 offlineTimeoutOf；它就是「客户端静默判负容忍时间」）；
+//     负值/非法/越出 [1s, 300s] 即失败（见 offlineTimeoutOf；它就是「连接被判掉线后判负的窗口」）；
+//   - datagram_idle_timeout 省略（或 0s）表示沿用 offline_timeout/3（现行为零变化），
+//     显式值必须落在 [1s, 600s]（见 datagramIdleTimeoutOf）；它可与 offline_timeout 解耦，
+//     允许更大（无感切网要求 ≥ 最长断流时间）；
 //   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（6000，10fps 下 10 分钟）/
 //     DefaultTickInterval（100ms），显式值越界即失败（见 frameLimitsOf）；
 //   - seat_window_ms 省略取 DefaultSeatWindow（3s），显式 0 表示**关闭入座窗口**（旧行为），
@@ -51,6 +54,10 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	if err != nil {
 		return out, err
 	}
+	idle, err := datagramIdleTimeoutOf(b.GetDatagramIdleTimeout())
+	if err != nil {
+		return out, err
+	}
 	instances, err := edgeInstancesOf(b)
 	if err != nil {
 		return out, err
@@ -70,6 +77,7 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out.TicketKey = key
 	out.TicketTTL = ttl
 	out.OfflineTimeout = offline
+	out.DatagramIdleTimeout = idle
 	// 单实例兼容字段取首个实例：旧代码/旧客户端读它即得「第一实例的面列表」。
 	out.EdgeEndpoints = instances[0]
 	out.EdgeInstances = instances
@@ -214,9 +222,10 @@ func ticketTTLOf(raw string) (time.Duration, error) {
 // offlineTimeoutOf 解析掉线判定窗口（规格 §9.2）：空串取默认 15s；显式 0 表示关闭掉线判定
 // （合法特例：此时不推导也不校验数据报面空闲超时）；负值、非法或越出 [1s, 300s] 即启动失败。
 //
-// 范围校验的意义：这个值就是「客户端静默多久判负」的容忍时间（判定点见 battle_offline.go 的
-// armOffline，同一份配置驱动帧面检测窗口 = 本值/3）。亚秒值必然先被帧面空闲读超时误判，
-// 分钟级值等于挂机占座；无感切网只需要 ≥15–20s，取舍见 docs/config.md §7.3。
+// 范围校验的意义：这个值就是「连接被判掉线后多久判负」的容忍时间（判定点见 battle_offline.go
+// 的 armOffline）。掉线发现窗口默认由它推导（帧面空闲读超时 = 本值/3），可用
+// battle.datagram_idle_timeout 独立指定；亚秒值必然先被误判，分钟级值等于挂机占座，
+// 无感切网只需 ≥15–20s（且另需 idle ≥ 断流时间），取舍见 docs/config.md §7.3。
 func offlineTimeoutOf(raw string) (time.Duration, error) {
 	if raw == "" {
 		return actor.DefaultOfflineTimeout, nil
@@ -235,6 +244,34 @@ func offlineTimeoutOf(raw string) (time.Duration, error) {
 		return 0, fmt.Errorf("app: battle.offline_timeout 必须落在 [%s, %s] 内，实际 %s"+
 			"（0 表示关闭掉线判定；无感切网只需 ≥15–20s，再长是挂机占座）",
 			actor.MinOfflineTimeout, actor.MaxOfflineTimeout, raw)
+	}
+	return d, nil
+}
+
+// datagramIdleTimeoutOf 解析数据报面空闲读超时（battle.datagram_idle_timeout）：空串与
+// "0s" 都表示**未配置** ⇒ 返回 0，由帧面装配沿用 offline_timeout/3（现行为零变化）；
+// 显式值必须落在 [MinDatagramIdleTimeout, MaxDatagramIdleTimeout]，负值/非法/越界即启动失败。
+//
+// 它与 offline_timeout **解耦**：没有「必须小于掉线窗口」的约束——无感切网恰恰要求
+// idle ≥ 最长断流时间，断流期间 battle 不能先关会话（见 docs/config.md §7.3）。
+func datagramIdleTimeoutOf(raw string) (time.Duration, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("app: battle.datagram_idle_timeout 非法（time.ParseDuration 字符串，如 30s）: %w", err)
+	}
+	if d == 0 {
+		return 0, nil
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("app: battle.datagram_idle_timeout 不得为负，实际 %s（0 表示沿用 offline_timeout/3）", raw)
+	}
+	if d < actor.MinDatagramIdleTimeout || d > actor.MaxDatagramIdleTimeout {
+		return 0, fmt.Errorf("app: battle.datagram_idle_timeout 必须落在 [%s, %s] 内，实际 %s"+
+			"（0 表示沿用 offline_timeout/3；无感切网需 ≥ 最长断流时间，再长会占住掉线会话）",
+			actor.MinDatagramIdleTimeout, actor.MaxDatagramIdleTimeout, raw)
 	}
 	return d, nil
 }

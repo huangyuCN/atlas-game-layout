@@ -97,10 +97,11 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `observability.metrics.prometheus` | 非空 | **不暴露抓取端点**（采集器退化为 noop） | — |
 | `observability.sampler` | 无 | — | 未设置/`0` ⇒ `PARENT_BASED_RATIO`；`sample_ratio` 未设置 ⇒ `1.0` |
 | `observability.pprof` | 非空 | **不监听任何端口**（默认关闭，零开销） | 非空 ⇒ 该地址暴露 `/debug/pprof/`；地址非法 ⇒ **装配期失败**（不静默降级）。安全约定、建议端口与验证命令见 §9 |
-| `server.kcp.idle_timeout` / `server.udp.idle_timeout`（battle） | 无（本服务按掉线窗口推导） | 空/`0s` ⇒ 取 `battle.offline_timeout / 3`（缺省 15s → 5s） | 显式值必须**严格小于** `battle.offline_timeout`，否则装配期启动失败（数据报面无关闭握手，掉线只能靠空闲读超时发现，见 §7） |
+| `server.kcp.idle_timeout` / `server.udp.idle_timeout`（battle） | 无（本服务按掉线窗口推导） | 空/`0s` ⇒ 取 `battle.offline_timeout / 3`（缺省 15s → 5s） | 显式值必须**严格小于** `battle.offline_timeout`，否则装配期启动失败（数据报面无关闭握手，掉线只能靠空闲读超时发现，见 §7）；**若同时配了 `battle.datagram_idle_timeout`，两处不一致即失败**（独立配置优先，见 §7.3） |
 | `battle.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `edge.ticket_key` 同值，否则帧面全面拒票 |
 | `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
-| `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；它就是**「客户端静默判负容忍时间」**，合法区间 `[1s, 300s]`（**无感切网需 ≥15–20s**，与挂机占座的权衡见 §7.3）；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法/越界即失败 |
+| `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；它就是**「连接被判掉线后多久判负」**的窗口，合法区间 `[1s, 300s]`（**无感切网需 ≥15–20s**，与挂机占座的权衡见 §7.3）；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法/越界即失败 |
+| `battle.datagram_idle_timeout` | 无 | — | 空/`0s` ⇒ **沿用 `offline_timeout / 3`**（缺省 15s → 5s，现行为零变化）；显式值合法区间 `[1s, 600s]`，负值/非法/越界即启动失败。它是数据报面（KCP/UDP）的**静默检测独立配置**，与 `offline_timeout` 解耦、**可以更大**：**无感切网需要 `datagram_idle_timeout ≥ 最长断流时间`**（否则断流中 battle 先关会话，接入层接管后无会话可续）；⚠️ **该值越大，掉线连接占用的会话越久**（判负 = idle 超时 + `offline_timeout`），见 §7.3 |
 | `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 6000 帧 / 100ms（= 10 分钟一局；60 帧只够 6 秒，见 §7.6 的取值依据）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
 | `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
 | `battle.frame_broadcast_protobuf` | 无 | `false`（protojson / 帧头 ver=1，行为零变化） | `true` ⇒ 帧广播载荷切 protobuf 二进制 + 帧头 ver=2：同一广播实测 **1631 B → 465 B（≈3.5×）**，**帧数不变**（每连接每 tick 仍一次写）。**前置条件**：三端 SDK 都能解 ver=2 帧广播——当前 Go 直连 SDK 的解码与补帧基准写死 protojson，TS/C# 只把 `(payload, version)` 透传且补帧基准只认 ver=1，未升级的客户端会**静默丢弃**广播（语义见 §7.10） |
@@ -185,26 +186,42 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 ### 7.3 `battle.offline_timeout` 与数据报面 `idle_timeout` 的推导
 
 - `battle.offline_timeout` 是掉线判定窗口（空 ⇒ 15s；显式 `0s` = **关闭**掉线判定，此时既不推导也不校验）。
-  它就是「**客户端静默多久判负**」的容忍时间（判定点：`services/battle/internal/actor/battle_offline.go`
+  它是「**连接被判掉线后多久判负**」的窗口（判定点：`services/battle/internal/actor/battle_offline.go`
   的 `armOffline` → `onOfflineTimeout` → `eliminate`，**不写死在判定点**）。配置面校验落在
   `[1s, 300s]`（`actor.MinOfflineTimeout` / `MaxOfflineTimeout`，越界/非法/负值一律启动失败；
   亚秒窗口只允许测试直接设 `actor.Config.OfflineTimeout`，配置面拒绝）。
+- **数据报面静默检测（独立配置）**：`battle.datagram_idle_timeout` 决定「连接静默多久后 battle
+  关闭该帧会话」，缺省（空/`0s`）沿用 `offline_timeout / 3`（15s → 5s，现行为零变化），显式值
+  合法区间 `[1s, 600s]`。它与 `offline_timeout` **解耦**：不再要求「严格小于掉线窗口」，也**可以更大**。
+  配置优先级：`battle.datagram_idle_timeout` > 帧面级 `server.kcp/udp.idle_timeout` > `offline_timeout / 3`；
+  独立值与帧面级同时配置且不一致 ⇒ 装配期启动失败（避免来源二义）。生效值在进程启动日志里以
+  `battle: 数据报面空闲读超时生效` 打印（含 `face` / `idle_timeout` / `offline_timeout`）。
 - **无感切网口径**：客户端换网（Wi-Fi ↔ 4G）时旧链路静默，服务端要能容忍到新链路把包发上来。
-  实测切网本身 <10ms，但「对端感知 + NAT 映射重建 + 回座」的窗口是秒级，故**需要 ≥15–20s**：
-  配 `battle.offline_timeout: 20s` ⇒ 帧面空闲检测 6.7s（= 本值/3，只把连接踢掉并打点）、
-  判负在 26.7s；即「静默 10s 不判负」。缺省 15s（检测 5s + 判负 20s）同样覆盖该口径。
-- **与「挂机占座」的权衡**：窗口越长，离场玩家的座位被占得越久（掉线者不判负 ⇒ 对局不结算 ⇒
-  同局其他人陪着等，且 `seat_window_ms` 之外不再补人）。故上限取 300s：无感切网只需 15–20s，
-  再长是拿别人的对局时长换一个人的容错。窗口内回座（同票重连）会取消计时、不计判负。
-- **KCP/UDP 没有关闭握手**：掉线只能靠帧面空闲读超时发现，故 `server.kcp.idle_timeout` /
+  实测切网本身 <10ms，但「对端感知 + NAT 映射重建 + 接入层接管」的窗口是秒级：
+  **`datagram_idle_timeout` 必须 ≥ 最长断流时间**，否则 battle 会在断流期间先关掉 KCP/UDP 会话，
+  之后接入层接管只换了接入层这一段，battle 侧已无会话可续（表现为切换后 0 新帧、随后 `idle_no_rx` 重建）。
+  推荐口径：`offline_timeout: 20s` + `datagram_idle_timeout: 30s` ⇒ 10–20s 断流都在静默窗口内，
+  连接与对局均不判负；对照旧口径（idle 恒 `offline/3` = 6.7s）10s 断流必失败。
+- ⚠️ **该值越大，掉线连接占用的会话越久**：真掉线时判负要等到 `datagram_idle_timeout + offline_timeout`
+  （例如 30s + 20s = 50s），期间该玩家的帧会话与座位仍被占着（对局不结算，同局其他人陪着等）。
+  故上限取 600s：无感切网只需覆盖最长断流（实测 10–20s），再长是拿别人的对局时长换一个人的容错。
+  窗口内回座（同票重连）会取消计时、不计判负。
+- **客户端侧还有一道「无收包判坏死」阈值**（Go 直连 SDK `direct.WithIdleDeadline`，缺省 T2=15s）：
+  断流超过 T2 时客户端会先重建流（`rebuilds_total{reason="idle_no_rx"}`），即使服务端 idle 更长，
+  也走不到「服务端保会话 + 接入层接管」这条路径。故断流时长 >15s 的验收/线上场景，客户端 T2
+  必须调到 **大于最长断流时间**（本轮 20s 断流用 35s 验收；仅用 SDK 公开选项，SDK 代码零改动）。
+  10s 断流在缺省 T2 下即可通过（实测 `rebuilds_total=0`）；20s 断流用缺省 T2=15s 会先重建（实测失败一次），
+  调大后通过。
+- **KCP/UDP 没有关闭握手**：掉线只能靠帧面空闲读超时发现，故帧面级 `server.kcp.idle_timeout` /
   `server.udp.idle_timeout` 未配置（或配 `0s`）时取 `offline_timeout / 3`（15s → 5s）；显式配置必须
-  **严格小于** `offline_timeout`，否则装配期启动失败。WS/TCP 面有可靠 EOF，**继承底层缺省、不做推导**。
+  **严格小于** `offline_timeout`，否则装配期启动失败（需要 ≥ 掉线窗口请用独立配置，见上）。
+  WS/TCP 面有可靠 EOF，**继承底层缺省、不做推导**。
 - 违反这条推导的后果不是「慢一点」：掉线事件会推迟到缺省的 120s 读超时，掉线策略形同虚设。
 - **客户端保活约定**：帧面活跃由**收包**刷新（流式面重设空闲读超时、数据报面刷新 peer 活跃时间，
-  与 op 是什么无关），故客户端须以 **≤ `offline_timeout / 3`** 的周期（缺省 15s → **5s**）发送帧或
-  `Ping`（`battle.v1.BattleService/Ping`：Tell 无回执、不参与对局逻辑、不改对局状态；无输入期间用它）；
-  超过该周期不只会在数据报面被判掉线判负，长时间静默还会让 NAT 映射失效——此后**下行**帧收不到，
-  现象是「连接还在但没数据」。`SendFrameInput` 不能兼职保活（会往 lockstep 输入流里塞垃圾）。
+  与 op 是什么无关），故客户端须以 **≤ 生效的 `datagram_idle_timeout / 3`** 的周期（缺省 = `offline_timeout/3`，
+  15s → **5s**）发送帧或 `Ping`（`battle.v1.BattleService/Ping`：Tell 无回执、不参与对局逻辑、不改对局状态；
+  无输入期间用它）；超过该周期不只会在数据报面被判掉线判负，长时间静默还会让 NAT 映射失效——此后**下行**
+  帧收不到，现象是「连接还在但没数据」。`SendFrameInput` 不能兼职保活（会往 lockstep 输入流里塞垃圾）。
 
 ### 7.4 票据密钥两处同值
 

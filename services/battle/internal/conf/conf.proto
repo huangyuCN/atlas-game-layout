@@ -96,6 +96,16 @@ message BattleConf {
   //   - 与 edge_endpoints **互斥**（两者都配即启动失败，避免地址来源二义）；
   //   - 每个实例至少一面、面不重复、地址非空（与 edge_endpoints 同一套校验）。
   repeated EdgeInstance edge_instances = 11;
+  // datagram_idle_timeout 是数据报面（KCP/UDP）的**空闲读超时**（time.ParseDuration 字符串，
+  // 如 30s）：它决定「连接静默多久后 battle 关闭该帧会话」，与 offline_timeout 解耦。
+  //   - 不配置 / 显式 0s：沿用 offline_timeout/3（缺省 15s → 5s，现行为零变化）；
+  //   - 显式值：必须落在 [1s, 600s]（低于 1s 属于笔误；600s 已是「掉线连接占住会话」的顶），
+  //     **允许 ≥ offline_timeout**——无感切网（断流后客户端换源端口、接入层接管）要求
+  //     `datagram_idle_timeout ≥ 最长断流时间`，否则 battle 会在断流期间先关掉会话，
+  //     之后接入层接管只是换了接入层这一段，battle 侧已无会话可续。
+  // 取舍：该值越大，掉线连接占用帧会话/座位的越久（判负要等到 idle 超时 + offline_timeout）；
+  // 与 offline_timeout 的配套口径见 docs/config.md §7.3。
+  string datagram_idle_timeout = 12;
 }
 
 // EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。
