@@ -117,6 +117,10 @@ message IssueEntryTicketReply {
   repeated EdgeEndpoint endpoints = 1;
   repeated BattleTicketEntry tickets = 2;
   int64 expires_at_unix_ms = 3;
+  // max_network_gap_ms 是 battle 配置 battle.max_network_gap 的生效值（毫秒；0 = 未启用/旧服务端
+  // 未下发）。语义：**玩家最多断网多久还能回来**，客户端据此设置自己的空闲判定，不必再单独配置；
+  // 由 matcher 原样搬进成局事件、最终随 MatchStartedNotify 下发。
+  int64 max_network_gap_ms = 4;
 }
 
 // BattleService 是战斗域统一业务契约（客户端 op 与 actor 分发共用一份）。

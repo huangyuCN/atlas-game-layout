@@ -257,6 +257,9 @@ public sealed class MatchStartedNotify
     [JsonPropertyName("endpoints")]
     public List<EdgeEndpoint>? Endpoints { get; set; }
 
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("maxNetworkGapMs")]
+    public long? MaxNetworkGapMs { get; set; }
+
 }
 
 /// <summary>MatchFailedNotify DTO（protojson JSON 语义）。</summary>

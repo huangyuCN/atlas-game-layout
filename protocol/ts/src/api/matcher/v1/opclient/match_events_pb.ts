@@ -11,6 +11,7 @@ export interface MatchStartedEvent {
   playerIds?: string[]; // matcher.v1.MatchStartedEvent.player_ids
   battleTickets?: BattleTicketEntry[]; // matcher.v1.MatchStartedEvent.battle_tickets
   battleEndpoints?: EdgeEndpoint[]; // matcher.v1.MatchStartedEvent.battle_endpoints
+  maxNetworkGapMs?: string // int64; // matcher.v1.MatchStartedEvent.max_network_gap_ms
 }
 
 export interface MatchFailedEvent {

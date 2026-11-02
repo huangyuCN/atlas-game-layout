@@ -74,6 +74,8 @@ func (b *BattleActor) signTickets(players []string) (*battlev1.IssueEntryTicketR
 		Endpoints:       instances[0],
 		Tickets:         tickets,
 		ExpiresAtUnixMs: expiresAt.UnixMilli(),
+		// 客户端据此设置自己的空闲判定（毫秒；0 = 未启用 ⇒ SDK 保持既有缺省）。
+		MaxNetworkGapMs: b.cfg.MaxNetworkGap.Milliseconds(),
 	}, nil
 }
 

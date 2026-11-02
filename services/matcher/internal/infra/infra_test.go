@@ -140,6 +140,7 @@ func TestSinkCarriesBattleTicketsIntoStartedEvent(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // 订阅注册有异步窗口
 
 	stub := &stubBattleClient{reply: stubReply(t)}
+	stub.reply.MaxNetworkGapMs = 30000 // battle 配置的 max_network_gap（matcher 只搬运）
 	sink := NewSink(pkgnats.NewPublisher(nc, topics), stub)
 	ctx := context.Background()
 	playerIDs := []string{"p-1", "p-2"}
@@ -185,6 +186,9 @@ func TestSinkCarriesBattleTicketsIntoStartedEvent(t *testing.T) {
 		}
 		if got := len(ev.GetBattleTickets()); got != 2 {
 			t.Fatalf("事件票据张数 = %d, 期望 2", got)
+		}
+		if got := ev.GetMaxNetworkGapMs(); got != 30000 {
+			t.Fatalf("事件 max_network_gap_ms = %d, 期望 30000（battle 回执原样搬运）", got)
 		}
 		for _, entry := range ev.GetBattleTickets() {
 			tk, derr := ticket.Decode(entry.GetTicket(), testTicketKey())

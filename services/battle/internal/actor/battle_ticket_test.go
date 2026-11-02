@@ -149,3 +149,28 @@ func TestIssueEntryTicketShortKeyFails(t *testing.T) {
 		t.Errorf("错误应可判定为密钥长度问题或 INTERNAL，实际 %v", err)
 	}
 }
+
+// TestIssueEntryTicketCarriesMaxNetworkGap 验证 battle.max_network_gap 的生效值随出票回执
+// 下发（客户端据此设置空闲判定）：配 30s ⇒ 回执 30000ms；未启用 ⇒ 0（旧客户端/旧服务端语义）。
+func TestIssueEntryTicketCarriesMaxNetworkGap(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		gap  time.Duration
+		want int64
+	}{
+		{name: "启用 30s", gap: 30 * time.Second, want: 30000},
+		{name: "未启用", gap: 0, want: 0},
+	} {
+		cfg := testBattleConfig()
+		cfg.TicketKey = testTicketKey()
+		cfg.TicketTTL = DefaultTicketTTL
+		cfg.EdgeEndpoints = testEdgeEndpoints()
+		cfg.MaxNetworkGap = c.gap
+		env := newBattleEnvWith(t, cfg)
+		seedRoster(t, env, "p-a")
+		reply := issueTickets(t, env)
+		if got := reply.GetMaxNetworkGapMs(); got != c.want {
+			t.Fatalf("%s：回执 max_network_gap_ms = %d, 期望 %d", c.name, got, c.want)
+		}
+	}
+}

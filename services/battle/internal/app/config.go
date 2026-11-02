@@ -28,6 +28,9 @@ const ticketKeyLen = 32
 //   - datagram_idle_timeout 省略（或 0s）表示沿用 offline_timeout/3（现行为零变化），
 //     显式值必须落在 [1s, 600s]（见 datagramIdleTimeoutOf）；它可与 offline_timeout 解耦，
 //     允许更大（无感切网要求 ≥ 最长断流时间）；
+//   - max_network_gap（「玩家最多断网多久还能回来」）省略/0s = 不启用，显式值落在 [1s, 300s]；
+//     启用时**覆盖**上面两项（idle = gap，offline = gap × 1.5），与它们任一同时配置即启动失败
+//     （见 maxNetworkGapOf；一个值就够，开发者不必理解两处推导）；
 //   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（6000，10fps 下 10 分钟）/
 //     DefaultTickInterval（100ms），显式值越界即失败（见 frameLimitsOf）；
 //   - seat_window_ms 省略取 DefaultSeatWindow（3s），显式 0 表示**关闭入座窗口**（旧行为），
@@ -50,6 +53,12 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	if err != nil {
 		return out, err
 	}
+	// 先判 max_network_gap：配了它就与下面两项互斥（冲突要优先于任何单项解析错误报出，
+	// 否则开发者只会看到「某一项越界」，看不到「你根本不该同时配」）。
+	gap, err := maxNetworkGapOf(b)
+	if err != nil {
+		return out, err
+	}
 	offline, err := offlineTimeoutOf(b.GetOfflineTimeout())
 	if err != nil {
 		return out, err
@@ -57,6 +66,12 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	idle, err := datagramIdleTimeoutOf(b.GetDatagramIdleTimeout())
 	if err != nil {
 		return out, err
+	}
+	// 一个值生效即覆盖两处（P1 的核心）：会话静默窗口 = 可断网时长，判负窗口 = 它的 1.5 倍
+	//（判负必须晚于拆会话，否则客户端还没来得及回座就被出局）。
+	if gap > 0 {
+		idle = gap
+		offline = gap * 3 / 2
 	}
 	instances, err := edgeInstancesOf(b)
 	if err != nil {
@@ -78,6 +93,7 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out.TicketTTL = ttl
 	out.OfflineTimeout = offline
 	out.DatagramIdleTimeout = idle
+	out.MaxNetworkGap = gap
 	// 单实例兼容字段取首个实例：旧代码/旧客户端读它即得「第一实例的面列表」。
 	out.EdgeEndpoints = instances[0]
 	out.EdgeInstances = instances
@@ -272,6 +288,41 @@ func datagramIdleTimeoutOf(raw string) (time.Duration, error) {
 		return 0, fmt.Errorf("app: battle.datagram_idle_timeout 必须落在 [%s, %s] 内，实际 %s"+
 			"（0 表示沿用 offline_timeout/3；无感切网需 ≥ 最长断流时间，再长会占住掉线会话）",
 			actor.MinDatagramIdleTimeout, actor.MaxDatagramIdleTimeout, raw)
+	}
+	return d, nil
+}
+
+// maxNetworkGapOf 解析「玩家最多断网多久还能回来」（battle.max_network_gap）：
+// 空串与 "0s" 都表示**不启用**（返回 0，offline/idle 两项各自生效，现行为零变化）；
+// 显式值必须落在 [MinNetworkGap, MaxNetworkGap]，且不得与 offline_timeout 或
+// datagram_idle_timeout 同时配置——一个值自动推导与两个值手配并存时无人知道谁说了算，
+// 宁可启动失败也不静默择一（防配错）。启用后的推导在 newActorConfig 内完成。
+func maxNetworkGapOf(b *conf.BattleConf) (time.Duration, error) {
+	raw := b.GetMaxNetworkGap()
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("app: battle.max_network_gap 非法（time.ParseDuration 字符串，如 30s）: %w", err)
+	}
+	if d == 0 {
+		return 0, nil
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("app: battle.max_network_gap 不得为负，实际 %s（0 表示不启用）", raw)
+	}
+	if d < actor.MinNetworkGap || d > actor.MaxNetworkGap {
+		return 0, fmt.Errorf("app: battle.max_network_gap 必须落在 [%s, %s] 内，实际 %s"+
+			"（它表示「玩家最多断网多久还能回来」；无感切网只需覆盖最长断流 10–20s）",
+			actor.MinNetworkGap, actor.MaxNetworkGap, raw)
+	}
+	if b.GetOfflineTimeout() != "" || b.GetDatagramIdleTimeout() != "" {
+		return 0, fmt.Errorf("app: battle.max_network_gap 与 battle.offline_timeout / "+
+			"battle.datagram_idle_timeout 互斥（要么用 max_network_gap 一个值自动推导，"+
+			"要么用那两项分别配置；实际 max_network_gap=%s offline_timeout=%q "+
+			"datagram_idle_timeout=%q）",
+			raw, b.GetOfflineTimeout(), b.GetDatagramIdleTimeout())
 	}
 	return d, nil
 }

@@ -38,6 +38,9 @@ func NotifyFor(ev *matcherv1.MatchStartedEvent, playerID string) (*gamev1.MatchS
 		// 同一玩家恒定同一接入层实例 ⇒ 数据报面粘性）；旧服务端未下发时回落到事件级列表。
 		Endpoints:    append([]*battlev1.EdgeEndpoint(nil), endpointsOf(entry, ev)...),
 		BattleTicket: entry.GetTicket(),
+		// 服务端「玩家最多断网多久还能回来」原样照抄（毫秒；0 = 旧服务端/未启用，
+		// 客户端据此保持既有缺省，不猜）。
+		MaxNetworkGapMs: ev.GetMaxNetworkGapMs(),
 	}, true
 }
 

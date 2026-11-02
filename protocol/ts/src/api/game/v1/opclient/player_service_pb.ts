@@ -120,6 +120,7 @@ export interface MatchStartedNotify {
   playerIds?: string[]; // game.v1.MatchStartedNotify.player_ids
   battleTicket?: string // base64; // game.v1.MatchStartedNotify.battle_ticket
   endpoints?: EdgeEndpoint[]; // game.v1.MatchStartedNotify.endpoints
+  maxNetworkGapMs?: string // int64; // game.v1.MatchStartedNotify.max_network_gap_ms
 }
 
 export interface MatchFailedNotify {

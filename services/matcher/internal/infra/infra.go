@@ -151,6 +151,8 @@ func (p *NatsEventPublisher) PublishStarted(ctx context.Context, battleID, match
 		PlayerIds:       playerIDs,
 		BattleEndpoints: tickets.GetEndpoints(),
 		BattleTickets:   tickets.GetTickets(),
+		// battle.max_network_gap 的生效值（毫秒；0 = 未启用）——matcher 只搬运，不改语义。
+		MaxNetworkGapMs: tickets.GetMaxNetworkGapMs(),
 	})
 	if err != nil {
 		return fmt.Errorf("infra: 成局事件编码失败: %w", err)

@@ -162,3 +162,26 @@ func sameEndpoints(a, b []*battlev1.EdgeEndpoint) bool {
 	}
 	return true
 }
+
+// TestNotifyForCarriesMaxNetworkGap 验证服务端「玩家最多断网多久」随通知原样下发：
+// 事件带 30000ms ⇒ 通知同样带 30000ms；事件未带（旧服务端/未启用）⇒ 通知为 0（= 未下发）。
+func TestNotifyForCarriesMaxNetworkGap(t *testing.T) {
+	ev := startedEvent(t)
+	ev.MaxNetworkGapMs = 30000
+	notify, ok := NotifyFor(ev, "p-1")
+	if !ok {
+		t.Fatal("p-1 应得到通知")
+	}
+	if got := notify.GetMaxNetworkGapMs(); got != 30000 {
+		t.Fatalf("通知 max_network_gap_ms = %d, 期望 30000（原样搬运）", got)
+	}
+
+	ev.MaxNetworkGapMs = 0
+	notify, ok = NotifyFor(ev, "p-1")
+	if !ok {
+		t.Fatal("p-1 应得到通知")
+	}
+	if got := notify.GetMaxNetworkGapMs(); got != 0 {
+		t.Fatalf("未配置时通知 max_network_gap_ms = %d, 期望 0", got)
+	}
+}

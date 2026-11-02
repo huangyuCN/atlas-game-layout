@@ -51,6 +51,9 @@ public sealed class MatchStartedEvent
     [JsonPropertyName("battleEndpoints")]
     public List<EdgeEndpoint>? BattleEndpoints { get; set; }
 
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("maxNetworkGapMs")]
+    public long? MaxNetworkGapMs { get; set; }
+
 }
 
 /// <summary>MatchFailedEvent DTO（protojson JSON 语义）。</summary>

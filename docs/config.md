@@ -100,7 +100,8 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `server.kcp.idle_timeout` / `server.udp.idle_timeout`（battle） | 无（本服务按掉线窗口推导） | 空/`0s` ⇒ 取 `battle.offline_timeout / 3`（缺省 15s → 5s） | 显式值必须**严格小于** `battle.offline_timeout`，否则装配期启动失败（数据报面无关闭握手，掉线只能靠空闲读超时发现，见 §7）；**若同时配了 `battle.datagram_idle_timeout`，两处不一致即失败**（独立配置优先，见 §7.3） |
 | `battle.ticket_key` | 非空 base64 且解码后 32 字节 | **启动失败**（无默认值） | 必须与 `edge.ticket_key` 同值，否则帧面全面拒票 |
 | `battle.ticket_ttl` | 无 | — | 空 ⇒ 120s；必须为正；应大于 `offline_timeout`（窗口内重连复用同一张票） |
-| `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；它就是**「连接被判掉线后多久判负」**的窗口，合法区间 `[1s, 300s]`（**无感切网需 ≥15–20s**，与挂机占座的权衡见 §7.3）；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法/越界即失败 |
+| `battle.max_network_gap` | 无 | — | **一句话：`max_network_gap` = 玩家最多断网多久还能回来；配了它就不用管其它两个**。空/`0s` = **不启用**（两项各自生效，行为零变化）；显式值合法区间 `[1s, 300s]`，负值/非法/越界即启动失败。启用后自动推导并覆盖：`datagram_idle_timeout = max_network_gap`、`offline_timeout = max_network_gap × 1.5`（判负晚于拆会话）；与 `offline_timeout` 或 `datagram_idle_timeout` **同时配置即启动失败**（要么用它，要么用那两项，防配错）。推导细节见 §7.3 |
+| `battle.offline_timeout` | 无 | — | 空 ⇒ 15s；它就是**「连接被判掉线后多久判负」**的窗口，合法区间 `[1s, 300s]`（**无感切网需 ≥15–20s**，与挂机占座的权衡见 §7.3）；显式 `0s` = **关闭掉线判定**（此时数据报面 idle 不推导也不校验）；负值/非法/越界即失败；**配了 `max_network_gap` 就不能再配它** |
 | `battle.datagram_idle_timeout` | 无 | — | 空/`0s` ⇒ **沿用 `offline_timeout / 3`**（缺省 15s → 5s，现行为零变化）；显式值合法区间 `[1s, 600s]`，负值/非法/越界即启动失败。它是数据报面（KCP/UDP）的**静默检测独立配置**，与 `offline_timeout` 解耦、**可以更大**：**无感切网需要 `datagram_idle_timeout ≥ 最长断流时间`**（否则断流中 battle 先关会话，接入层接管后无会话可续）；⚠️ **该值越大，掉线连接占用的会话越久**（判负 = idle 超时 + `offline_timeout`），见 §7.3 |
 | `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 6000 帧 / 100ms（= 10 分钟一局；60 帧只够 6 秒，见 §7.6 的取值依据）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
 | `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
@@ -183,8 +184,18 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 端口既不写死也不进票据：接入层从 `battle-frame` 实例元数据里读各面**已绑定**的真实端口
 （`server.kcp/udp/websocket.addr` 的端口填 0 时，注册的是内核分配后的真实端口）。
 
-### 7.3 `battle.offline_timeout` 与数据报面 `idle_timeout` 的推导
+### 7.3 `battle.max_network_gap` / `battle.offline_timeout` 与数据报面 `idle_timeout` 的推导
 
+- **只配一个值（推荐）**：`battle.max_network_gap` 的语义是「**玩家最多断网多久还能回来**」。
+  配了它（如 `30s`）就**不用管其它两个**：`datagram_idle_timeout = max_network_gap`（会话至少活
+  这么久）、`offline_timeout = max_network_gap × 1.5`（判负晚于拆会话）。空/`0s` = 不启用（下面
+  两项各自生效，行为零变化）；合法区间 `[1s, 300s]`；与 `offline_timeout` 或
+  `datagram_idle_timeout` 同时配置即**启动失败**（要么用它，要么用那两项，避免二义与配错）。
+  实现：`services/battle/internal/app/config.go` 的 `maxNetworkGapOf` + `newActorConfig` 覆盖。
+  **下发链路（P2）**：该值随出票回执（`IssueEntryTicketReply.max_network_gap_ms`）→ 成局事件
+  （`MatchStartedEvent.max_network_gap_ms`）→ 客户端通知（`MatchStartedNotify.max_network_gap_ms`）
+  原样下发：Go SDK 缺省 T2 = gap × 1.5（显式 `WithIdleDeadline` 优先），TS/C# 在直连 plan 上
+  暴露该值；旧服务端未下发（0）时三端回落既有缺省，行为零变化。
 - `battle.offline_timeout` 是掉线判定窗口（空 ⇒ 15s；显式 `0s` = **关闭**掉线判定，此时既不推导也不校验）。
   它是「**连接被判掉线后多久判负**」的窗口（判定点：`services/battle/internal/actor/battle_offline.go`
   的 `armOffline` → `onOfflineTimeout` → `eliminate`，**不写死在判定点**）。配置面校验落在

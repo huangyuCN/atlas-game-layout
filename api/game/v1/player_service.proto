@@ -178,6 +178,10 @@ message MatchStartedNotify {
   // endpoints 是接入层「传输面 → 地址」列表（对所有人相同，由扇出方照抄成局事件）。
   // SDK 按自身支持的传输面取一个，缺该面即明确报错（不得回退猜端口、不得静默换面）。
   repeated battle.v1.EdgeEndpoint endpoints = 6;
+  // max_network_gap_ms 是服务端给出的「玩家最多断网多久还能回来」（毫秒；0 = 未启用/旧服务端
+  // 未下发）。客户端应据此设置自己的空闲判定（必须**大于**服务端的会话静默窗口，否则客户端
+  // 先重建、无感切网失效）；显式设置的 SDK 逃生阀选项仍优先。
+  int64 max_network_gap_ms = 7;
 }
 
 // MatchFailedNotify 服务端推送：匹配失败/超时/取消通知。

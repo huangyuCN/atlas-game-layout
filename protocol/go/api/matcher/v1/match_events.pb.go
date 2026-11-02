@@ -152,6 +152,9 @@ type MatchStartedEvent struct {
 	// battle_endpoints 是接入层「传输面 → 地址」列表（来源是 battle 配置 edge_endpoints，
 	// matcher 只搬运；对所有人相同）。消费方按自身传输面取一个，缺该面即明确报错。
 	BattleEndpoints []*v1.EdgeEndpoint `protobuf:"bytes,6,rep,name=battle_endpoints,json=battleEndpoints,proto3" json:"battle_endpoints,omitempty"`
+	// max_network_gap_ms 是 battle 出票回执里的 battle.max_network_gap（毫秒；0 = 未启用/旧服务端）。
+	// matcher 只搬运；扇出通知时原样填入 MatchStartedNotify.max_network_gap_ms。
+	MaxNetworkGapMs int64 `protobuf:"varint,7,opt,name=max_network_gap_ms,json=maxNetworkGapMs,proto3" json:"max_network_gap_ms,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -219,6 +222,13 @@ func (x *MatchStartedEvent) GetBattleEndpoints() []*v1.EdgeEndpoint {
 		return x.BattleEndpoints
 	}
 	return nil
+}
+
+func (x *MatchStartedEvent) GetMaxNetworkGapMs() int64 {
+	if x != nil {
+		return x.MaxNetworkGapMs
+	}
+	return 0
 }
 
 // MatchFailedEvent 匹配失败（超时/取消/异常）：单玩家 ticket 终态，
@@ -366,14 +376,15 @@ var File_api_matcher_v1_match_events_proto protoreflect.FileDescriptor
 const file_api_matcher_v1_match_events_proto_rawDesc = "" +
 	"\n" +
 	"!api/matcher/v1/match_events.proto\x12\n" +
-	"matcher.v1\x1a\"api/battle/v1/battle_service.proto\"\xf9\x01\n" +
+	"matcher.v1\x1a\"api/battle/v1/battle_service.proto\"\xa6\x02\n" +
 	"\x11MatchStartedEvent\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1b\n" +
 	"\tbattle_id\x18\x02 \x01(\tR\bbattleId\x12\x1d\n" +
 	"\n" +
 	"player_ids\x18\x03 \x03(\tR\tplayerIds\x12C\n" +
 	"\x0ebattle_tickets\x18\x05 \x03(\v2\x1c.battle.v1.BattleTicketEntryR\rbattleTickets\x12B\n" +
-	"\x10battle_endpoints\x18\x06 \x03(\v2\x17.battle.v1.EdgeEndpointR\x0fbattleEndpointsJ\x04\b\x04\x10\x05\"\x9e\x01\n" +
+	"\x10battle_endpoints\x18\x06 \x03(\v2\x17.battle.v1.EdgeEndpointR\x0fbattleEndpoints\x12+\n" +
+	"\x12max_network_gap_ms\x18\a \x01(\x03R\x0fmaxNetworkGapMsJ\x04\b\x04\x10\x05\"\x9e\x01\n" +
 	"\x10MatchFailedEvent\x12\x19\n" +
 	"\bmatch_id\x18\x01 \x01(\tR\amatchId\x12\x1d\n" +
 	"\n" +

@@ -22,6 +22,9 @@ message MatchStartedEvent {
   // battle_endpoints 是接入层「传输面 → 地址」列表（来源是 battle 配置 edge_endpoints，
   // matcher 只搬运；对所有人相同）。消费方按自身传输面取一个，缺该面即明确报错。
   repeated battle.v1.EdgeEndpoint battle_endpoints = 6;
+  // max_network_gap_ms 是 battle 出票回执里的 battle.max_network_gap（毫秒；0 = 未启用/旧服务端）。
+  // matcher 只搬运；扇出通知时原样填入 MatchStartedNotify.max_network_gap_ms。
+  int64 max_network_gap_ms = 7;
 }
 
 // MatchFailReason 是匹配失败原因（客户端可读枚举，对齐状态机终态与处置来源）。

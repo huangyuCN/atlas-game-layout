@@ -106,6 +106,17 @@ message BattleConf {
   // 取舍：该值越大，掉线连接占用帧会话/座位的越久（判负要等到 idle 超时 + offline_timeout）；
   // 与 offline_timeout 的配套口径见 docs/config.md §7.3。
   string datagram_idle_timeout = 12;
+  // max_network_gap 是「玩家最多断网多久还能回来」的**唯一业务配置**（time.ParseDuration
+  // 字符串，如 30s）：面向开发者的语义只有这一句，配了它就**不用再管** offline_timeout 与
+  // datagram_idle_timeout——两者由它自动推导：
+  //   - datagram_idle_timeout = max_network_gap（会话至少活这么久，断流中不先拆会话）；
+  //   - offline_timeout = max_network_gap × 1.5（判负晚于拆会话，给回座留出余量）。
+  //   - 不配置 / 显式 0s：**不启用**（保持两项各自的现有行为，零破坏）；
+  //   - 显式值：必须落在 [1s, 300s]；与 offline_timeout 或 datagram_idle_timeout 同时配置
+  //     即启动失败（二义：要么用 max_network_gap，要么用那两项）。
+  // 客户端侧：该值随出票回执 → 成局事件 → MatchStartedNotify.max_network_gap_ms 下发，
+  // 客户端据此设置自己的空闲判定，不必再单独配置；显式设置的 SDK 选项仍优先（逃生阀）。
+  string max_network_gap = 13;
 }
 
 // EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。

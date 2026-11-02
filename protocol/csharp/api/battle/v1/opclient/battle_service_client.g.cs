@@ -134,6 +134,9 @@ public sealed class BattleTicketEntry
     [JsonPropertyName("ticket")]
     public byte[]? Ticket { get; set; }
 
+    [JsonPropertyName("endpoints")]
+    public List<EdgeEndpoint>? Endpoints { get; set; }
+
 }
 
 /// <summary>IssueEntryTicketReply DTO（protojson JSON 语义）。</summary>
@@ -147,6 +150,9 @@ public sealed class IssueEntryTicketReply
 
     [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("expiresAtUnixMs")]
     public long? ExpiresAtUnixMs { get; set; }
+
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("maxNetworkGapMs")]
+    public long? MaxNetworkGapMs { get; set; }
 
 }
 
