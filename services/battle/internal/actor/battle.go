@@ -60,7 +60,8 @@ type Config struct {
 	DatagramIdleTimeout time.Duration
 	// MaxNetworkGap 是「玩家最多断网多久还能回来」的唯一业务配置（battle.max_network_gap 的
 	// 生效值；0 = 未启用 ⇒ 上面两项各自生效，现行为零变化）。启用时由配置装配层推导：
-	// DatagramIdleTimeout = MaxNetworkGap，OfflineTimeout = MaxNetworkGap × 1.5；
+	// DatagramIdleTimeout = MaxNetworkGap，OfflineTimeout = min(MaxNetworkGap × 1.5, MaxOfflineTimeout)
+	//（若 gap×1.5 超过 offline 上限（300s），按 300s 夹取）；
 	// 同时随出票回执（max_network_gap_ms）下发，客户端据此设空闲判定，故 actor 需要持有生效值。
 	MaxNetworkGap time.Duration
 	// SeatWindow 是成局后的**入座窗口**（≤0 = 关闭窗口，成局即开打——旧行为）。
@@ -112,7 +113,7 @@ const (
 	// 亚秒值必然先于任何有意义的往返触发，属于笔误。
 	MinNetworkGap = time.Second
 	// MaxNetworkGap 是 max_network_gap 的配置上限：300s 已是「挂机占座」的容忍顶
-	//（推导出的判负窗口 = 450s）；无感切网只需覆盖最长断流（实测 10–20s）。
+	//（推导出的判负窗口夹取到 MaxOfflineTimeout = 300s）；无感切网只需覆盖最长断流（实测 10–20s）。
 	MaxNetworkGap = 300 * time.Second
 	// DefaultSeatWindow 是成局后入座窗口的缺省值（3s）：客户端从收到成局通知到建连、
 	// 握手、首帧，实测 1–2s，留一倍余量；再长就等于「成局不开打」。

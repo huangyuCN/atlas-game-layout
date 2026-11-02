@@ -155,7 +155,8 @@ battle:
   ticket_ttl: 120s
   # max_network_gap 是「**玩家最多断网多久还能回来**」的**唯一推荐配置**（time.ParseDuration
   # 字符串，如 30s）：配了它就**不用管** offline_timeout 与 datagram_idle_timeout——自动推导
-  # `datagram_idle_timeout = max_network_gap`、`offline_timeout = max_network_gap × 1.5`。
+  # `datagram_idle_timeout = max_network_gap`、`offline_timeout = min(max_network_gap × 1.5, 300s)`；
+  # 若 gap×1.5 超过 offline 上限（300s），按 300s 夹取。
   # 空/0s = 不启用（下面两项各自生效，行为零变化）；合法区间 [1s, 300s]；与下面任一项同时
   # 配置即启动失败（要么用它，要么用那两项）。见 docs/config.md §7.3。
   # max_network_gap: 30s

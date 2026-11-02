@@ -29,8 +29,9 @@ const ticketKeyLen = 32
 //     显式值必须落在 [1s, 600s]（见 datagramIdleTimeoutOf）；它可与 offline_timeout 解耦，
 //     允许更大（无感切网要求 ≥ 最长断流时间）；
 //   - max_network_gap（「玩家最多断网多久还能回来」）省略/0s = 不启用，显式值落在 [1s, 300s]；
-//     启用时**覆盖**上面两项（idle = gap，offline = gap × 1.5），与它们任一同时配置即启动失败
-//     （见 maxNetworkGapOf；一个值就够，开发者不必理解两处推导）；
+//     启用时**覆盖**上面两项（idle = gap，offline = gap × 1.5），与它们任一同时配置即启动失败；
+//     若 gap×1.5 超过 offline 上限（300s），按 300s 夹取（见 maxNetworkGapOf；一个值就够，
+//     开发者不必理解两处推导）；
 //   - max_frames / tick_interval_ms 省略取 DefaultMaxFrames（6000，10fps 下 10 分钟）/
 //     DefaultTickInterval（100ms），显式值越界即失败（见 frameLimitsOf）；
 //   - seat_window_ms 省略取 DefaultSeatWindow（3s），显式 0 表示**关闭入座窗口**（旧行为），
@@ -53,25 +54,9 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	if err != nil {
 		return out, err
 	}
-	// 先判 max_network_gap：配了它就与下面两项互斥（冲突要优先于任何单项解析错误报出，
-	// 否则开发者只会看到「某一项越界」，看不到「你根本不该同时配」）。
-	gap, err := maxNetworkGapOf(b)
+	gap, offline, idle, err := timeoutsOf(b)
 	if err != nil {
 		return out, err
-	}
-	offline, err := offlineTimeoutOf(b.GetOfflineTimeout())
-	if err != nil {
-		return out, err
-	}
-	idle, err := datagramIdleTimeoutOf(b.GetDatagramIdleTimeout())
-	if err != nil {
-		return out, err
-	}
-	// 一个值生效即覆盖两处（P1 的核心）：会话静默窗口 = 可断网时长，判负窗口 = 它的 1.5 倍
-	//（判负必须晚于拆会话，否则客户端还没来得及回座就被出局）。
-	if gap > 0 {
-		idle = gap
-		offline = gap * 3 / 2
 	}
 	instances, err := edgeInstancesOf(b)
 	if err != nil {
@@ -103,6 +88,29 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out.MaxPlayers = players
 	out.FrameBroadcastProtobuf = b.GetFrameBroadcastProtobuf()
 	return out, nil
+}
+
+// timeoutsOf 解析三处超时配置并完成 max_network_gap 推导：先判 gap（配了它即与另两项互斥，
+// 冲突要优先于任何单项解析错误报出），再解析 offline/idle；gap 启用时覆盖两项
+// （idle = gap，offline = min(gap × 1.5, MaxOfflineTimeout)，即超 300s 按 300s 夹取）。
+func timeoutsOf(b *conf.BattleConf) (gap, offline, idle time.Duration, err error) {
+	if gap, err = maxNetworkGapOf(b); err != nil {
+		return 0, 0, 0, err
+	}
+	if offline, err = offlineTimeoutOf(b.GetOfflineTimeout()); err != nil {
+		return 0, 0, 0, err
+	}
+	if idle, err = datagramIdleTimeoutOf(b.GetDatagramIdleTimeout()); err != nil {
+		return 0, 0, 0, err
+	}
+	// 一个值生效即覆盖两处（P1 的核心）：会话静默窗口 = 可断网时长，判负窗口 = 它的 1.5 倍
+	//（判负必须晚于拆会话，否则客户端还没来得及回座就被出局）；若 gap×1.5 超过 offline 上限
+	//（300s），按 300s 夹取——gap 本身 ≤300s（MaxNetworkGap），故 idle 无需夹取。
+	if gap > 0 {
+		idle = gap
+		offline = min(gap*3/2, actor.MaxOfflineTimeout)
+	}
+	return gap, offline, idle, nil
 }
 
 // seatWindowOf 解析入座窗口（battle.seat_window_ms）：字段**缺失**取缺省 3s；

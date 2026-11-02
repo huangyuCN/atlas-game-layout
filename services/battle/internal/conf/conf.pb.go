@@ -124,7 +124,8 @@ type BattleConf struct {
 	// 字符串，如 30s）：面向开发者的语义只有这一句，配了它就**不用再管** offline_timeout 与
 	// datagram_idle_timeout——两者由它自动推导：
 	//   - datagram_idle_timeout = max_network_gap（会话至少活这么久，断流中不先拆会话）；
-	//   - offline_timeout = max_network_gap × 1.5（判负晚于拆会话，给回座留出余量）。
+	//   - offline_timeout = min(max_network_gap × 1.5, 300s)（判负晚于拆会话，给回座留出余量；
+	//     若 gap×1.5 超过 offline 上限（300s），按 300s 夹取）。
 	//   - 不配置 / 显式 0s：**不启用**（保持两项各自的现有行为，零破坏）；
 	//   - 显式值：必须落在 [1s, 300s]；与 offline_timeout 或 datagram_idle_timeout 同时配置
 	//     即启动失败（二义：要么用 max_network_gap，要么用那两项）。

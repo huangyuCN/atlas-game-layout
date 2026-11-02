@@ -68,8 +68,9 @@ func TestMaxNetworkGapDefaultUnchanged(t *testing.T) {
 }
 
 // TestMaxNetworkGapDerivesTimeouts 验证一个值自动推导两处（旧实现只有两项、不推导 ⇒ 真红）：
-// datagram_idle_timeout = max_network_gap；offline_timeout = max_network_gap × 1.5
-// （判负晚于拆会话，客户端才来得及在窗口内回座）。
+// datagram_idle_timeout = max_network_gap；offline_timeout = min(max_network_gap × 1.5, 300s)
+// （判负晚于拆会话，客户端才来得及在窗口内回座；gap×1.5 超过 offline 单项上限（300s）时
+// 按 300s 夹取，故 gap=300s 的判负窗口是 300s 而不是旧的 450s）。
 func TestMaxNetworkGapDerivesTimeouts(t *testing.T) {
 	cases := []struct {
 		raw     string
@@ -80,7 +81,8 @@ func TestMaxNetworkGapDerivesTimeouts(t *testing.T) {
 		{raw: "30s", gap: 30 * time.Second, idle: 30 * time.Second, offline: 45 * time.Second},
 		{raw: "20s", gap: 20 * time.Second, idle: 20 * time.Second, offline: 30 * time.Second},
 		{raw: "1s", gap: actor.MinNetworkGap, idle: time.Second, offline: 1500 * time.Millisecond},
-		{raw: "300s", gap: actor.MaxNetworkGap, idle: 300 * time.Second, offline: 450 * time.Second},
+		{raw: "200s", gap: 200 * time.Second, idle: 200 * time.Second, offline: 300 * time.Second},
+		{raw: "300s", gap: actor.MaxNetworkGap, idle: 300 * time.Second, offline: 300 * time.Second},
 	}
 	for _, c := range cases {
 		got, err := newActorConfig(newGapTestConfig(c.raw, "", ""))
@@ -94,7 +96,7 @@ func TestMaxNetworkGapDerivesTimeouts(t *testing.T) {
 			t.Fatalf("%s：DatagramIdleTimeout = %s, 期望 %s", c.raw, got.DatagramIdleTimeout, c.idle)
 		}
 		if got.OfflineTimeout != c.offline {
-			t.Fatalf("%s：OfflineTimeout = %s, 期望 %s（gap × 1.5）", c.raw, got.OfflineTimeout, c.offline)
+			t.Fatalf("%s：OfflineTimeout = %s, 期望 %s（min(gap × 1.5, 300s)）", c.raw, got.OfflineTimeout, c.offline)
 		}
 	}
 }
