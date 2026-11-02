@@ -31,6 +31,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # 跨仓检出凭证：首选 GitHub App 安装令牌（只读、1 小时过期、不绑个人），
+      # 未配置 APP_ID / APP_PRIVATE_KEY 或签发失败时回退旧 PAT 链路。
+      - name: 签发 GitHub App 安装令牌（跨仓只读）
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          # 令牌只覆盖这四个被检出的仓（App 需已安装到它们，少装一个该输入即校验失败）。
+          repositories: atlas,atlas-game-layout,atlas-sdk-go,cow
+
       - name: Checkout Atlas（replace ../atlas）
         id: checkout-atlas
         continue-on-error: true
@@ -40,7 +53,7 @@ jobs:
           ref: ${{ env.ATLAS_REF }}
           path: .ci-deps/atlas
           persist-credentials: false
-          token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token || secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Checkout atlas-sdk-go（replace ../atlas-sdk-go）
         id: checkout-sdk-go
@@ -51,7 +64,7 @@ jobs:
           ref: main
           path: .ci-deps/atlas-sdk-go
           persist-credentials: false
-          token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token || secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Checkout cow（replace ../cow）
         id: checkout-cow
@@ -62,16 +75,16 @@ jobs:
           ref: ${{ env.COW_REF }}
           path: .ci-deps/cow
           persist-credentials: false
-          token: ${{ secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token || secrets.ATLAS_CI_TOKEN || secrets.ATLAS_PAT || secrets.GH_PAT || secrets.CI_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: 校验 Atlas/cow 检出（私有仓库需 PAT）
+      - name: 校验 Atlas/cow 检出（私有仓库需 App 令牌或 PAT）
         run: |
           if [ ! -f "$GITHUB_WORKSPACE/.ci-deps/atlas/go.mod" ]; then
             echo "::error::无法检出 huangyuCN/atlas（Repository not found）"
             echo "  原因：atlas 为私有仓库，GITHUB_TOKEN 无权跨仓库读取。"
-            echo "  解决：请在 atlas-game-layout 仓库 Settings → Secrets and variables → Actions 中新增"
-            echo "        ATLAS_CI_TOKEN（或 ATLAS_PAT / GH_PAT / CI_PAT）—— 一个有 huangyuCN/atlas 与 huangyuCN/cow 读权限的 fine-grained PAT（Contents: Read）"
-            echo "        或将 atlas/cow 设为 public / internal。"
+            echo "  解决（首选）：在本仓 Secrets 配 APP_ID / APP_PRIVATE_KEY，并确认该 GitHub App 已安装到"
+            echo "        huangyuCN/atlas、huangyuCN/cow、huangyuCN/atlas-sdk-go（权限 Contents: Read）。"
+            echo "  解决（回退）：配 ATLAS_CI_TOKEN（或 ATLAS_PAT / GH_PAT / CI_PAT）—— 一个有上述仓读权限的 PAT。"
             exit 1
           fi
           if [ ! -f "$GITHUB_WORKSPACE/.ci-deps/cow/go.mod" ]; then
