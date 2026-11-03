@@ -8,12 +8,19 @@ import type { Invoker, InvokeOption } from '@huangyucn/atlas-sdk-ts';
 
 export interface JoinBattleReq {
   battleId?: string; // battle.v1.JoinBattleReq.battle_id
+  acceptPayloadVersions?: FramePayloadVersion[]; // battle.v1.JoinBattleReq.accept_payload_versions
 }
 
 export interface JoinBattleReply {
   meta?: SessionMeta; // battle.v1.JoinBattleReply.meta
   currentFrame?: string // int64; // battle.v1.JoinBattleReply.current_frame
   snapshot?: SnapshotMeta; // battle.v1.JoinBattleReply.snapshot
+  payloadVersion?: FramePayloadVersion; // battle.v1.JoinBattleReply.payload_version
+}
+
+export interface RequestFrameKeyframeReq {
+  battleId?: string; // battle.v1.RequestFrameKeyframeReq.battle_id
+  lastSeq?: string // int64; // battle.v1.RequestFrameKeyframeReq.last_seq
 }
 
 export interface FrameInputReq {
@@ -63,6 +70,16 @@ export interface IssueEntryTicketReply {
   maxNetworkGapMs?: string // int64; // battle.v1.IssueEntryTicketReply.max_network_gap_ms
 }
 
+export interface FrameBroadcastDelta {
+  baseSeq?: string // int64; // battle.v1.FrameBroadcastDelta.base_seq
+  seq?: string // int64; // battle.v1.FrameBroadcastDelta.seq
+  changed?: FrameDeltaField[]; // battle.v1.FrameBroadcastDelta.changed
+  serverTimeUnixNano?: string // int64; // battle.v1.FrameBroadcastDelta.server_time_unix_nano
+  setInputs?: LockstepInput[]; // battle.v1.FrameBroadcastDelta.set_inputs
+  removedPlayerIds?: string[]; // battle.v1.FrameBroadcastDelta.removed_player_ids
+  snapshot?: SnapshotMeta; // battle.v1.FrameBroadcastDelta.snapshot
+}
+
 export interface FrameBroadcast {
   battleId?: string; // battle.v1.FrameBroadcast.battle_id
   frame?: LockstepFrame; // battle.v1.FrameBroadcast.frame
@@ -79,7 +96,11 @@ export interface PlayerOutNotify {
   reason?: PlayerOutReason; // battle.v1.PlayerOutNotify.reason
 }
 
+export type FramePayloadVersion = "FRAME_PAYLOAD_VERSION_UNSPECIFIED" | "FRAME_PAYLOAD_VERSION_PROTOJSON" | "FRAME_PAYLOAD_VERSION_PROTOBUF" | "FRAME_PAYLOAD_VERSION_DELTA";
+
 export type EdgeTransport = "EDGE_TRANSPORT_UNSPECIFIED" | "EDGE_TRANSPORT_WS" | "EDGE_TRANSPORT_KCP" | "EDGE_TRANSPORT_UDP";
+
+export type FrameDeltaField = "FRAME_DELTA_FIELD_UNSPECIFIED" | "FRAME_DELTA_FIELD_SERVER_TIME" | "FRAME_DELTA_FIELD_INPUTS" | "FRAME_DELTA_FIELD_SNAPSHOT";
 
 export type PlayerOutReason = "PLAYER_OUT_REASON_UNSPECIFIED" | "PLAYER_OUT_REASON_OFFLINE_TIMEOUT";
 
@@ -104,6 +125,10 @@ export class BattleService {
   async ping(req: PingReq | null, ...opts: InvokeOption[]): Promise<void> {
     await this.inv.invoke('/battle.v1.BattleService/Ping', req ?? {}, ...opts);
   }
+  /** /battle.v1.BattleService/RequestFrameKeyframe：单向调用（returns Empty，无回执）。 */
+  async requestFrameKeyframe(req: RequestFrameKeyframeReq | null, ...opts: InvokeOption[]): Promise<void> {
+    await this.inv.invoke('/battle.v1.BattleService/RequestFrameKeyframe', req ?? {}, ...opts);
+  }
 }
 
 /** BattleServiceProtocolOps 是 BattleService 的会话 op 名（按 rpc 名索引）。 */
@@ -112,6 +137,7 @@ export const BattleServiceProtocolOps = {
   sendframeinput: "/battle.v1.BattleService/SendFrameInput",
   syncframes: "/battle.v1.BattleService/SyncFrames",
   ping: "/battle.v1.BattleService/Ping",
+  requestframekeyframe: "/battle.v1.BattleService/RequestFrameKeyframe",
 } as const;
 
 /** BattleServiceToken 从会话消息里取 Token（无该字段返回零值）。 */

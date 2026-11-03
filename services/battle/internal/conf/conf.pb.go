@@ -154,9 +154,15 @@ type BattleConf struct {
 	//   - 下限 512MiB：更小的上限会让 GOGC=off 的进程被内存上限反复触发 GC，
 	//     延迟收益归零甚至反转，故配置面直接拒绝（启动失败）；
 	//   - memory_mode 未开启（缺省/off）时配置本项即启动失败（配了没生效属于误配）。
-	MemoryLimit   string `protobuf:"bytes,15,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	MemoryLimit string `protobuf:"bytes,15,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
+	// frame_broadcast_delta 是**下行增量编码（ver=3）**的节点级开关（不配置 = false = 现行为零变化）：
+	// 打开后，协商到 ver=3 的连接发增量（帧头 ver=3），未协商/未声明的连接与 UDP 面仍发全量。
+	// **开启前提**：frame_broadcast_protobuf = true（关键帧就是 ver=2 全量帧）——不自洽即启动失败。
+	// 只省字节，**不减少包数**（每连接每 tick 仍是一次写）；恢复靠 base_seq 自校验 + 按需关键帧 +
+	// 每 300 tick 的周期兜底，详见 docs/superpowers/specs/2026-11-03-downlink-delta-encoding.md。
+	FrameBroadcastDelta bool `protobuf:"varint,16,opt,name=frame_broadcast_delta,json=frameBroadcastDelta,proto3" json:"frame_broadcast_delta,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *BattleConf) Reset() {
@@ -292,6 +298,13 @@ func (x *BattleConf) GetMemoryLimit() string {
 		return x.MemoryLimit
 	}
 	return ""
+}
+
+func (x *BattleConf) GetFrameBroadcastDelta() bool {
+	if x != nil {
+		return x.FrameBroadcastDelta
+	}
+	return false
 }
 
 // EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。
@@ -457,7 +470,7 @@ var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\x8a\x06\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xbe\x06\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -480,7 +493,8 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\x0fmax_network_gap\x18\r \x01(\tR\rmaxNetworkGap\x12\x1f\n" +
 	"\vmemory_mode\x18\x0e \x01(\tR\n" +
 	"memoryMode\x12!\n" +
-	"\fmemory_limit\x18\x0f \x01(\tR\vmemoryLimitB\x17\n" +
+	"\fmemory_limit\x18\x0f \x01(\tR\vmemoryLimit\x122\n" +
+	"\x15frame_broadcast_delta\x18\x10 \x01(\bR\x13frameBroadcastDeltaB\x17\n" +
 	"\x15_frame_advertise_hostB\r\n" +
 	"\v_max_framesB\x13\n" +
 	"\x11_tick_interval_msB\x11\n" +

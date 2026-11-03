@@ -20,9 +20,21 @@ import "api/battle/v1/battle.proto";
 import "api/lockstep/lockstep.proto";
 import "google/protobuf/empty.proto";
 
+// FramePayloadVersion 是帧广播载荷版本，与帧头 ver 位一一对应（不得另立字面量）。
+enum FramePayloadVersion {
+  FRAME_PAYLOAD_VERSION_UNSPECIFIED = 0; // 不得下发
+  FRAME_PAYLOAD_VERSION_PROTOJSON = 1;   // ver=1 全量 protojson
+  FRAME_PAYLOAD_VERSION_PROTOBUF = 2;    // ver=2 全量 protobuf（同时是 ver=3 的关键帧载体）
+  FRAME_PAYLOAD_VERSION_DELTA = 3;       // ver=3 增量（基线见 base_seq）
+}
+
 // JoinBattleReq 玩家加入战斗（battle_id 为客体寻址字段；发起者由 sender 承载）。
 message JoinBattleReq {
   string battle_id = 1;
+  // accept_payload_versions 是客户端**能解**的全部帧广播载荷版本（如 [1,2,3]）。
+  // 缺省空 = [1]（老客户端行为零变化）。服务端取「自己允许」与「客户端声明」的交集最高者，
+  // 结果写进回执的 payload_version——**永远以回执为准，不以自己声明的为准**。
+  repeated FramePayloadVersion accept_payload_versions = 2;
 }
 
 // JoinBattleReply 加入回执：会话元信息、当前帧与快照（断线重连恢复）。
@@ -30,6 +42,19 @@ message JoinBattleReply {
   atlas.game.lockstep.SessionMeta meta = 1;
   uint64 current_frame = 2;
   atlas.game.lockstep.SnapshotMeta snapshot = 3;
+  // payload_version 是本连接生效的帧广播载荷版本（协商结果，见 JoinBattleReq）。
+  // 客户端据此选择解码器；服务端在任何情况下都不会下发高于它的版本。
+  FramePayloadVersion payload_version = 4;
+}
+
+// RequestFrameKeyframeReq 请求关键帧（ver=3 增量链的按需恢复）：客户端发现序号跳变
+// 或 base_seq 与自己的基线不符时发一次，服务端下一 tick 给该连接补一帧全量（ver=2）。
+// 幂等 Tell（无回执）：同一请求重复到达只会至多触发一次补发，不放大、不改变对局状态。
+message RequestFrameKeyframeReq {
+  string battle_id = 1;
+  // last_seq 是客户端**实际拥有**的基线帧号（服务端据此记日志/指标，不作发送决策依据——
+  // 是否补关键帧只看「这条连接请求过」）。
+  uint64 last_seq = 2;
 }
 
 // FrameInputReq 帧输入上行（客户端 → 接入层 → battle 帧面 → 本地 actor 的 lockstep 输入通道）。
@@ -141,6 +166,9 @@ service BattleService {
   //（数据报面 idle 判掉线、NAT 映射保活）。不参与对局逻辑、不改对局状态。
   // 发送周期上限 = battle.offline_timeout 的数据报面空闲读超时（缺省 offline_timeout/3 = 5s）。
   rpc Ping (PingReq) returns (google.protobuf.Empty);
+  // 请求关键帧：增量链失步时的快速修复（幂等 Tell，服务端每连接 ≥200ms 一次限流）。
+  // 只有 ver=3 客户端会发；服务端未开增量开关时直接忽略（不下发、不报错）。
+  rpc RequestFrameKeyframe (RequestFrameKeyframeReq) returns (google.protobuf.Empty);
   // 服务端内部（matcher 开局、管理面 grpc 转发；客户端 op 不存在）。
   rpc Create (CreateBattleRequest) returns (CreateBattleReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
@@ -161,6 +189,34 @@ service BattleService {
   rpc IssueEntryTicket (IssueEntryTicketReq) returns (IssueEntryTicketReply) {
     option (atlas.route.v1.rpc_route) = { access: ACCESS_INTERNAL };
   }
+}
+
+// FrameDeltaField 是「本条增量携带了哪些字段」的自描述列表（枚举优先，不用魔法位图）。
+enum FrameDeltaField {
+  FRAME_DELTA_FIELD_UNSPECIFIED = 0; // 不得下发
+  FRAME_DELTA_FIELD_SERVER_TIME = 1; // server_time_unix_nano 有效
+  FRAME_DELTA_FIELD_INPUTS = 2;      // set_inputs / removed_player_ids 有效
+  FRAME_DELTA_FIELD_SNAPSHOT = 3;    // snapshot 有效（缺失 = 本帧无快照）
+}
+
+// FrameBroadcastDelta 是帧广播的增量载荷（帧头 ver=3）：相对 base_seq 那一帧的稀疏差分。
+// 关键帧不另立格式——恢复用的全量就是现有 ver=2 的 FrameBroadcast。
+message FrameBroadcastDelta {
+  // base_seq 是基线帧号：**服务端声明**「我假设你已经拥有这一帧的完整状态」。
+  // 它不是 seq 的冗余：只有显式基线才能让接收方比较「我的现实」与「你的假设」。
+  uint64 base_seq = 1;
+  // seq 是本帧帧号（须 = base_seq + 1）。
+  uint64 seq = 2;
+  // changed 是本帧相对基线变化的字段（可空 = 只有帧号推进）。
+  repeated FrameDeltaField changed = 3;
+  // server_time_unix_nano 在 changed 含 SERVER_TIME 时有效：绝对值（不累加，避免漂移）。
+  int64 server_time_unix_nano = 4;
+  // set_inputs 是变化/新增的输入：**按 player_id 稀疏整条替换**（未提及的保持基线）。
+  repeated atlas.game.lockstep.LockstepInput set_inputs = 5;
+  // removed_player_ids 是本帧不再出现的玩家：先删除、再按 set_inputs 覆盖/追加。
+  repeated string removed_player_ids = 6;
+  // snapshot 在 changed 含 SNAPSHOT 时有效；**缺失 = 本帧无快照**（即「清空」的表达方式）。
+  atlas.game.lockstep.SnapshotMeta snapshot = 7;
 }
 
 // FrameBroadcast 服务端推送：帧广播下行（op 为消息完整名）。

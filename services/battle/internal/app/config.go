@@ -87,6 +87,7 @@ func newActorConfig(cfg *conf.Bootstrap) (actor.Config, error) {
 	out.SeatWindow = window
 	out.MaxPlayers = players
 	out.FrameBroadcastProtobuf = b.GetFrameBroadcastProtobuf()
+	out.FrameBroadcastDelta = b.GetFrameBroadcastDelta()
 	return out, nil
 }
 

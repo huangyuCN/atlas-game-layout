@@ -52,17 +52,24 @@ func (c *BattleService) Ping(ctx context.Context, req *v1.PingReq, opts ...clien
 	return c.cli.Invoke(ctx, `/battle.v1.BattleService/Ping`, req, nil, opts...)
 }
 
+// RequestFrameKeyframe 单向调用（returns Empty，无回执）。
+func (c *BattleService) RequestFrameKeyframe(ctx context.Context, req *v1.RequestFrameKeyframeReq, opts ...client.InvokeOption) error {
+	return c.cli.Invoke(ctx, `/battle.v1.BattleService/RequestFrameKeyframe`, req, nil, opts...)
+}
+
 // BattleServiceProtocolOps 是 BattleService 的会话 op 名（按 rpc 名索引）。
 var BattleServiceProtocolOps = struct {
-	JoinBattle     string
-	SendFrameInput string
-	SyncFrames     string
-	Ping           string
+	JoinBattle           string
+	SendFrameInput       string
+	SyncFrames           string
+	Ping                 string
+	RequestFrameKeyframe string
 }{
-	JoinBattle:     "/battle.v1.BattleService/JoinBattle",
-	SendFrameInput: "/battle.v1.BattleService/SendFrameInput",
-	SyncFrames:     "/battle.v1.BattleService/SyncFrames",
-	Ping:           "/battle.v1.BattleService/Ping",
+	JoinBattle:           "/battle.v1.BattleService/JoinBattle",
+	SendFrameInput:       "/battle.v1.BattleService/SendFrameInput",
+	SyncFrames:           "/battle.v1.BattleService/SyncFrames",
+	Ping:                 "/battle.v1.BattleService/Ping",
+	RequestFrameKeyframe: "/battle.v1.BattleService/RequestFrameKeyframe",
 }
 
 // BattleServiceToken 从会话消息里取 Token（无该字段的消息返回零值）。

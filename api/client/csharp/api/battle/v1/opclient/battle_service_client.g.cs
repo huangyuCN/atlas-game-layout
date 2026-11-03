@@ -17,6 +17,15 @@ using Atlas.Google.Protobuf;
 
 namespace Atlas.Battle.V1;
 
+/// <summary>FramePayloadVersion 的枚举名常量（protojson 以枚举名下发；未知值前向兼容）。</summary>
+public static class FramePayloadVersionConst
+{
+    public const string FRAMEPAYLOADVERSIONUNSPECIFIED = "FRAME_PAYLOAD_VERSION_UNSPECIFIED";
+    public const string FRAMEPAYLOADVERSIONPROTOJSON = "FRAME_PAYLOAD_VERSION_PROTOJSON";
+    public const string FRAMEPAYLOADVERSIONPROTOBUF = "FRAME_PAYLOAD_VERSION_PROTOBUF";
+    public const string FRAMEPAYLOADVERSIONDELTA = "FRAME_PAYLOAD_VERSION_DELTA";
+}
+
 /// <summary>EdgeTransport 的枚举名常量（protojson 以枚举名下发；未知值前向兼容）。</summary>
 public static class EdgeTransportConst
 {
@@ -24,6 +33,15 @@ public static class EdgeTransportConst
     public const string EDGETRANSPORTWS = "EDGE_TRANSPORT_WS";
     public const string EDGETRANSPORTKCP = "EDGE_TRANSPORT_KCP";
     public const string EDGETRANSPORTUDP = "EDGE_TRANSPORT_UDP";
+}
+
+/// <summary>FrameDeltaField 的枚举名常量（protojson 以枚举名下发；未知值前向兼容）。</summary>
+public static class FrameDeltaFieldConst
+{
+    public const string FRAMEDELTAFIELDUNSPECIFIED = "FRAME_DELTA_FIELD_UNSPECIFIED";
+    public const string FRAMEDELTAFIELDSERVERTIME = "FRAME_DELTA_FIELD_SERVER_TIME";
+    public const string FRAMEDELTAFIELDINPUTS = "FRAME_DELTA_FIELD_INPUTS";
+    public const string FRAMEDELTAFIELDSNAPSHOT = "FRAME_DELTA_FIELD_SNAPSHOT";
 }
 
 /// <summary>PlayerOutReason 的枚举名常量（protojson 以枚举名下发；未知值前向兼容）。</summary>
@@ -39,6 +57,9 @@ public sealed class JoinBattleReq
     [JsonPropertyName("battleId")]
     public string? BattleId { get; set; }
 
+    [JsonPropertyName("acceptPayloadVersions")]
+    public List<string>? AcceptPayloadVersions { get; set; }
+
 }
 
 /// <summary>JoinBattleReply DTO（protojson JSON 语义）。</summary>
@@ -52,6 +73,20 @@ public sealed class JoinBattleReply
 
     [JsonPropertyName("snapshot")]
     public SnapshotMeta? Snapshot { get; set; }
+
+    [JsonPropertyName("payloadVersion")]
+    public string? PayloadVersion { get; set; }
+
+}
+
+/// <summary>RequestFrameKeyframeReq DTO（protojson JSON 语义）。</summary>
+public sealed class RequestFrameKeyframeReq
+{
+    [JsonPropertyName("battleId")]
+    public string? BattleId { get; set; }
+
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("lastSeq")]
+    public ulong? LastSeq { get; set; }
 
 }
 
@@ -160,6 +195,32 @@ public sealed class IssueEntryTicketReply
 
 }
 
+/// <summary>FrameBroadcastDelta DTO（protojson JSON 语义）。</summary>
+public sealed class FrameBroadcastDelta
+{
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("baseSeq")]
+    public ulong? BaseSeq { get; set; }
+
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("seq")]
+    public ulong? Seq { get; set; }
+
+    [JsonPropertyName("changed")]
+    public List<string>? Changed { get; set; }
+
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("serverTimeUnixNano")]
+    public long? ServerTimeUnixNano { get; set; }
+
+    [JsonPropertyName("setInputs")]
+    public List<LockstepInput>? SetInputs { get; set; }
+
+    [JsonPropertyName("removedPlayerIds")]
+    public List<string>? RemovedPlayerIds { get; set; }
+
+    [JsonPropertyName("snapshot")]
+    public SnapshotMeta? Snapshot { get; set; }
+
+}
+
 /// <summary>FrameBroadcast DTO（protojson JSON 语义）。</summary>
 public sealed class FrameBroadcast
 {
@@ -232,6 +293,12 @@ public sealed class BattleService
         var payload = _ser.Serialize(req ?? new PingReq());
         await _inv.InvokeRawAsync("/battle.v1.BattleService/Ping", payload, options, cancellationToken);
     }
+    /// <summary>/battle.v1.BattleService/RequestFrameKeyframe：单向调用（returns Empty，无回执）。</summary>
+    public async Task RequestFrameKeyframeAsync(RequestFrameKeyframeReq? req, InvokeOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var payload = _ser.Serialize(req ?? new RequestFrameKeyframeReq());
+        await _inv.InvokeRawAsync("/battle.v1.BattleService/RequestFrameKeyframe", payload, options, cancellationToken);
+    }
 }
 
 /// <summary>BattleServiceProtocolOps 是 BattleService 的会话 op 名（按 rpc 名索引）。</summary>
@@ -241,6 +308,7 @@ public static class BattleServiceProtocolOps
     public const string SendFrameInput = "/battle.v1.BattleService/SendFrameInput";
     public const string SyncFrames = "/battle.v1.BattleService/SyncFrames";
     public const string Ping = "/battle.v1.BattleService/Ping";
+    public const string RequestFrameKeyframe = "/battle.v1.BattleService/RequestFrameKeyframe";
 }
 /// <summary>BattleServiceProtocolDescriptor 是 BattleService 的会话描述符提取器
 /// （op 名见 BattleServiceProtocolOps；C# 不允许命名空间级方法，故收进静态类）。</summary>

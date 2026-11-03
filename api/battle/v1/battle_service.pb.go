@@ -36,6 +36,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// FramePayloadVersion 是帧广播载荷版本，与帧头 ver 位一一对应（不得另立字面量）。
+type FramePayloadVersion int32
+
+const (
+	FramePayloadVersion_FRAME_PAYLOAD_VERSION_UNSPECIFIED FramePayloadVersion = 0 // 不得下发
+	FramePayloadVersion_FRAME_PAYLOAD_VERSION_PROTOJSON   FramePayloadVersion = 1 // ver=1 全量 protojson
+	FramePayloadVersion_FRAME_PAYLOAD_VERSION_PROTOBUF    FramePayloadVersion = 2 // ver=2 全量 protobuf（同时是 ver=3 的关键帧载体）
+	FramePayloadVersion_FRAME_PAYLOAD_VERSION_DELTA       FramePayloadVersion = 3 // ver=3 增量（基线见 base_seq）
+)
+
+// Enum value maps for FramePayloadVersion.
+var (
+	FramePayloadVersion_name = map[int32]string{
+		0: "FRAME_PAYLOAD_VERSION_UNSPECIFIED",
+		1: "FRAME_PAYLOAD_VERSION_PROTOJSON",
+		2: "FRAME_PAYLOAD_VERSION_PROTOBUF",
+		3: "FRAME_PAYLOAD_VERSION_DELTA",
+	}
+	FramePayloadVersion_value = map[string]int32{
+		"FRAME_PAYLOAD_VERSION_UNSPECIFIED": 0,
+		"FRAME_PAYLOAD_VERSION_PROTOJSON":   1,
+		"FRAME_PAYLOAD_VERSION_PROTOBUF":    2,
+		"FRAME_PAYLOAD_VERSION_DELTA":       3,
+	}
+)
+
+func (x FramePayloadVersion) Enum() *FramePayloadVersion {
+	p := new(FramePayloadVersion)
+	*p = x
+	return p
+}
+
+func (x FramePayloadVersion) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FramePayloadVersion) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_battle_v1_battle_service_proto_enumTypes[0].Descriptor()
+}
+
+func (FramePayloadVersion) Type() protoreflect.EnumType {
+	return &file_api_battle_v1_battle_service_proto_enumTypes[0]
+}
+
+func (x FramePayloadVersion) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FramePayloadVersion.Descriptor instead.
+func (FramePayloadVersion) EnumDescriptor() ([]byte, []int) {
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{0}
+}
+
 // EdgeTransport 是接入层的传输面：客户端按自身支持的传输面从 EdgeEndpoint 列表里取地址。
 // 必须按面下发而不是给单个地址——接入层分面监听（ws=tcp、kcp/udp 各一个 udp 端口），
 // 单地址无法让 SDK 知道该拨哪个端口。
@@ -75,11 +128,11 @@ func (x EdgeTransport) String() string {
 }
 
 func (EdgeTransport) Descriptor() protoreflect.EnumDescriptor {
-	return file_api_battle_v1_battle_service_proto_enumTypes[0].Descriptor()
+	return file_api_battle_v1_battle_service_proto_enumTypes[1].Descriptor()
 }
 
 func (EdgeTransport) Type() protoreflect.EnumType {
-	return &file_api_battle_v1_battle_service_proto_enumTypes[0]
+	return &file_api_battle_v1_battle_service_proto_enumTypes[1]
 }
 
 func (x EdgeTransport) Number() protoreflect.EnumNumber {
@@ -88,7 +141,60 @@ func (x EdgeTransport) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EdgeTransport.Descriptor instead.
 func (EdgeTransport) EnumDescriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{0}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{1}
+}
+
+// FrameDeltaField 是「本条增量携带了哪些字段」的自描述列表（枚举优先，不用魔法位图）。
+type FrameDeltaField int32
+
+const (
+	FrameDeltaField_FRAME_DELTA_FIELD_UNSPECIFIED FrameDeltaField = 0 // 不得下发
+	FrameDeltaField_FRAME_DELTA_FIELD_SERVER_TIME FrameDeltaField = 1 // server_time_unix_nano 有效
+	FrameDeltaField_FRAME_DELTA_FIELD_INPUTS      FrameDeltaField = 2 // set_inputs / removed_player_ids 有效
+	FrameDeltaField_FRAME_DELTA_FIELD_SNAPSHOT    FrameDeltaField = 3 // snapshot 有效（缺失 = 本帧无快照）
+)
+
+// Enum value maps for FrameDeltaField.
+var (
+	FrameDeltaField_name = map[int32]string{
+		0: "FRAME_DELTA_FIELD_UNSPECIFIED",
+		1: "FRAME_DELTA_FIELD_SERVER_TIME",
+		2: "FRAME_DELTA_FIELD_INPUTS",
+		3: "FRAME_DELTA_FIELD_SNAPSHOT",
+	}
+	FrameDeltaField_value = map[string]int32{
+		"FRAME_DELTA_FIELD_UNSPECIFIED": 0,
+		"FRAME_DELTA_FIELD_SERVER_TIME": 1,
+		"FRAME_DELTA_FIELD_INPUTS":      2,
+		"FRAME_DELTA_FIELD_SNAPSHOT":    3,
+	}
+)
+
+func (x FrameDeltaField) Enum() *FrameDeltaField {
+	p := new(FrameDeltaField)
+	*p = x
+	return p
+}
+
+func (x FrameDeltaField) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FrameDeltaField) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_battle_v1_battle_service_proto_enumTypes[2].Descriptor()
+}
+
+func (FrameDeltaField) Type() protoreflect.EnumType {
+	return &file_api_battle_v1_battle_service_proto_enumTypes[2]
+}
+
+func (x FrameDeltaField) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FrameDeltaField.Descriptor instead.
+func (FrameDeltaField) EnumDescriptor() ([]byte, []int) {
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{2}
 }
 
 // PlayerOutReason 是玩家出局原因（枚举优先：原因不散落字面量）。
@@ -122,11 +228,11 @@ func (x PlayerOutReason) String() string {
 }
 
 func (PlayerOutReason) Descriptor() protoreflect.EnumDescriptor {
-	return file_api_battle_v1_battle_service_proto_enumTypes[1].Descriptor()
+	return file_api_battle_v1_battle_service_proto_enumTypes[3].Descriptor()
 }
 
 func (PlayerOutReason) Type() protoreflect.EnumType {
-	return &file_api_battle_v1_battle_service_proto_enumTypes[1]
+	return &file_api_battle_v1_battle_service_proto_enumTypes[3]
 }
 
 func (x PlayerOutReason) Number() protoreflect.EnumNumber {
@@ -135,15 +241,19 @@ func (x PlayerOutReason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PlayerOutReason.Descriptor instead.
 func (PlayerOutReason) EnumDescriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{1}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{3}
 }
 
 // JoinBattleReq 玩家加入战斗（battle_id 为客体寻址字段；发起者由 sender 承载）。
 type JoinBattleReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BattleId      string                 `protobuf:"bytes,1,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	BattleId string                 `protobuf:"bytes,1,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
+	// accept_payload_versions 是客户端**能解**的全部帧广播载荷版本（如 [1,2,3]）。
+	// 缺省空 = [1]（老客户端行为零变化）。服务端取「自己允许」与「客户端声明」的交集最高者，
+	// 结果写进回执的 payload_version——**永远以回执为准，不以自己声明的为准**。
+	AcceptPayloadVersions []FramePayloadVersion `protobuf:"varint,2,rep,packed,name=accept_payload_versions,json=acceptPayloadVersions,proto3,enum=battle.v1.FramePayloadVersion" json:"accept_payload_versions,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *JoinBattleReq) Reset() {
@@ -183,14 +293,24 @@ func (x *JoinBattleReq) GetBattleId() string {
 	return ""
 }
 
+func (x *JoinBattleReq) GetAcceptPayloadVersions() []FramePayloadVersion {
+	if x != nil {
+		return x.AcceptPayloadVersions
+	}
+	return nil
+}
+
 // JoinBattleReply 加入回执：会话元信息、当前帧与快照（断线重连恢复）。
 type JoinBattleReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Meta          *lockstep.SessionMeta  `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
-	CurrentFrame  uint64                 `protobuf:"varint,2,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
-	Snapshot      *lockstep.SnapshotMeta `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Meta         *lockstep.SessionMeta  `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
+	CurrentFrame uint64                 `protobuf:"varint,2,opt,name=current_frame,json=currentFrame,proto3" json:"current_frame,omitempty"`
+	Snapshot     *lockstep.SnapshotMeta `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	// payload_version 是本连接生效的帧广播载荷版本（协商结果，见 JoinBattleReq）。
+	// 客户端据此选择解码器；服务端在任何情况下都不会下发高于它的版本。
+	PayloadVersion FramePayloadVersion `protobuf:"varint,4,opt,name=payload_version,json=payloadVersion,proto3,enum=battle.v1.FramePayloadVersion" json:"payload_version,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *JoinBattleReply) Reset() {
@@ -244,6 +364,70 @@ func (x *JoinBattleReply) GetSnapshot() *lockstep.SnapshotMeta {
 	return nil
 }
 
+func (x *JoinBattleReply) GetPayloadVersion() FramePayloadVersion {
+	if x != nil {
+		return x.PayloadVersion
+	}
+	return FramePayloadVersion_FRAME_PAYLOAD_VERSION_UNSPECIFIED
+}
+
+// RequestFrameKeyframeReq 请求关键帧（ver=3 增量链的按需恢复）：客户端发现序号跳变
+// 或 base_seq 与自己的基线不符时发一次，服务端下一 tick 给该连接补一帧全量（ver=2）。
+// 幂等 Tell（无回执）：同一请求重复到达只会至多触发一次补发，不放大、不改变对局状态。
+type RequestFrameKeyframeReq struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	BattleId string                 `protobuf:"bytes,1,opt,name=battle_id,json=battleId,proto3" json:"battle_id,omitempty"`
+	// last_seq 是客户端**实际拥有**的基线帧号（服务端据此记日志/指标，不作发送决策依据——
+	// 是否补关键帧只看「这条连接请求过」）。
+	LastSeq       uint64 `protobuf:"varint,2,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestFrameKeyframeReq) Reset() {
+	*x = RequestFrameKeyframeReq{}
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestFrameKeyframeReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestFrameKeyframeReq) ProtoMessage() {}
+
+func (x *RequestFrameKeyframeReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestFrameKeyframeReq.ProtoReflect.Descriptor instead.
+func (*RequestFrameKeyframeReq) Descriptor() ([]byte, []int) {
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RequestFrameKeyframeReq) GetBattleId() string {
+	if x != nil {
+		return x.BattleId
+	}
+	return ""
+}
+
+func (x *RequestFrameKeyframeReq) GetLastSeq() uint64 {
+	if x != nil {
+		return x.LastSeq
+	}
+	return 0
+}
+
 // FrameInputReq 帧输入上行（客户端 → 接入层 → battle 帧面 → 本地 actor 的 lockstep 输入通道）。
 type FrameInputReq struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
@@ -255,7 +439,7 @@ type FrameInputReq struct {
 
 func (x *FrameInputReq) Reset() {
 	*x = FrameInputReq{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[2]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -267,7 +451,7 @@ func (x *FrameInputReq) String() string {
 func (*FrameInputReq) ProtoMessage() {}
 
 func (x *FrameInputReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[2]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -280,7 +464,7 @@ func (x *FrameInputReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrameInputReq.ProtoReflect.Descriptor instead.
 func (*FrameInputReq) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{2}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *FrameInputReq) GetBattleId() string {
@@ -305,7 +489,7 @@ type FrameInputReply struct {
 
 func (x *FrameInputReply) Reset() {
 	*x = FrameInputReply{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[3]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -317,7 +501,7 @@ func (x *FrameInputReply) String() string {
 func (*FrameInputReply) ProtoMessage() {}
 
 func (x *FrameInputReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[3]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -330,7 +514,7 @@ func (x *FrameInputReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrameInputReply.ProtoReflect.Descriptor instead.
 func (*FrameInputReply) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{3}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{4}
 }
 
 // SyncFramesReq 补帧：断线重连后携带已见帧号按帧区间拉取缺失帧。
@@ -344,7 +528,7 @@ type SyncFramesReq struct {
 
 func (x *SyncFramesReq) Reset() {
 	*x = SyncFramesReq{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[4]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -356,7 +540,7 @@ func (x *SyncFramesReq) String() string {
 func (*SyncFramesReq) ProtoMessage() {}
 
 func (x *SyncFramesReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[4]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -369,7 +553,7 @@ func (x *SyncFramesReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncFramesReq.ProtoReflect.Descriptor instead.
 func (*SyncFramesReq) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{4}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SyncFramesReq) GetBattleId() string {
@@ -411,7 +595,7 @@ type SyncFramesReply struct {
 
 func (x *SyncFramesReply) Reset() {
 	*x = SyncFramesReply{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[5]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -423,7 +607,7 @@ func (x *SyncFramesReply) String() string {
 func (*SyncFramesReply) ProtoMessage() {}
 
 func (x *SyncFramesReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[5]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -436,7 +620,7 @@ func (x *SyncFramesReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncFramesReply.ProtoReflect.Descriptor instead.
 func (*SyncFramesReply) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{5}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SyncFramesReply) GetCurrentFrame() uint64 {
@@ -485,7 +669,7 @@ type PingReq struct {
 
 func (x *PingReq) Reset() {
 	*x = PingReq{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[6]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +681,7 @@ func (x *PingReq) String() string {
 func (*PingReq) ProtoMessage() {}
 
 func (x *PingReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[6]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +694,7 @@ func (x *PingReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingReq.ProtoReflect.Descriptor instead.
 func (*PingReq) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{6}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PingReq) GetBattleId() string {
@@ -531,7 +715,7 @@ type IssueEntryTicketReq struct {
 
 func (x *IssueEntryTicketReq) Reset() {
 	*x = IssueEntryTicketReq{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[7]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -543,7 +727,7 @@ func (x *IssueEntryTicketReq) String() string {
 func (*IssueEntryTicketReq) ProtoMessage() {}
 
 func (x *IssueEntryTicketReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[7]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -556,7 +740,7 @@ func (x *IssueEntryTicketReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueEntryTicketReq.ProtoReflect.Descriptor instead.
 func (*IssueEntryTicketReq) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{7}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *IssueEntryTicketReq) GetBattleId() string {
@@ -579,7 +763,7 @@ type EdgeEndpoint struct {
 
 func (x *EdgeEndpoint) Reset() {
 	*x = EdgeEndpoint{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[8]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +775,7 @@ func (x *EdgeEndpoint) String() string {
 func (*EdgeEndpoint) ProtoMessage() {}
 
 func (x *EdgeEndpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[8]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +788,7 @@ func (x *EdgeEndpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EdgeEndpoint.ProtoReflect.Descriptor instead.
 func (*EdgeEndpoint) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{8}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *EdgeEndpoint) GetTransport() EdgeTransport {
@@ -638,7 +822,7 @@ type BattleTicketEntry struct {
 
 func (x *BattleTicketEntry) Reset() {
 	*x = BattleTicketEntry{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[9]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -650,7 +834,7 @@ func (x *BattleTicketEntry) String() string {
 func (*BattleTicketEntry) ProtoMessage() {}
 
 func (x *BattleTicketEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[9]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +847,7 @@ func (x *BattleTicketEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BattleTicketEntry.ProtoReflect.Descriptor instead.
 func (*BattleTicketEntry) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{9}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *BattleTicketEntry) GetPlayerId() string {
@@ -707,7 +891,7 @@ type IssueEntryTicketReply struct {
 
 func (x *IssueEntryTicketReply) Reset() {
 	*x = IssueEntryTicketReply{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[10]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -719,7 +903,7 @@ func (x *IssueEntryTicketReply) String() string {
 func (*IssueEntryTicketReply) ProtoMessage() {}
 
 func (x *IssueEntryTicketReply) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[10]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -732,7 +916,7 @@ func (x *IssueEntryTicketReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueEntryTicketReply.ProtoReflect.Descriptor instead.
 func (*IssueEntryTicketReply) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{10}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *IssueEntryTicketReply) GetEndpoints() []*EdgeEndpoint {
@@ -763,6 +947,108 @@ func (x *IssueEntryTicketReply) GetMaxNetworkGapMs() int64 {
 	return 0
 }
 
+// FrameBroadcastDelta 是帧广播的增量载荷（帧头 ver=3）：相对 base_seq 那一帧的稀疏差分。
+// 关键帧不另立格式——恢复用的全量就是现有 ver=2 的 FrameBroadcast。
+type FrameBroadcastDelta struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// base_seq 是基线帧号：**服务端声明**「我假设你已经拥有这一帧的完整状态」。
+	// 它不是 seq 的冗余：只有显式基线才能让接收方比较「我的现实」与「你的假设」。
+	BaseSeq uint64 `protobuf:"varint,1,opt,name=base_seq,json=baseSeq,proto3" json:"base_seq,omitempty"`
+	// seq 是本帧帧号（须 = base_seq + 1）。
+	Seq uint64 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
+	// changed 是本帧相对基线变化的字段（可空 = 只有帧号推进）。
+	Changed []FrameDeltaField `protobuf:"varint,3,rep,packed,name=changed,proto3,enum=battle.v1.FrameDeltaField" json:"changed,omitempty"`
+	// server_time_unix_nano 在 changed 含 SERVER_TIME 时有效：绝对值（不累加，避免漂移）。
+	ServerTimeUnixNano int64 `protobuf:"varint,4,opt,name=server_time_unix_nano,json=serverTimeUnixNano,proto3" json:"server_time_unix_nano,omitempty"`
+	// set_inputs 是变化/新增的输入：**按 player_id 稀疏整条替换**（未提及的保持基线）。
+	SetInputs []*lockstep.LockstepInput `protobuf:"bytes,5,rep,name=set_inputs,json=setInputs,proto3" json:"set_inputs,omitempty"`
+	// removed_player_ids 是本帧不再出现的玩家：先删除、再按 set_inputs 覆盖/追加。
+	RemovedPlayerIds []string `protobuf:"bytes,6,rep,name=removed_player_ids,json=removedPlayerIds,proto3" json:"removed_player_ids,omitempty"`
+	// snapshot 在 changed 含 SNAPSHOT 时有效；**缺失 = 本帧无快照**（即「清空」的表达方式）。
+	Snapshot      *lockstep.SnapshotMeta `protobuf:"bytes,7,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FrameBroadcastDelta) Reset() {
+	*x = FrameBroadcastDelta{}
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FrameBroadcastDelta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FrameBroadcastDelta) ProtoMessage() {}
+
+func (x *FrameBroadcastDelta) ProtoReflect() protoreflect.Message {
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FrameBroadcastDelta.ProtoReflect.Descriptor instead.
+func (*FrameBroadcastDelta) Descriptor() ([]byte, []int) {
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *FrameBroadcastDelta) GetBaseSeq() uint64 {
+	if x != nil {
+		return x.BaseSeq
+	}
+	return 0
+}
+
+func (x *FrameBroadcastDelta) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *FrameBroadcastDelta) GetChanged() []FrameDeltaField {
+	if x != nil {
+		return x.Changed
+	}
+	return nil
+}
+
+func (x *FrameBroadcastDelta) GetServerTimeUnixNano() int64 {
+	if x != nil {
+		return x.ServerTimeUnixNano
+	}
+	return 0
+}
+
+func (x *FrameBroadcastDelta) GetSetInputs() []*lockstep.LockstepInput {
+	if x != nil {
+		return x.SetInputs
+	}
+	return nil
+}
+
+func (x *FrameBroadcastDelta) GetRemovedPlayerIds() []string {
+	if x != nil {
+		return x.RemovedPlayerIds
+	}
+	return nil
+}
+
+func (x *FrameBroadcastDelta) GetSnapshot() *lockstep.SnapshotMeta {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
+}
+
 // FrameBroadcast 服务端推送：帧广播下行（op 为消息完整名）。
 type FrameBroadcast struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
@@ -774,7 +1060,7 @@ type FrameBroadcast struct {
 
 func (x *FrameBroadcast) Reset() {
 	*x = FrameBroadcast{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[11]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -786,7 +1072,7 @@ func (x *FrameBroadcast) String() string {
 func (*FrameBroadcast) ProtoMessage() {}
 
 func (x *FrameBroadcast) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[11]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -799,7 +1085,7 @@ func (x *FrameBroadcast) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrameBroadcast.ProtoReflect.Descriptor instead.
 func (*FrameBroadcast) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{11}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FrameBroadcast) GetBattleId() string {
@@ -827,7 +1113,7 @@ type BattleEndNotify struct {
 
 func (x *BattleEndNotify) Reset() {
 	*x = BattleEndNotify{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[12]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -839,7 +1125,7 @@ func (x *BattleEndNotify) String() string {
 func (*BattleEndNotify) ProtoMessage() {}
 
 func (x *BattleEndNotify) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[12]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -852,7 +1138,7 @@ func (x *BattleEndNotify) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BattleEndNotify.ProtoReflect.Descriptor instead.
 func (*BattleEndNotify) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{12}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *BattleEndNotify) GetBattleId() string {
@@ -882,7 +1168,7 @@ type PlayerOutNotify struct {
 
 func (x *PlayerOutNotify) Reset() {
 	*x = PlayerOutNotify{}
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[13]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -894,7 +1180,7 @@ func (x *PlayerOutNotify) String() string {
 func (*PlayerOutNotify) ProtoMessage() {}
 
 func (x *PlayerOutNotify) ProtoReflect() protoreflect.Message {
-	mi := &file_api_battle_v1_battle_service_proto_msgTypes[13]
+	mi := &file_api_battle_v1_battle_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -907,7 +1193,7 @@ func (x *PlayerOutNotify) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlayerOutNotify.ProtoReflect.Descriptor instead.
 func (*PlayerOutNotify) Descriptor() ([]byte, []int) {
-	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{13}
+	return file_api_battle_v1_battle_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PlayerOutNotify) GetBattleId() string {
@@ -935,13 +1221,18 @@ var File_api_battle_v1_battle_service_proto protoreflect.FileDescriptor
 
 const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\n" +
-	"\"api/battle/v1/battle_service.proto\x12\tbattle.v1\x1a\x18api/atlas/v1/route.proto\x1a\x1aapi/battle/v1/battle.proto\x1a\x1bapi/lockstep/lockstep.proto\x1a\x1bgoogle/protobuf/empty.proto\",\n" +
+	"\"api/battle/v1/battle_service.proto\x12\tbattle.v1\x1a\x18api/atlas/v1/route.proto\x1a\x1aapi/battle/v1/battle.proto\x1a\x1bapi/lockstep/lockstep.proto\x1a\x1bgoogle/protobuf/empty.proto\"\x84\x01\n" +
 	"\rJoinBattleReq\x12\x1b\n" +
-	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\"\xab\x01\n" +
+	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x12V\n" +
+	"\x17accept_payload_versions\x18\x02 \x03(\x0e2\x1e.battle.v1.FramePayloadVersionR\x15acceptPayloadVersions\"\xf4\x01\n" +
 	"\x0fJoinBattleReply\x124\n" +
 	"\x04meta\x18\x01 \x01(\v2 .atlas.game.lockstep.SessionMetaR\x04meta\x12#\n" +
 	"\rcurrent_frame\x18\x02 \x01(\x04R\fcurrentFrame\x12=\n" +
-	"\bsnapshot\x18\x03 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\"f\n" +
+	"\bsnapshot\x18\x03 \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\x12G\n" +
+	"\x0fpayload_version\x18\x04 \x01(\x0e2\x1e.battle.v1.FramePayloadVersionR\x0epayloadVersion\"Q\n" +
+	"\x17RequestFrameKeyframeReq\x12\x1b\n" +
+	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x12\x19\n" +
+	"\blast_seq\x18\x02 \x01(\x04R\alastSeq\"f\n" +
 	"\rFrameInputReq\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x128\n" +
 	"\x05input\x18\x02 \x01(\v2\".atlas.game.lockstep.LockstepInputR\x05input\"\x11\n" +
@@ -971,7 +1262,16 @@ const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\tendpoints\x18\x01 \x03(\v2\x17.battle.v1.EdgeEndpointR\tendpoints\x126\n" +
 	"\atickets\x18\x02 \x03(\v2\x1c.battle.v1.BattleTicketEntryR\atickets\x12+\n" +
 	"\x12expires_at_unix_ms\x18\x03 \x01(\x03R\x0fexpiresAtUnixMs\x12+\n" +
-	"\x12max_network_gap_ms\x18\x04 \x01(\x03R\x0fmaxNetworkGapMs\"m\n" +
+	"\x12max_network_gap_ms\x18\x04 \x01(\x03R\x0fmaxNetworkGapMs\"\xdb\x02\n" +
+	"\x13FrameBroadcastDelta\x12\x19\n" +
+	"\bbase_seq\x18\x01 \x01(\x04R\abaseSeq\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\x124\n" +
+	"\achanged\x18\x03 \x03(\x0e2\x1a.battle.v1.FrameDeltaFieldR\achanged\x121\n" +
+	"\x15server_time_unix_nano\x18\x04 \x01(\x03R\x12serverTimeUnixNano\x12A\n" +
+	"\n" +
+	"set_inputs\x18\x05 \x03(\v2\".atlas.game.lockstep.LockstepInputR\tsetInputs\x12,\n" +
+	"\x12removed_player_ids\x18\x06 \x03(\tR\x10removedPlayerIds\x12=\n" +
+	"\bsnapshot\x18\a \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\"m\n" +
 	"\x0eFrameBroadcast\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x128\n" +
 	"\x05frame\x18\x02 \x01(\v2\".atlas.game.lockstep.LockstepFrameR\x05frame:\x04\xd8\xd5\"\x01\"^\n" +
@@ -981,22 +1281,33 @@ const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\x0fPlayerOutNotify\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x12\x1b\n" +
 	"\tplayer_id\x18\x02 \x01(\tR\bplayerId\x122\n" +
-	"\x06reason\x18\x03 \x01(\x0e2\x1a.battle.v1.PlayerOutReasonR\x06reason:\x04\xd8\xd5\"\x01*v\n" +
+	"\x06reason\x18\x03 \x01(\x0e2\x1a.battle.v1.PlayerOutReasonR\x06reason:\x04\xd8\xd5\"\x01*\xa6\x01\n" +
+	"\x13FramePayloadVersion\x12%\n" +
+	"!FRAME_PAYLOAD_VERSION_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fFRAME_PAYLOAD_VERSION_PROTOJSON\x10\x01\x12\"\n" +
+	"\x1eFRAME_PAYLOAD_VERSION_PROTOBUF\x10\x02\x12\x1f\n" +
+	"\x1bFRAME_PAYLOAD_VERSION_DELTA\x10\x03*v\n" +
 	"\rEdgeTransport\x12\x1e\n" +
 	"\x1aEDGE_TRANSPORT_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11EDGE_TRANSPORT_WS\x10\x01\x12\x16\n" +
 	"\x12EDGE_TRANSPORT_KCP\x10\x02\x12\x16\n" +
-	"\x12EDGE_TRANSPORT_UDP\x10\x03*[\n" +
+	"\x12EDGE_TRANSPORT_UDP\x10\x03*\x95\x01\n" +
+	"\x0fFrameDeltaField\x12!\n" +
+	"\x1dFRAME_DELTA_FIELD_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dFRAME_DELTA_FIELD_SERVER_TIME\x10\x01\x12\x1c\n" +
+	"\x18FRAME_DELTA_FIELD_INPUTS\x10\x02\x12\x1e\n" +
+	"\x1aFRAME_DELTA_FIELD_SNAPSHOT\x10\x03*[\n" +
 	"\x0fPlayerOutReason\x12!\n" +
 	"\x1dPLAYER_OUT_REASON_UNSPECIFIED\x10\x00\x12%\n" +
-	"!PLAYER_OUT_REASON_OFFLINE_TIMEOUT\x10\x012\xee\x04\n" +
+	"!PLAYER_OUT_REASON_OFFLINE_TIMEOUT\x10\x012\xc2\x05\n" +
 	"\rBattleService\x12B\n" +
 	"\n" +
 	"JoinBattle\x12\x18.battle.v1.JoinBattleReq\x1a\x1a.battle.v1.JoinBattleReply\x12B\n" +
 	"\x0eSendFrameInput\x12\x18.battle.v1.FrameInputReq\x1a\x16.google.protobuf.Empty\x12B\n" +
 	"\n" +
 	"SyncFrames\x12\x18.battle.v1.SyncFramesReq\x1a\x1a.battle.v1.SyncFramesReply\x122\n" +
-	"\x04Ping\x12\x12.battle.v1.PingReq\x1a\x16.google.protobuf.Empty\x12N\n" +
+	"\x04Ping\x12\x12.battle.v1.PingReq\x1a\x16.google.protobuf.Empty\x12R\n" +
+	"\x14RequestFrameKeyframe\x12\".battle.v1.RequestFrameKeyframeReq\x1a\x16.google.protobuf.Empty\x12N\n" +
 	"\x06Create\x12\x1e.battle.v1.CreateBattleRequest\x1a\x1c.battle.v1.CreateBattleReply\"\x06\xd2\xd5\"\x02\b\x02\x12L\n" +
 	"\x05Admit\x12\x19.battle.v1.AdmitBattleReq\x1a .battle.v1.IssueEntryTicketReply\"\x06\xd2\xd5\"\x02\b\x02\x12D\n" +
 	"\bGetState\x12\x16.battle.v1.GetStateReq\x1a\x18.battle.v1.GetStateReply\"\x06\xd2\xd5\"\x02\b\x02\x12\\\n" +
@@ -1015,70 +1326,81 @@ func file_api_battle_v1_battle_service_proto_rawDescGZIP() []byte {
 	return file_api_battle_v1_battle_service_proto_rawDescData
 }
 
-var file_api_battle_v1_battle_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_battle_v1_battle_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_api_battle_v1_battle_service_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_api_battle_v1_battle_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_api_battle_v1_battle_service_proto_goTypes = []any{
-	(EdgeTransport)(0),             // 0: battle.v1.EdgeTransport
-	(PlayerOutReason)(0),           // 1: battle.v1.PlayerOutReason
-	(*JoinBattleReq)(nil),          // 2: battle.v1.JoinBattleReq
-	(*JoinBattleReply)(nil),        // 3: battle.v1.JoinBattleReply
-	(*FrameInputReq)(nil),          // 4: battle.v1.FrameInputReq
-	(*FrameInputReply)(nil),        // 5: battle.v1.FrameInputReply
-	(*SyncFramesReq)(nil),          // 6: battle.v1.SyncFramesReq
-	(*SyncFramesReply)(nil),        // 7: battle.v1.SyncFramesReply
-	(*PingReq)(nil),                // 8: battle.v1.PingReq
-	(*IssueEntryTicketReq)(nil),    // 9: battle.v1.IssueEntryTicketReq
-	(*EdgeEndpoint)(nil),           // 10: battle.v1.EdgeEndpoint
-	(*BattleTicketEntry)(nil),      // 11: battle.v1.BattleTicketEntry
-	(*IssueEntryTicketReply)(nil),  // 12: battle.v1.IssueEntryTicketReply
-	(*FrameBroadcast)(nil),         // 13: battle.v1.FrameBroadcast
-	(*BattleEndNotify)(nil),        // 14: battle.v1.BattleEndNotify
-	(*PlayerOutNotify)(nil),        // 15: battle.v1.PlayerOutNotify
-	(*lockstep.SessionMeta)(nil),   // 16: atlas.game.lockstep.SessionMeta
-	(*lockstep.SnapshotMeta)(nil),  // 17: atlas.game.lockstep.SnapshotMeta
-	(*lockstep.LockstepInput)(nil), // 18: atlas.game.lockstep.LockstepInput
-	(*lockstep.FrameInputs)(nil),   // 19: atlas.game.lockstep.FrameInputs
-	(*lockstep.LockstepFrame)(nil), // 20: atlas.game.lockstep.LockstepFrame
-	(*CreateBattleRequest)(nil),    // 21: battle.v1.CreateBattleRequest
-	(*AdmitBattleReq)(nil),         // 22: battle.v1.AdmitBattleReq
-	(*GetStateReq)(nil),            // 23: battle.v1.GetStateReq
-	(*emptypb.Empty)(nil),          // 24: google.protobuf.Empty
-	(*CreateBattleReply)(nil),      // 25: battle.v1.CreateBattleReply
-	(*GetStateReply)(nil),          // 26: battle.v1.GetStateReply
+	(FramePayloadVersion)(0),        // 0: battle.v1.FramePayloadVersion
+	(EdgeTransport)(0),              // 1: battle.v1.EdgeTransport
+	(FrameDeltaField)(0),            // 2: battle.v1.FrameDeltaField
+	(PlayerOutReason)(0),            // 3: battle.v1.PlayerOutReason
+	(*JoinBattleReq)(nil),           // 4: battle.v1.JoinBattleReq
+	(*JoinBattleReply)(nil),         // 5: battle.v1.JoinBattleReply
+	(*RequestFrameKeyframeReq)(nil), // 6: battle.v1.RequestFrameKeyframeReq
+	(*FrameInputReq)(nil),           // 7: battle.v1.FrameInputReq
+	(*FrameInputReply)(nil),         // 8: battle.v1.FrameInputReply
+	(*SyncFramesReq)(nil),           // 9: battle.v1.SyncFramesReq
+	(*SyncFramesReply)(nil),         // 10: battle.v1.SyncFramesReply
+	(*PingReq)(nil),                 // 11: battle.v1.PingReq
+	(*IssueEntryTicketReq)(nil),     // 12: battle.v1.IssueEntryTicketReq
+	(*EdgeEndpoint)(nil),            // 13: battle.v1.EdgeEndpoint
+	(*BattleTicketEntry)(nil),       // 14: battle.v1.BattleTicketEntry
+	(*IssueEntryTicketReply)(nil),   // 15: battle.v1.IssueEntryTicketReply
+	(*FrameBroadcastDelta)(nil),     // 16: battle.v1.FrameBroadcastDelta
+	(*FrameBroadcast)(nil),          // 17: battle.v1.FrameBroadcast
+	(*BattleEndNotify)(nil),         // 18: battle.v1.BattleEndNotify
+	(*PlayerOutNotify)(nil),         // 19: battle.v1.PlayerOutNotify
+	(*lockstep.SessionMeta)(nil),    // 20: atlas.game.lockstep.SessionMeta
+	(*lockstep.SnapshotMeta)(nil),   // 21: atlas.game.lockstep.SnapshotMeta
+	(*lockstep.LockstepInput)(nil),  // 22: atlas.game.lockstep.LockstepInput
+	(*lockstep.FrameInputs)(nil),    // 23: atlas.game.lockstep.FrameInputs
+	(*lockstep.LockstepFrame)(nil),  // 24: atlas.game.lockstep.LockstepFrame
+	(*CreateBattleRequest)(nil),     // 25: battle.v1.CreateBattleRequest
+	(*AdmitBattleReq)(nil),          // 26: battle.v1.AdmitBattleReq
+	(*GetStateReq)(nil),             // 27: battle.v1.GetStateReq
+	(*emptypb.Empty)(nil),           // 28: google.protobuf.Empty
+	(*CreateBattleReply)(nil),       // 29: battle.v1.CreateBattleReply
+	(*GetStateReply)(nil),           // 30: battle.v1.GetStateReply
 }
 var file_api_battle_v1_battle_service_proto_depIdxs = []int32{
-	16, // 0: battle.v1.JoinBattleReply.meta:type_name -> atlas.game.lockstep.SessionMeta
-	17, // 1: battle.v1.JoinBattleReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
-	18, // 2: battle.v1.FrameInputReq.input:type_name -> atlas.game.lockstep.LockstepInput
-	17, // 3: battle.v1.SyncFramesReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
-	19, // 4: battle.v1.SyncFramesReply.missed:type_name -> atlas.game.lockstep.FrameInputs
-	0,  // 5: battle.v1.EdgeEndpoint.transport:type_name -> battle.v1.EdgeTransport
-	10, // 6: battle.v1.BattleTicketEntry.endpoints:type_name -> battle.v1.EdgeEndpoint
-	10, // 7: battle.v1.IssueEntryTicketReply.endpoints:type_name -> battle.v1.EdgeEndpoint
-	11, // 8: battle.v1.IssueEntryTicketReply.tickets:type_name -> battle.v1.BattleTicketEntry
-	20, // 9: battle.v1.FrameBroadcast.frame:type_name -> atlas.game.lockstep.LockstepFrame
-	1,  // 10: battle.v1.PlayerOutNotify.reason:type_name -> battle.v1.PlayerOutReason
-	2,  // 11: battle.v1.BattleService.JoinBattle:input_type -> battle.v1.JoinBattleReq
-	4,  // 12: battle.v1.BattleService.SendFrameInput:input_type -> battle.v1.FrameInputReq
-	6,  // 13: battle.v1.BattleService.SyncFrames:input_type -> battle.v1.SyncFramesReq
-	8,  // 14: battle.v1.BattleService.Ping:input_type -> battle.v1.PingReq
-	21, // 15: battle.v1.BattleService.Create:input_type -> battle.v1.CreateBattleRequest
-	22, // 16: battle.v1.BattleService.Admit:input_type -> battle.v1.AdmitBattleReq
-	23, // 17: battle.v1.BattleService.GetState:input_type -> battle.v1.GetStateReq
-	9,  // 18: battle.v1.BattleService.IssueEntryTicket:input_type -> battle.v1.IssueEntryTicketReq
-	3,  // 19: battle.v1.BattleService.JoinBattle:output_type -> battle.v1.JoinBattleReply
-	24, // 20: battle.v1.BattleService.SendFrameInput:output_type -> google.protobuf.Empty
-	7,  // 21: battle.v1.BattleService.SyncFrames:output_type -> battle.v1.SyncFramesReply
-	24, // 22: battle.v1.BattleService.Ping:output_type -> google.protobuf.Empty
-	25, // 23: battle.v1.BattleService.Create:output_type -> battle.v1.CreateBattleReply
-	12, // 24: battle.v1.BattleService.Admit:output_type -> battle.v1.IssueEntryTicketReply
-	26, // 25: battle.v1.BattleService.GetState:output_type -> battle.v1.GetStateReply
-	12, // 26: battle.v1.BattleService.IssueEntryTicket:output_type -> battle.v1.IssueEntryTicketReply
-	19, // [19:27] is the sub-list for method output_type
-	11, // [11:19] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	0,  // 0: battle.v1.JoinBattleReq.accept_payload_versions:type_name -> battle.v1.FramePayloadVersion
+	20, // 1: battle.v1.JoinBattleReply.meta:type_name -> atlas.game.lockstep.SessionMeta
+	21, // 2: battle.v1.JoinBattleReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
+	0,  // 3: battle.v1.JoinBattleReply.payload_version:type_name -> battle.v1.FramePayloadVersion
+	22, // 4: battle.v1.FrameInputReq.input:type_name -> atlas.game.lockstep.LockstepInput
+	21, // 5: battle.v1.SyncFramesReply.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
+	23, // 6: battle.v1.SyncFramesReply.missed:type_name -> atlas.game.lockstep.FrameInputs
+	1,  // 7: battle.v1.EdgeEndpoint.transport:type_name -> battle.v1.EdgeTransport
+	13, // 8: battle.v1.BattleTicketEntry.endpoints:type_name -> battle.v1.EdgeEndpoint
+	13, // 9: battle.v1.IssueEntryTicketReply.endpoints:type_name -> battle.v1.EdgeEndpoint
+	14, // 10: battle.v1.IssueEntryTicketReply.tickets:type_name -> battle.v1.BattleTicketEntry
+	2,  // 11: battle.v1.FrameBroadcastDelta.changed:type_name -> battle.v1.FrameDeltaField
+	22, // 12: battle.v1.FrameBroadcastDelta.set_inputs:type_name -> atlas.game.lockstep.LockstepInput
+	21, // 13: battle.v1.FrameBroadcastDelta.snapshot:type_name -> atlas.game.lockstep.SnapshotMeta
+	24, // 14: battle.v1.FrameBroadcast.frame:type_name -> atlas.game.lockstep.LockstepFrame
+	3,  // 15: battle.v1.PlayerOutNotify.reason:type_name -> battle.v1.PlayerOutReason
+	4,  // 16: battle.v1.BattleService.JoinBattle:input_type -> battle.v1.JoinBattleReq
+	7,  // 17: battle.v1.BattleService.SendFrameInput:input_type -> battle.v1.FrameInputReq
+	9,  // 18: battle.v1.BattleService.SyncFrames:input_type -> battle.v1.SyncFramesReq
+	11, // 19: battle.v1.BattleService.Ping:input_type -> battle.v1.PingReq
+	6,  // 20: battle.v1.BattleService.RequestFrameKeyframe:input_type -> battle.v1.RequestFrameKeyframeReq
+	25, // 21: battle.v1.BattleService.Create:input_type -> battle.v1.CreateBattleRequest
+	26, // 22: battle.v1.BattleService.Admit:input_type -> battle.v1.AdmitBattleReq
+	27, // 23: battle.v1.BattleService.GetState:input_type -> battle.v1.GetStateReq
+	12, // 24: battle.v1.BattleService.IssueEntryTicket:input_type -> battle.v1.IssueEntryTicketReq
+	5,  // 25: battle.v1.BattleService.JoinBattle:output_type -> battle.v1.JoinBattleReply
+	28, // 26: battle.v1.BattleService.SendFrameInput:output_type -> google.protobuf.Empty
+	10, // 27: battle.v1.BattleService.SyncFrames:output_type -> battle.v1.SyncFramesReply
+	28, // 28: battle.v1.BattleService.Ping:output_type -> google.protobuf.Empty
+	28, // 29: battle.v1.BattleService.RequestFrameKeyframe:output_type -> google.protobuf.Empty
+	29, // 30: battle.v1.BattleService.Create:output_type -> battle.v1.CreateBattleReply
+	15, // 31: battle.v1.BattleService.Admit:output_type -> battle.v1.IssueEntryTicketReply
+	30, // 32: battle.v1.BattleService.GetState:output_type -> battle.v1.GetStateReply
+	15, // 33: battle.v1.BattleService.IssueEntryTicket:output_type -> battle.v1.IssueEntryTicketReply
+	25, // [25:34] is the sub-list for method output_type
+	16, // [16:25] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_api_battle_v1_battle_service_proto_init() }
@@ -1092,8 +1414,8 @@ func file_api_battle_v1_battle_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_battle_v1_battle_service_proto_rawDesc), len(file_api_battle_v1_battle_service_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   14,
+			NumEnums:      4,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	pkgactor "github.com/huangyuCN/atlas-game-layout/pkg/actor"
 	"github.com/huangyuCN/atlas-game-layout/pkg/fxkit"
@@ -160,6 +161,13 @@ func newStreamBridge(rt *pkgactor.Runtime, reg *stream.Registry) *stream.Bridge 
 // 打开时换成 protobuf 二进制 + 帧头 ver=2（编码与帧头必须自洽，由 stream.NewRegistryWithEncoding 校验）。
 func newStreamRegistry(cfg actor.Config) (*stream.Registry, error) {
 	ttl := stream.EndedTTL(cfg.TicketTTL, cfg.OfflineTimeout)
+	if cfg.FrameBroadcastDelta {
+		// 增量的关键帧就是 ver=2 全量帧：开关不自洽必须在**装配期**失败，不能运行期降级。
+		if !cfg.FrameBroadcastProtobuf {
+			return nil, errors.New("battle: frame_broadcast_delta=true 需要 frame_broadcast_protobuf=true（关键帧即 ver=2 全量帧）")
+		}
+		return stream.NewRegistryDelta(ttl, stream.DeltaConfig{})
+	}
 	if !cfg.FrameBroadcastProtobuf {
 		return stream.NewRegistryWithTTL(ttl), nil
 	}

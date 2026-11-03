@@ -171,6 +171,16 @@ func (e *battleEnv) ask(ctx context.Context, req any) (any, error) {
 
 // askAs 以具体消息对象向战斗 actor 请求并注入发起者 sender：
 // 战斗域客户端 op 的发起者身份经投递 sender 注入（消息体无身份字段）。
+// tellAs 以 Tell 语义向战斗 actor 投递一条无回执消息并注入发起者 sender
+// （returns Empty 的 op 走这条路，如关键帧请求）。
+func (e *battleEnv) tellAs(ctx context.Context, playerID string, req any) error {
+	sender, err := types.NewPID(playerType, playerID)
+	if err != nil {
+		return err
+	}
+	return e.rt.Tell(ctx, e.pid, req, core.WithSender(sender))
+}
+
 func (e *battleEnv) askAs(ctx context.Context, playerID string, req any) (any, error) {
 	sender, err := types.NewPID(playerType, playerID)
 	if err != nil {

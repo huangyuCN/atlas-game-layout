@@ -25,6 +25,12 @@ type BattlePusher interface {
 	// CloseBattle 关闭并移除本局全部直连（结算后回收，规格 §9.8）：关闭前对本局仍未确认的
 	// 连接有界重投结算通知（数据报面无重传，单次推送易丢）。每局只被结算调用一次。
 	CloseBattle(battleID string)
+	// NegotiatePayloadVersion 协商该连接的帧广播载荷版本：取「服务端允许 ∩ 客户端声明」的
+	// 最高者并记为该连接的生效版本；未开增量 / 裸 UDP 面一律回落到全量版本（ver=2 或 ver=1）。
+	NegotiatePayloadVersion(playerID string, accepted []battlev1.FramePayloadVersion) battlev1.FramePayloadVersion
+	// RequestKeyframe 记录该连接的关键帧请求（幂等 Tell）：下一 tick 必给该连接一帧全量。
+	// 每连接 ≥200ms 一次限流，超频丢弃并返回 false（不回错，避免客户端放大）。
+	RequestKeyframe(playerID string, lastSeq uint64) bool
 }
 
 // ConnPresence 是直连在场性查询端口（规格 §9.2 硬约束②）：应用掉线事件前复核注册表，

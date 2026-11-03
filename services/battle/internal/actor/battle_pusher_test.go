@@ -20,6 +20,22 @@ type memPusher struct {
 	outs       map[string][]outRecord                 // playerID → 出局广播序列
 	closed     []string                               // 已关闭的对局 ID（结算后回收，规格 §9.8）
 	broadcasts []int                                  // 每次帧广播的目标数（一次调用 = 一次编码）
+
+	keyframeReqs []keyframeRecord             // 关键帧请求（ver=3 恢复路径）
+	negotiated   []negotiateRecord            // 载荷版本协商调用
+	wantVersion  battlev1.FramePayloadVersion // 协商回执的固定值（0 = 回落 ver=1）
+}
+
+// keyframeRecord 是一次关键帧请求的观测值。
+type keyframeRecord struct {
+	playerID string
+	lastSeq  uint64
+}
+
+// negotiateRecord 是一次载荷版本协商的观测值。
+type negotiateRecord struct {
+	playerID string
+	accepted []battlev1.FramePayloadVersion
 }
 
 // newMemPusher 构造直连推送内存实现。
@@ -67,6 +83,32 @@ func (p *memPusher) PublishOut(_ context.Context, playerID, _, outPlayerID strin
 	defer p.mu.Unlock()
 	p.outs[playerID] = append(p.outs[playerID], outRecord{playerID: outPlayerID, reason: reason})
 	return nil
+}
+
+// NegotiatePayloadVersion 实现 biz.BattlePusher：记录声明并回执固定版本（用例可配）。
+func (p *memPusher) NegotiatePayloadVersion(playerID string, accepted []battlev1.FramePayloadVersion) battlev1.FramePayloadVersion {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.negotiated = append(p.negotiated, negotiateRecord{playerID: playerID, accepted: accepted})
+	if p.wantVersion != battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_UNSPECIFIED {
+		return p.wantVersion
+	}
+	return battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_PROTOJSON
+}
+
+// RequestKeyframe 实现 biz.BattlePusher：记录关键帧请求（幂等 Tell）。
+func (p *memPusher) RequestKeyframe(playerID string, lastSeq uint64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.keyframeReqs = append(p.keyframeReqs, keyframeRecord{playerID: playerID, lastSeq: lastSeq})
+	return true
+}
+
+// keyframeRequests 返回关键帧请求快照（测试断言用，带锁）。
+func (p *memPusher) keyframeRequests() []keyframeRecord {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]keyframeRecord(nil), p.keyframeReqs...)
 }
 
 // CloseBattle 实现 biz.BattlePusher：记录关闭的对局。

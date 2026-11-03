@@ -26,6 +26,7 @@ type BattleService interface {
 	SendFrameInput(ctx core.ActorContext, msg *v1.FrameInputReq) error
 	SyncFrames(ctx core.ActorContext, req *v1.SyncFramesReq) (*v1.SyncFramesReply, error)
 	Ping(ctx core.ActorContext, msg *v1.PingReq) error
+	RequestFrameKeyframe(ctx core.ActorContext, msg *v1.RequestFrameKeyframeReq) error
 	Create(ctx core.ActorContext, req *v1.CreateBattleRequest) (*v1.CreateBattleReply, error)
 	Admit(ctx core.ActorContext, req *v1.AdmitBattleReq) (*v1.IssueEntryTicketReply, error)
 	GetState(ctx core.ActorContext, req *v1.GetStateReq) (*v1.GetStateReply, error)
@@ -46,6 +47,9 @@ func (UnimplementedBattleService) SyncFrames(core.ActorContext, *v1.SyncFramesRe
 }
 func (UnimplementedBattleService) Ping(core.ActorContext, *v1.PingReq) error {
 	return errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.Ping")
+}
+func (UnimplementedBattleService) RequestFrameKeyframe(core.ActorContext, *v1.RequestFrameKeyframeReq) error {
+	return errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.RequestFrameKeyframe")
 }
 func (UnimplementedBattleService) Create(core.ActorContext, *v1.CreateBattleRequest) (*v1.CreateBattleReply, error) {
 	return nil, errors.InternalServer("ACTOR_METHOD_UNIMPLEMENTED", "actor 方法未实现: BattleService.Create")
@@ -76,6 +80,10 @@ var battleServiceDecodeTable = map[string]func([]byte) (proto.Message, error){
 	},
 	"battle.v1.PingReq": func(b []byte) (proto.Message, error) {
 		m := new(v1.PingReq)
+		return m, proto.Unmarshal(b, m)
+	},
+	"battle.v1.RequestFrameKeyframeReq": func(b []byte) (proto.Message, error) {
+		m := new(v1.RequestFrameKeyframeReq)
 		return m, proto.Unmarshal(b, m)
 	},
 	"battle.v1.CreateBattleRequest": func(b []byte) (proto.Message, error) {
@@ -148,6 +156,8 @@ func (d *battleServiceDispatch) OnTell(ctx core.ActorContext, msg any) error {
 		return d.impl.SendFrameInput(ctx, m)
 	case *v1.PingReq:
 		return d.impl.Ping(ctx, m)
+	case *v1.RequestFrameKeyframeReq:
+		return d.impl.RequestFrameKeyframe(ctx, m)
 	default:
 		return d.FallbackTell(ctx, msg)
 	}
@@ -221,6 +231,11 @@ func (c *BattleServiceClusterClient) SyncFrames(ctx context.Context, pid types.P
 
 // Ping 单向投递 Tell 消息（无回执；变参透传投递选项——sender/观测头等）。
 func (c *BattleServiceClusterClient) Ping(ctx context.Context, pid types.PID, msg *v1.PingReq, opts ...core.SendOption) error {
+	return c.inv.Tell(ctx, pid, msg, opts...)
+}
+
+// RequestFrameKeyframe 单向投递 Tell 消息（无回执；变参透传投递选项——sender/观测头等）。
+func (c *BattleServiceClusterClient) RequestFrameKeyframe(ctx context.Context, pid types.PID, msg *v1.RequestFrameKeyframeReq, opts ...core.SendOption) error {
 	return c.inv.Tell(ctx, pid, msg, opts...)
 }
 

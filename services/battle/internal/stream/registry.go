@@ -29,6 +29,13 @@ type Registry struct {
 	ended     *EndedBook               // 结束留档：懒激活前拒绝迟到 op + 重连补投
 	encode    Encoder                  // 推送载荷编码器（默认 encodeJSON，测试注入计数钩子）
 	pushVer   uint8                    // 帧广播的载荷编码版本（默认 frame.Version=protojson；见 NewRegistryWithEncoding）
+
+	// 下行增量编码（ver=3）：delta 为 false 时以下字段全部不参与，行为与现状逐字节相同。
+	delta       bool                    // 增量开关（装配期决定，运行期只读）
+	keyEvery    uint64                  // 周期关键帧间隔（tick；见 NewRegistryDelta）
+	keyInterval time.Duration           // 每连接关键帧请求限流窗口
+	links       map[string]*deltaLink   // 全局单链：battle_id → 上一 tick 的完整帧（只读）
+	states      map[string]*clientState // player_id → 逐连接发送基线（lastSeq / payloadVer / 关键帧请求）
 }
 
 // endpointRef 是端点反查项：断开事件据此找到玩家与对局（对局用于把消息投给正确的 actor）。
@@ -56,6 +63,8 @@ func NewRegistryWithTTL(ttl time.Duration) *Registry {
 		ended:     NewEndedBook(ttl),
 		encode:    encodeJSON,
 		pushVer:   frame.Version,
+		links:     make(map[string]*deltaLink),
+		states:    make(map[string]*clientState),
 	}
 }
 
@@ -134,6 +143,7 @@ func (r *Registry) Register(playerID string, c Conn) bool {
 	r.conns[playerID] = c
 	if changed { // 逐帧重复登记（同一连接）不动反查表：热路径上少一次写
 		r.endpoints[c.Endpoint()] = endpointRef{playerID: playerID, battleID: c.BattleID}
+		r.resetState(playerID) // 新连接/接管：基线归零（首帧必全量，见 §4.4）
 	}
 	r.mu.Unlock()
 	if existed && old != c {
@@ -151,6 +161,7 @@ func (r *Registry) Unregister(playerID string, c Conn) {
 	defer r.mu.Unlock()
 	if cur, ok := r.conns[playerID]; ok && cur == c {
 		delete(r.conns, playerID)
+		r.resetState(playerID)
 	}
 }
 
@@ -176,6 +187,7 @@ func (r *Registry) Disconnect(ep Endpoint) (playerID, battleID string, ok bool) 
 	delete(r.endpoints, ep)
 	if cur, live := r.conns[owner.playerID]; live && cur.Endpoint() == ep {
 		delete(r.conns, owner.playerID)
+		r.resetState(owner.playerID)
 	}
 	return owner.playerID, owner.battleID, true
 }
@@ -217,6 +229,7 @@ func (r *Registry) CloseBattle(battleID string) {
 			victims = append(victims, closedConn{playerID: playerID, conn: c})
 			delete(r.conns, playerID)
 			delete(r.endpoints, c.Endpoint())
+			r.resetState(playerID)
 		}
 	}
 	r.mu.Unlock()
@@ -249,27 +262,73 @@ func (r *Registry) repushEnd(c Conn, winner string, recorded bool) {
 
 // PublishFrames 实现 biz.BattlePusher：把**同一帧**下发给该局的全部目标。
 //
-// 每帧只编码一次（r.encode），产物 []byte 复用于该帧全部目标；每个目标仍各写一帧
-// （PushRaw 会把载荷拷进该连接自己的帧体——写是必需的 syscall，且各目标互不共享帧体）。
-// 载荷**按帧新分配、不跨帧复用**：目标写入是并发的，跨帧复用同一块字节会在上一帧还没写完时
-// 被下一帧改写（串数据）。单目标写失败不影响其余目标，返回首个错误；死链按失效注销。
+// 编码次数有硬上限：**每 tick 至多两次**——增量至多一次、全量至多一次（§3.5 全局单链，
+// 严禁 per-client 差分）。载荷按帧新分配、不跨帧复用（目标写入并发，复用会串数据）；
+// 每个目标仍各写一帧（写是必需的 syscall，包数不因增量而下降）。
+// 单目标写失败不影响其余目标，返回首个错误；死链按失效注销。
 func (r *Registry) PublishFrames(_ context.Context, battleID string, players []string,
-	frame *locksteppb.LockstepFrame) error {
+	f *locksteppb.LockstepFrame) error {
 	if len(players) == 0 {
 		return nil // 没有目标就不为这一帧付编码与分配（名单可能已被掉线判负清空）
 	}
-	payload, err := r.encode(&battlev1.FrameBroadcast{BattleId: battleID, Frame: frame})
+	plan := r.buildPlan(battleID, players, f)
+	defer r.advanceLink(battleID, f)
+	if len(plan.targets) == 0 {
+		return nil
+	}
+	full, delta, err := r.encodePlan(battleID, f, plan)
 	if err != nil {
-		return fmt.Errorf("stream: 帧广播编码失败: %w", err)
+		return err
 	}
 	operation := battlev1opclient.BattleServicePushOps.FrameBroadcast
 	var firstErr error
-	for _, playerID := range players {
-		if pushErr := r.pushPayload(playerID, operation, payload); pushErr != nil && firstErr == nil {
-			firstErr = pushErr
+	for _, t := range plan.targets {
+		payload := full
+		if !t.full {
+			payload = delta
 		}
+		if pushErr := r.pushPlanned(t, operation, payload); pushErr != nil {
+			if firstErr == nil {
+				firstErr = pushErr
+			}
+			continue
+		}
+		r.commitSend(t.playerID, t.conn, plan.seq, t.full)
 	}
 	return firstErr
+}
+
+// encodePlan 按计划编码载荷：全量与增量各至多一次（计划里没有就不编）。
+func (r *Registry) encodePlan(battleID string, f *locksteppb.LockstepFrame, plan pushPlan) (full, delta []byte, err error) {
+	if plan.needFull {
+		full, err = r.encode(&battlev1.FrameBroadcast{BattleId: battleID, Frame: f})
+		if err != nil {
+			return nil, nil, fmt.Errorf("stream: 帧广播编码失败: %w", err)
+		}
+	}
+	if plan.needDelta {
+		delta, err = r.encode(plan.delta)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stream: 帧广播增量编码失败: %w", err)
+		}
+	}
+	return full, delta, nil
+}
+
+// pushPlanned 向计划里的一条目标发送已编码载荷（帧头 ver 由计划决定），
+// 死链按失效注销（与 pushConn 同一口径）。
+func (r *Registry) pushPlanned(t pushTarget, operation string, payload []byte) error {
+	r.mu.Lock()
+	port := r.ports[t.conn.Kind]
+	r.mu.Unlock()
+	if port == nil {
+		return fmt.Errorf("stream: 帧面 %s 未挂载推送端口（装配期漏挂）", t.conn.Kind)
+	}
+	err := port.PushRaw(t.conn, operation, payload, t.ver)
+	if errors.Is(err, engine.ErrConnNotFound) || errors.Is(err, engine.ErrPeerNotFound) {
+		r.Unregister(t.playerID, t.conn)
+	}
+	return err
 }
 
 // PublishEnd 实现 biz.BattlePusher：把战斗结束通知直发该玩家的当前连接。

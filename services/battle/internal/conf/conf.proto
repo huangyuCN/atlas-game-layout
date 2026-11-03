@@ -139,6 +139,12 @@ message BattleConf {
   //     延迟收益归零甚至反转，故配置面直接拒绝（启动失败）；
   //   - memory_mode 未开启（缺省/off）时配置本项即启动失败（配了没生效属于误配）。
   string memory_limit = 15;
+  // frame_broadcast_delta 是**下行增量编码（ver=3）**的节点级开关（不配置 = false = 现行为零变化）：
+  // 打开后，协商到 ver=3 的连接发增量（帧头 ver=3），未协商/未声明的连接与 UDP 面仍发全量。
+  // **开启前提**：frame_broadcast_protobuf = true（关键帧就是 ver=2 全量帧）——不自洽即启动失败。
+  // 只省字节，**不减少包数**（每连接每 tick 仍是一次写）；恢复靠 base_seq 自校验 + 按需关键帧 +
+  // 每 300 tick 的周期兜底，详见 docs/superpowers/specs/2026-11-03-downlink-delta-encoding.md。
+  bool frame_broadcast_delta = 16;
 }
 
 // EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。

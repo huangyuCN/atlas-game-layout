@@ -72,6 +72,10 @@ type Config struct {
 	// true = protobuf 二进制/ver=2）：只改编码，不改消息字段、不减少帧数。
 	// 语义与开启前提见 conf.proto 的 frame_broadcast_protobuf（三端 SDK 就绪才能开）。
 	FrameBroadcastProtobuf bool
+	// FrameBroadcastDelta 是下行增量编码（ver=3）的节点开关（false = 现行为零变化）。
+	// 开启前提是 FrameBroadcastProtobuf = true（关键帧复用 ver=2 全量帧），
+	// 不自洽由装配期校验拦下（stream.NewRegistryDelta 报错 → 启动失败）。
+	FrameBroadcastDelta bool
 }
 
 // 默认战斗参数（示例竞速对局：10fps、5 格赛道、帧数上限见 DefaultMaxFrames）。
