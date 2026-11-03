@@ -53,6 +53,9 @@ func (b *BattleActor) onFrameResult(ctx core.ActorContext, result lockstep.Frame
 		FrameId:    uint64(result.Frame),
 		ServerTime: timestamppb.Now(), // 广播时间戳：客户端对时与压测延迟度量
 		Snapshot:   snapshotMeta(result.Snapshot),
+		// 帧级 state_hash：每帧都有（模拟器实现 StateHasher 时由会话算好，见 lockstep.FrameResult）。
+		// 与快照帧的 SnapshotMeta.StateHash 是两条口径：前者每帧的轻量哈希，后者是快照状态的 JSON 哈希。
+		StateHash: frameStateHash(result),
 	}
 	for _, in := range result.Inputs {
 		frame.Inputs = append(frame.Inputs, toPBInput(in))
@@ -171,6 +174,15 @@ func hashBytes(h uint64) []byte {
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, h)
 	return buf
+}
+
+// frameStateHash 返回帧级 state_hash 的线上字节：模拟器未实现 StateHasher（HasHash=false）时留空，
+// 表示「本帧未算哈希」——不能用 8 个零字节冒充真实哈希。
+func frameStateHash(result lockstep.FrameResult) []byte {
+	if !result.HasHash {
+		return nil
+	}
+	return hashBytes(result.Hash)
 }
 
 // toPBInput 转换 lockstep 输入为协议帧输入（帧广播与补帧共用）。

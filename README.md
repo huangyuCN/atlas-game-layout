@@ -74,6 +74,7 @@ test/e2e        # 进程内端到端测试（真中间件，不可达自动跳�
 1. **定义协议**：在 `api/game/v1/player_service.proto` 的 `PlayerService` 增加 rpc，并按需标注
    `atlas.route.v1`（`access=CLIENT` 是客户端 op、`INTERNAL` 是服务间调用；uid 来源决定 actor 目标 PID）；
 2. **生成代码**：`make proto`（Atlas 全家桶插件：go / actor / client / http / tcp / udp / kcp / ws / errors / openapi）；
+   **提交前请跑 `make gen-all`**（= `make proto` + `bash scripts/gen-protocol.sh` + `gofmt`，幂等：连跑两次第二次 `git status` 为空）；
 3. **填生成桩**：业务逻辑实现生成的 `actor/` 平面接口（`services/game/internal/actor/`，battle 为
    `services/battle/internal/actor/`），错误直接 `return nil, err` 上抛；接入层在 `services/<域>/assemble`
    挂载两个 gRPC 面即可（Edge/Internal 的 `Register`/`ServiceDesc` 由生成产物自带）。

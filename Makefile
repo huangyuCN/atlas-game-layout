@@ -112,7 +112,7 @@ API_ADMIN_PROTOS := api/admin/game/v1/admin.proto
 API_MIGRATION_PROTOS := api/battle/v1/migration.proto
 API_ALL_PROTOS := api/common/v1/common.proto api/error/v1/errors.proto api/matcher/v1/match_events.proto $(API_SERVICE_PROTOS) $(API_DOMAIN_PROTOS) $(API_SESSION_PROTOS) $(API_MIGRATION_PROTOS)
 
-.PHONY: proto proto-tools
+.PHONY: proto proto-tools gen-all
 
 proto-tools: ## 收集/构建 protoc 插件到 ./bin（Atlas 全家桶 + go/go-grpc/openapi）
 	@mkdir -p $(BIN_DIR)
@@ -184,3 +184,15 @@ proto: proto-tools ## 生成全部 proto 产物（go/grpc/http/多传输/errors/
 		api/error/v1/errors.proto
 	@PATH="$(PWD)/$(BIN_DIR):$(abspath $(ATLAS_BIN)):$$PATH" $(PROTOC) $(PROTO_INC) \
 		--openapi_out=paths=source_relative:. $(API_ALL_PROTOS) $(API_ADMIN_PROTOS)
+
+# 一键生成：make proto（Atlas 全家桶产物）+ 三端协议包（scripts/gen-protocol.sh）+ gofmt 收尾。
+# 提交前跑它——CI 的两道「重生成无 diff」门（proto 产物 / protocol 包）与 gofmt 门，覆盖的正是这三步。
+# 幂等：连跑两次，第二次 `git status` 应为空（生成物已全部入库，任何 diff 都是忘了提交或插件漂移）。
+gen-all: proto ## 一键生成 proto + 三端协议包 + gofmt（提交前跑；幂等）
+	bash scripts/gen-protocol.sh
+	@# gofmt 收尾：生成器产出的 Go 一律对齐 gofmt 口径（排除 vendored 的 third_party）。
+	@gofmt -w $$(find . -name '*.go' -not -path './third_party/*' -not -path './.git/*')
+	@# 写完再校验一遍：仍有未格式化文件即失败，不让格式漂移留到 CI 才暴露。
+	@out="$$(gofmt -l $$(find . -name '*.go' -not -path './third_party/*' -not -path './.git/*'))"; \
+	if [ -n "$$out" ]; then echo "gen-all: gofmt 校验失败（以下文件未格式化）：$$out" >&2; exit 1; fi
+	@echo "gen-all 完成：proto + protocol 已重生成并 gofmt 收尾"
