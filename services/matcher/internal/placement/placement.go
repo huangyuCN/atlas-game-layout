@@ -16,7 +16,9 @@ package placement
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +35,14 @@ const schemeGRPC = "grpc"
 // 成局速率绑到 etcd 的 QPS 上；1s 的陈旧代价只是「新 battle 上线后最多 1s 才分到对局」。
 const DefaultCacheTTL = time.Second
 
+// DefaultReadyTimeout 是「候选集未就绪」的最长等待：重启后实例逐个注册进注册中心，
+// 帧面实例晚到的那一台会被帧面过滤摘掉，候选集随之塌成 1 台。等到齐再出票只多花注册延迟
+// （实测百毫秒级）；有了上限，等不齐时仍照常出票，绝不把成局路径挂在注册中心上。
+const DefaultReadyTimeout = 2 * time.Second
+
+// DefaultReadyPoll 是等待候选集就绪时的重试间隔。
+const DefaultReadyPoll = 20 * time.Millisecond
+
 // Options 是 Planner 构造选项。
 type Options struct {
 	// Service 是 battle internal 面注册的服务名（空 = consts.ServiceBattle）。
@@ -44,6 +54,11 @@ type Options struct {
 	// FrameService 是 battle 帧面实例的注册中心服务名（空 = consts.ServiceBattleFrame；
 	// 选点据此排除「没有帧面端点」的实例，见 frames.go）。
 	FrameService string
+	// ReadyTimeout 是候选集未就绪（少于注册的 battle 实例数）时的**最长等待**（≤0 取
+	// DefaultReadyTimeout）；给个极小值等于关掉等待，退回旧口径。
+	ReadyTimeout time.Duration
+	// ReadyPoll 是未就绪时的重试间隔（≤0 取 DefaultReadyPoll）。
+	ReadyPoll time.Duration
 	// Now 是时钟（测试可注入；nil = time.Now）。
 	Now func() time.Time
 }
@@ -55,12 +70,19 @@ type Planner struct {
 	frameService string
 	local        selector.NodeFilter
 	cacheTTL     time.Duration
+	readyTimeout time.Duration
+	readyPoll    time.Duration
 	now          func() time.Time
 
-	mu     sync.Mutex
-	nodes  []selector.Node // 候选快照（本机优先过滤后的结果）
-	loaded time.Time       // 快照建立时刻
-	warned int             // 上次快照的候选数（候选集塌成 1 时只告警一次，见 warnSole）
+	mu       sync.Mutex
+	nodes    []selector.Node // 候选快照（本机优先过滤后的结果）
+	loaded   time.Time       // 快照建立时刻
+	warned   int             // 上次快照的候选数（候选集塌成 1 时只告警一次，见 warnSole）
+	knownSig string          // 上次快照的候选指纹（同一份缺口只等一次，见 refresh）
+
+	// refreshMu 串行化快照重建：冷启动时上百局并发选点只让一个 goroutine 去等注册中心，
+	// 其余在锁上短暂排队后直接读新快照（否则等待窗口会被放大成「每局各等一轮」）。
+	refreshMu sync.Mutex
 
 	turn uint64 // 轮询游标（锁内自增：与快照读取同域，避免两次读取跨越一次快照切换）
 }
@@ -73,6 +95,8 @@ func New(disc registry.Discovery, o Options) *Planner {
 		frameService: o.FrameService,
 		local:        o.Local,
 		cacheTTL:     o.CacheTTL,
+		readyTimeout: o.ReadyTimeout,
+		readyPoll:    o.ReadyPoll,
 		now:          o.Now,
 	}
 	if p.service == "" {
@@ -83,6 +107,12 @@ func New(disc registry.Discovery, o Options) *Planner {
 	}
 	if p.cacheTTL <= 0 {
 		p.cacheTTL = DefaultCacheTTL
+	}
+	if p.readyTimeout <= 0 {
+		p.readyTimeout = DefaultReadyTimeout
+	}
+	if p.readyPoll <= 0 {
+		p.readyPoll = DefaultReadyPoll
 	}
 	if p.now == nil {
 		p.now = time.Now
@@ -153,47 +183,144 @@ func (p *Planner) next(n int) int {
 	return idx
 }
 
-// candidates 返回候选快照：TTL 内复用；过期则重查注册中心并套用本机优先过滤。
+// candidates 返回候选快照：TTL 内复用；过期则重建（含「候选集未就绪即等待」，见 refresh）。
 // 发现失败时**保留原快照**（自愈交给下一次查询），无快照则返回空。
 func (p *Planner) candidates(ctx context.Context) []selector.Node {
-	p.mu.Lock()
-	nodes, loaded := p.nodes, p.loaded
-	p.mu.Unlock()
-	if len(nodes) > 0 && p.now().Sub(loaded) < p.cacheTTL {
+	if nodes, ok := p.fresh(); ok {
 		return nodes
 	}
+	p.refreshMu.Lock()
+	defer p.refreshMu.Unlock()
+	if nodes, ok := p.fresh(); ok {
+		return nodes // 等锁期间别人已重建（冷启动时并发选点不各等一轮）
+	}
+	return p.refresh(ctx)
+}
+
+// fresh 返回 TTL 内可用的候选快照；无可用快照时 ok=false。
+func (p *Planner) fresh() ([]selector.Node, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.nodes) > 0 && p.now().Sub(p.loaded) < p.cacheTTL {
+		return p.nodes, true
+	}
+	return nil, false
+}
+
+// candidateSet 是一次快照重建的产物：候选端点 + 注册的 battle 实例数（候选的理论上限）。
+type candidateSet struct {
+	nodes      []selector.Node
+	registered int
+}
+
+// ready 报告候选集是否已就绪：候选数不少于注册实例数（注册为 0 时无从比较，视为就绪）。
+func (c candidateSet) ready() bool { return len(c.nodes) >= c.registered }
+
+// sig 返回候选集的地址指纹（用于判断「同一份缺口是不是已经见过」）。
+func (c candidateSet) sig() string {
+	addrs := make([]string, 0, len(c.nodes))
+	for _, n := range c.nodes {
+		addrs = append(addrs, n.Address())
+	}
+	return strings.Join(addrs, ",")
+}
+
+// refresh 查注册中心重建快照。候选数少于**注册的 battle 实例数**（帧面实例晚于 battle 实例
+// 注册进注册中心，即冷启动窗口）时先等：这段时间出的票必然全落先就绪的那台，而 1s 快照复用
+// 会把窗口放大成整批偏斜（实测重启后首轮 113:297，复测 199:211）。
+//
+// 三条边界：等到上限仍不齐 ⇒ WARN（带注册数 vs 候选数）并照常出票，绝不永久卡住成局路径；
+// 同一份缺口只等一次（已在此前快照出现过 ⇒ 不是启动竞态，不再为它加延迟）；发现失败 ⇒ 沿用
+// 上次快照。
+func (p *Planner) refresh(ctx context.Context) []selector.Node {
+	deadline := p.now().Add(p.readyTimeout)
+	var set candidateSet
+	for {
+		got, ok := p.query(ctx)
+		if !ok {
+			return p.lastSnapshot() // 发现失败：不把错误甩给成局路径
+		}
+		set = got
+		if set.ready() || p.known(set.sig()) || ctx.Err() != nil || !p.now().Before(deadline) {
+			break
+		}
+		p.pause(ctx)
+	}
+	if !set.ready() && !p.known(set.sig()) && ctx.Err() == nil {
+		getlog.GetLogger().Warn(fmt.Sprintf(
+			"matcher: 候选集未就绪——等待 %s 仍不足（候选 %d / 注册 %d），按现有候选继续出票",
+			p.readyTimeout, len(set.nodes), set.registered), "service", p.service)
+	}
+	p.store(set)
+	p.warnSole(set)
+	return set.nodes
+}
+
+// query 查一次注册中心并构造候选集：registered 是套用本机优先后可作候选的实例数
+// （即候选的理论上限），nodes 是再叠加帧面过滤后的结果（过滤不可得时退回不过滤）。
+func (p *Planner) query(ctx context.Context) (candidateSet, bool) {
 	list, err := p.disc.GetService(ctx, p.service)
 	if err != nil {
-		return nodes // 发现失败：沿用上次快照（可能为空），不把错误甩给成局路径
+		return candidateSet{}, false
 	}
-	ready := p.frameReady(ctx)
-	nodes = localFirst(ctx, p.local, nodesOf(list, ready))
-	if len(nodes) == 0 && ready != nil {
-		// 过滤后无候选：退回不过滤（选点不得因帧面过滤而整体失效）。
-		nodes = localFirst(ctx, p.local, nodesOf(list, nil))
+	eligible := localFirst(ctx, p.local, nodesOf(list, nil))
+	nodes := eligible
+	if ready := p.frameReady(ctx); ready != nil {
+		if filtered := localFirst(ctx, p.local, nodesOf(list, ready)); len(filtered) > 0 {
+			nodes = filtered // 过滤后为空：退回不过滤（选点不得因帧面过滤而整体失效）
+		}
 	}
+	return candidateSet{nodes: nodes, registered: len(eligible)}, true
+}
+
+// store 落盘新快照（候选集 + 指纹 + 建立时刻）。
+func (p *Planner) store(set candidateSet) {
 	p.mu.Lock()
-	p.nodes, p.loaded = nodes, p.now()
+	p.nodes, p.loaded, p.knownSig = set.nodes, p.now(), set.sig()
 	p.mu.Unlock()
-	p.warnSole(nodes)
-	return nodes
+}
+
+// lastSnapshot 返回上一次成功建立的候选快照（无快照时为空）。
+func (p *Planner) lastSnapshot() []selector.Node {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.nodes
+}
+
+// known 报告该指纹的候选集是否已经出现过（同一份缺口只等一次）。
+func (p *Planner) known(sig string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return sig != "" && p.knownSig == sig
+}
+
+// pause 等一个重试间隔；ctx 结束即提前返回（选点不得超出调用方预算）。
+func (p *Planner) pause(ctx context.Context) {
+	t := time.NewTimer(p.readyPoll)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
 }
 
 // warnSole 在候选集**只剩一台**时打一条 WARN（只在候选数变化时打，避免每 TTL 刷一行）。
 //
 // 为什么值得一条告警：轮询在单候选上退化成「本批对局全落这一台」，而选点代码本身完全
 // 看不出错——500 局里 486 局同台这种偏斜，根因几乎总是候选集塌了（实例 id 缺省导致同名键
-// 被顶掉、注册冲突、帧面过滤把某台摘掉）。把候选集大小做成可观测信号，下次直接看 WARN。
-func (p *Planner) warnSole(nodes []selector.Node) {
+// 被顶掉、注册冲突、帧面过滤把某台摘掉）。把候选数/注册数做成可观测信号，下次直接看 WARN。
+func (p *Planner) warnSole(set candidateSet) {
 	p.mu.Lock()
-	changed := p.warned != len(nodes)
-	p.warned = len(nodes)
+	changed := p.warned != len(set.nodes)
+	p.warned = len(set.nodes)
 	p.mu.Unlock()
-	if !changed || len(nodes) != 1 {
+	if !changed || len(set.nodes) != 1 {
 		return
 	}
-	getlog.GetLogger().Warn("matcher: battle 候选集只有 1 台——轮询退化为本批对局全落这一台",
-		"service", p.service, "instance", nodes[0].Address())
+	getlog.GetLogger().Warn(fmt.Sprintf(
+		"matcher: battle 候选集只有 1 台（候选 %d / 注册 %d）——轮询退化为本批对局全落这一台",
+		len(set.nodes), set.registered),
+		"service", p.service, "instance", set.nodes[0].Address())
 }
 
 // nodesOf 把注册实例映射为选点节点：地址取 grpc 面端点主机（host:port），

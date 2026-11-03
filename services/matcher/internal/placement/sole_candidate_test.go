@@ -60,6 +60,13 @@ func (l *captureLogger) record(msg string) {
 	l.warns = append(l.warns, msg)
 }
 
+// warnsText 返回已收集 WARN 的合并文本（断言告警内容用）。
+func (l *captureLogger) warnsText() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Join(l.warns, " | ")
+}
+
 // soleWarns 返回提及「候选集」的告警条数（只看本用例关心的那一条）。
 func (l *captureLogger) soleWarns() int {
 	l.mu.Lock()

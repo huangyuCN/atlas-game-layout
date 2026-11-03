@@ -2,7 +2,9 @@ package placement
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/huangyuCN/atlas-game-layout/lib/consts"
 	"github.com/huangyuCN/atlas/registry"
@@ -17,17 +19,30 @@ import (
 // serviceDiscovery 按服务名返回不同实例列表：选点器同时查 battle 与 battle-frame，
 // 单一列表的桩会把「帧面实例」误当成「battle 实例」（旧桩即如此）。
 type serviceDiscovery struct {
+	mu        sync.Mutex
 	byService map[string][]*registry.ServiceInstance
 	calls     map[string]int
 }
 
 // GetService 返回该服务名的实例列表（并按服务名计数，快照复用断言用）。
 func (d *serviceDiscovery) GetService(_ context.Context, service string) ([]*registry.ServiceInstance, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.calls == nil {
 		d.calls = make(map[string]int)
 	}
 	d.calls[service]++
 	return append([]*registry.ServiceInstance(nil), d.byService[service]...), nil
+}
+
+// stage 替换某个服务的实例列表（模拟重启后实例逐个就绪；加锁以便与选点并发并存）。
+func (d *serviceDiscovery) stage(service string, ins ...*registry.ServiceInstance) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.byService == nil {
+		d.byService = make(map[string][]*registry.ServiceInstance)
+	}
+	d.byService[service] = append([]*registry.ServiceInstance(nil), ins...)
 }
 
 // Watch 不支持（选点不做长连监听）。
@@ -45,8 +60,11 @@ func frameInstance(id string, endpoints ...string) *registry.ServiceInstance {
 }
 
 // newFrameAwarePlanner 构造带本机优先的选点器（同时查 battle 与 battle-frame）。
+//
+// ReadyTimeout 给到极小值：这些用例表达的是**稳态**（某台本来就没有帧面端点，不是启动竞态），
+// 选点不该为它等待——冷启动的等待语义由 ready_test.go 专测。
 func newFrameAwarePlanner(disc *serviceDiscovery) *Planner {
-	return New(disc, Options{Local: filter.PreferLocal("127.0.0.1")})
+	return New(disc, Options{Local: filter.PreferLocal("127.0.0.1"), ReadyTimeout: time.Nanosecond})
 }
 
 // TestPlannerExcludesBattlesWithoutFrameEndpoint 是本修复的核心断言：
