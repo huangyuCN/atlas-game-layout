@@ -155,6 +155,9 @@ public sealed class IssueEntryTicketReply
     [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("expiresAtUnixMs")]
     public long? ExpiresAtUnixMs { get; set; }
 
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)][JsonPropertyName("maxNetworkGapMs")]
+    public long? MaxNetworkGapMs { get; set; }
+
 }
 
 /// <summary>FrameBroadcast DTO（protojson JSON 语义）。</summary>

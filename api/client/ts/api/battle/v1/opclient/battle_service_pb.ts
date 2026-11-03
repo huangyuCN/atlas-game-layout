@@ -60,6 +60,7 @@ export interface IssueEntryTicketReply {
   endpoints?: EdgeEndpoint[]; // battle.v1.IssueEntryTicketReply.endpoints
   tickets?: BattleTicketEntry[]; // battle.v1.IssueEntryTicketReply.tickets
   expiresAtUnixMs?: string // int64; // battle.v1.IssueEntryTicketReply.expires_at_unix_ms
+  maxNetworkGapMs?: string // int64; // battle.v1.IssueEntryTicketReply.max_network_gap_ms
 }
 
 export interface FrameBroadcast {
