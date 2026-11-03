@@ -37,8 +37,8 @@ const (
 
 // 报错类型标签（SUMMARY 里按标签计数，避免把长错误串铺进报表）。
 const (
-	errKindDeadline = "context deadline exceeded"
-	errKindCanceled = "context canceled"
+	errKindDeadline  = "context deadline exceeded"
+	errKindCanceled  = "context canceled"
 	errKindIOTimeout = "i/o timeout"
 )
 
@@ -85,14 +85,14 @@ func firstLine(s string) string {
 
 // probeSummary 是一组探针的结果摘要（成功率 + 两套分位 + 超时等待时长）。
 type probeSummary struct {
-	Total      int
-	OK         int
-	Timeout    int
-	Errors     int
-	SuccessPct float64
-	ErrKinds   map[string]int
-	OKLatency  latency // 仅成功样本：真实服务时延
-	AllLatency latency // 含超时（超时按其实际等待时长计）：现在的观测口径
+	Total       int
+	OK          int
+	Timeout     int
+	Errors      int
+	SuccessPct  float64
+	ErrKinds    map[string]int
+	OKLatency   latency // 仅成功样本：真实服务时延
+	AllLatency  latency // 含超时（超时按其实际等待时长计）：现在的观测口径
 	TimeoutWait latency // 超时样本的等待时长分布（判是否卡在调用预算上）
 }
 
