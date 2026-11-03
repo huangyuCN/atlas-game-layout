@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 
 	"github.com/huangyuCN/atlas/lockstep"
 )
@@ -71,19 +70,21 @@ func (b *Battle) Step(_ context.Context, frame lockstep.FrameID, inputs []lockst
 	return nil
 }
 
-// Snapshot 实现 lockstep.Simulator：状态序列化 + 哈希。
+// Snapshot 实现 lockstep.Simulator：状态序列化 + 状态哈希。
+//
+// State 字节仍是 JSON（Restore 与结算需要**可还原**的状态），但 Hash 与帧级 state_hash
+// **共用同一口径**：定向二进制编码 + 内联 FNV-1a 64（见 hash.go 的 Hash），不再对 JSON 字节
+// 另算一遍 fnv——同一状态只有一个哈希值，帧级与快照级线上逐字节相等。
 func (b *Battle) Snapshot(_ context.Context) (lockstep.Snapshot, error) {
 	st := State{Positions: b.pos, Scores: b.score, Winner: b.winner}
 	raw, err := json.Marshal(&st)
 	if err != nil {
 		return lockstep.Snapshot{}, fmt.Errorf("simulator: 状态序列化失败: %w", err)
 	}
-	h := fnv.New64a()
-	_, _ = h.Write(raw)
 	return lockstep.Snapshot{
 		Frame: lockstep.FrameID(b.frame),
 		State: raw,
-		Hash:  h.Sum64(),
+		Hash:  b.Hash(),
 	}, nil
 }
 

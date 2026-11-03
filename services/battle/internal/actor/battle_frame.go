@@ -54,7 +54,8 @@ func (b *BattleActor) onFrameResult(ctx core.ActorContext, result lockstep.Frame
 		ServerTime: timestamppb.Now(), // 广播时间戳：客户端对时与压测延迟度量
 		Snapshot:   snapshotMeta(result.Snapshot),
 		// 帧级 state_hash：每帧都有（模拟器实现 StateHasher 时由会话算好，见 lockstep.FrameResult）。
-		// 与快照帧的 SnapshotMeta.StateHash 是两条口径：前者每帧的轻量哈希，后者是快照状态的 JSON 哈希。
+		// 与快照帧的 SnapshotMeta.StateHash **同一口径**（模拟器 Hash()：定向编码 + FNV-1a），
+		// 线上同为 8 字节大端，同一状态逐字节相等。
 		StateHash: frameStateHash(result),
 	}
 	for _, in := range result.Inputs {

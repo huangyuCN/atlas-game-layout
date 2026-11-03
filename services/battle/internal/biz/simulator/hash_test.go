@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"hash/fnv"
 	"reflect"
 	"sort"
@@ -105,16 +104,23 @@ func newBattleWith(t *testing.T, frames []struct {
 	return b
 }
 
-// TestHashCoversAllStateFields 是「防漏字段」属性测试：State 的每个字段单独变化，
-// 哈希都必须跟着变（编码漏掉某字段 ⇒ 该字段怎么改哈希都不变 ⇒ 红）。
-func TestHashCoversAllStateFields(t *testing.T) {
-	base := func() *State {
-		return &State{Positions: map[string]int32{"p1": 1, "p2": 2}, Scores: map[string]int32{"p1": 0, "p2": 0}}
-	}
-	simOf := func(st *State) *Battle {
-		return &Battle{pos: st.Positions, score: st.Scores, winner: st.Winner}
-	}
-	mutations := []struct {
+// baseState 是字段覆盖属性测试的基准状态（位置/得分各两人、未分胜负）。
+func baseState() *State {
+	return &State{Positions: map[string]int32{"p1": 1, "p2": 2}, Scores: map[string]int32{"p1": 0, "p2": 0}}
+}
+
+// simOfState 用给定 State 直接组装模拟器（绕开 Step，便于构造任意字段组合）。
+func simOfState(st *State) *Battle {
+	return &Battle{pos: st.Positions, score: st.Scores, winner: st.Winner}
+}
+
+// stateMutations 是「State 每个字段单独变化」的变异集（位置/得分/胜者/增删玩家），
+// 帧级与快照（同一口径）的属性测试共用同一份变异集，避免两边覆盖面漂移。
+func stateMutations() []struct {
+	name   string
+	mutate func(*State)
+} {
+	return []struct {
 		name   string
 		mutate func(*State)
 	}{
@@ -125,11 +131,16 @@ func TestHashCoversAllStateFields(t *testing.T) {
 		{"新增玩家得分", func(s *State) { s.Scores["p3"] = 1 }},
 		{"胜者", func(s *State) { s.Winner = "p1" }},
 	}
-	baseHash := simOf(base()).Hash()
-	for _, m := range mutations {
-		st := base()
+}
+
+// TestHashCoversAllStateFields 是「防漏字段」属性测试：State 的每个字段单独变化，
+// 哈希都必须跟着变（编码漏掉某字段 ⇒ 该字段怎么改哈希都不变 ⇒ 红）。
+func TestHashCoversAllStateFields(t *testing.T) {
+	baseHash := simOfState(baseState()).Hash()
+	for _, m := range stateMutations() {
+		st := baseState()
 		m.mutate(st)
-		got := simOf(st).Hash()
+		got := simOfState(st).Hash()
 		if got == baseHash {
 			t.Fatalf("%s 变化后哈希不变（编码漏了该字段）", m.name)
 		}
@@ -163,28 +174,6 @@ func TestHashStableAcrossSnapshotRestore(t *testing.T) {
 	}
 }
 
-// TestSnapshotHashStaysJSON 钉住快照口径不受影响：Snapshot().Hash 仍是
-// json.Marshal(State) + fnv64a（帧级 Hash 是另一条口径，两者不混用）。
-func TestSnapshotHashStaysJSON(t *testing.T) {
-	b := newBattleWith(t, []struct {
-		frame lockstep.FrameID
-		ins   []lockstep.Input
-	}{{1, []lockstep.Input{mkInput("a", 1, 2), mkInput("b", 1, 1)}}})
-	snap, err := b.Snapshot(context.Background())
-	if err != nil {
-		t.Fatalf("Snapshot: %v", err)
-	}
-	raw, err := json.Marshal(&State{Positions: b.pos, Scores: b.score, Winner: b.winner})
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	h := fnv.New64a()
-	_, _ = h.Write(raw)
-	if snap.Hash != h.Sum64() {
-		t.Fatalf("快照哈希口径变了：got %d，json+fnv = %d", snap.Hash, h.Sum64())
-	}
-}
-
 // BenchmarkHash 帧级哈希性能：目标 0 分配、亚微秒级（旧 json.Marshal 路径约 2.2µs/23 分配）。
 func BenchmarkHash(b *testing.B) {
 	sim := New(100, 1000)
@@ -200,7 +189,8 @@ func BenchmarkHash(b *testing.B) {
 	_ = sink
 }
 
-// BenchmarkSnapshotHash 是旧口径对照：同一状态走 json.Marshal + fnv64a（快照路径）。
+// BenchmarkSnapshotHash 是快照路径的完整成本（含 State 的 JSON 序列化 + 统一口径的状态哈希）：
+// 序列化产物要能 Restore/结算，故不可省；哈希部分与 BenchmarkHash 同一实现。
 func BenchmarkSnapshotHash(b *testing.B) {
 	sim := New(100, 1000)
 	_ = sim.Step(context.Background(), 1, []lockstep.Input{
