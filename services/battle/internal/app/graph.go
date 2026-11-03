@@ -38,6 +38,8 @@ var Module = fx.Module("battle",
 	// 中间件/过滤器默认链（业务可用 fx.Decorate 追加自己的）。
 	middleware.Module,
 	fx.Provide(
+		// GC 调优意图（battle.memory_mode / memory_limit）：缺省关闭，不产生运行时副作用。
+		newMemoryTuning,
 		// 战斗参数 + 出票三件（票据密钥/TTL/接入层地址）：配置缺失即启动失败。
 		newActorConfig,
 		// ── infra：注册中心 + 外部客户端 + 集群运行时 + 帧广播 ──
@@ -80,6 +82,8 @@ var Module = fx.Module("battle",
 		server.NewGRPCServers,
 	),
 	fx.Invoke(
+		// GC 调优必须最先落地：在注册资源/启动运行时之前设置进程级内存上限与 GC 档位。
+		registerMemoryTuning,
 		registerResources,
 		registerActor,
 		registerMigration,

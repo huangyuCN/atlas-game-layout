@@ -133,6 +133,28 @@ type BattleConf struct {
 	// 客户端侧：该值随出票回执 → 成局事件 → MatchStartedNotify.max_network_gap_ms 下发，
 	// 客户端据此设置自己的空闲判定，不必再单独配置；显式设置的 SDK 选项仍优先（逃生阀）。
 	MaxNetworkGap string `protobuf:"bytes,13,opt,name=max_network_gap,json=maxNetworkGap,proto3" json:"max_network_gap,omitempty"`
+	// memory_mode 是**进程内 GC 调优档位**（不配置 = 关闭 = 现行为零变化）：
+	//   - 不配置 / 显式 "off"：**不调用** debug.SetGCPercent / debug.SetMemoryLimit，
+	//     GOGC 与 GOMEMLIMIT 完全交给运行环境（缺省必须保持这条，守回归）；
+	//   - 显式 "tuned"：battle 启动早期在进程内设置 GOGC=off 等价行为
+	//     （debug.SetGCPercent(-1)）+ 内存软上限（debug.SetMemoryLimit，值见 memory_limit）。
+	//     实测收益：探针 p99 55.30ms → 17.46/31.34ms（−43%~−68%）、帧失败 145 → 29/2、
+	//     六进程 CPU 11.36 核 → 10.82 核（−4%~−5%）；代价：**每进程 RSS 约 +1.9GiB**
+	//     （0.92–1.14GiB → 2.85GiB）。**内存 <16GB 的机器不建议开启**，
+	//     否则多进程 RSS 叠加会把机器推到 OOM 边缘。详见 docs/config.md §12。
+	//
+	// 为什么用进程内 API 而非环境变量：运行中改不了、也不好测；debug 两个 API 是
+	// Go 标准库能力，进程内即时生效，且可通过注入 setter 做「缺省零调用」的断言。
+	// 非法值（未知档位）即启动失败——「配了没生效」比启动失败更贵。
+	MemoryMode string `protobuf:"bytes,14,opt,name=memory_mode,json=memoryMode,proto3" json:"memory_mode,omitempty"`
+	// memory_limit 是 memory_mode=tuned 时的**进程内存软上限**（GOMEMLIMIT 等价物，
+	// 如 "3GiB"）：GC 只在逼近该上限时才跑，故它必须按**进程可用内存**给，而不是越小越好。
+	//   - 单位只接受二进制后缀 KiB/MiB/GiB/TiB（正整数，如 512MiB、3GiB；不接受 3GB/裸数字）；
+	//   - 不配置：取预设 3GiB（压测验证过的取值；**推荐显式配置**，上限可预测）；
+	//   - 下限 512MiB：更小的上限会让 GOGC=off 的进程被内存上限反复触发 GC，
+	//     延迟收益归零甚至反转，故配置面直接拒绝（启动失败）；
+	//   - memory_mode 未开启（缺省/off）时配置本项即启动失败（配了没生效属于误配）。
+	MemoryLimit   string `protobuf:"bytes,15,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -254,6 +276,20 @@ func (x *BattleConf) GetDatagramIdleTimeout() string {
 func (x *BattleConf) GetMaxNetworkGap() string {
 	if x != nil {
 		return x.MaxNetworkGap
+	}
+	return ""
+}
+
+func (x *BattleConf) GetMemoryMode() string {
+	if x != nil {
+		return x.MemoryMode
+	}
+	return ""
+}
+
+func (x *BattleConf) GetMemoryLimit() string {
+	if x != nil {
+		return x.MemoryLimit
 	}
 	return ""
 }
@@ -421,7 +457,7 @@ var File_services_battle_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\xc6\x05\n" +
+	"(services/battle/internal/conf/conf.proto\x12\vbattle.conf\x1a\"api/battle/v1/battle_service.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1bprotobuf/configs/data.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\x1a\x1cprotobuf/configs/actor.proto\"\x8a\x06\n" +
 	"\n" +
 	"BattleConf\x12\x1d\n" +
 	"\n" +
@@ -441,7 +477,10 @@ const file_services_battle_internal_conf_conf_proto_rawDesc = "" +
 	" \x01(\bR\x16frameBroadcastProtobuf\x12@\n" +
 	"\x0eedge_instances\x18\v \x03(\v2\x19.battle.conf.EdgeInstanceR\redgeInstances\x122\n" +
 	"\x15datagram_idle_timeout\x18\f \x01(\tR\x13datagramIdleTimeout\x12&\n" +
-	"\x0fmax_network_gap\x18\r \x01(\tR\rmaxNetworkGapB\x17\n" +
+	"\x0fmax_network_gap\x18\r \x01(\tR\rmaxNetworkGap\x12\x1f\n" +
+	"\vmemory_mode\x18\x0e \x01(\tR\n" +
+	"memoryMode\x12!\n" +
+	"\fmemory_limit\x18\x0f \x01(\tR\vmemoryLimitB\x17\n" +
 	"\x15_frame_advertise_hostB\r\n" +
 	"\v_max_framesB\x13\n" +
 	"\x11_tick_interval_msB\x11\n" +

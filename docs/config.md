@@ -106,6 +106,7 @@ runtime.namespace = "test"  ──→  框架 namespace.Derive(ns)   ← 唯一�
 | `battle.max_frames` / `battle.tick_interval_ms` | 无 | — | **整项缺失** ⇒ 6000 帧 / 100ms（= 10 分钟一局；60 帧只够 6 秒，见 §7.6 的取值依据）；**显式值**必须为正且不超上限（`max_frames ≤ 20000`、`tick_interval_ms ≤ 1000`），显式 `0`/负值/超上限一律启动失败（未配置与显式 `0` 语义不同，故用 `optional`；依据见 §7.6） |
 | `battle.seat_window_ms` / `battle.max_players` | 无 | — | **整项缺失** ⇒ 3000ms 入座窗口 / 10 人会话容量；`seat_window_ms` 显式 `0` = **关闭窗口**（成局即开打，旧行为），负值或 `> 30000` 失败；`max_players` 合法区间 `[1, 64]`（`0` 不是「不限」），越界失败（语义见 §7.7） |
 | `battle.frame_broadcast_protobuf` | 无 | `false`（protojson / 帧头 ver=1，行为零变化） | `true` ⇒ 帧广播载荷切 protobuf 二进制 + 帧头 ver=2：同一广播实测 **1631 B → 465 B（≈3.5×）**，**帧数不变**（每连接每 tick 仍一次写）。**前置条件**：三端 SDK 都能解 ver=2 帧广播——当前 Go 直连 SDK 的解码与补帧基准写死 protojson，TS/C# 只把 `(payload, version)` 透传且补帧基准只认 ver=1，未升级的客户端会**静默丢弃**广播（语义见 §7.10） |
+| `battle.memory_mode` / `battle.memory_limit` | 无 | 不配置 / `off` = **关闭**：不调用 `debug.SetGCPercent` / `debug.SetMemoryLimit`（GOGC/GOMEMLIMIT 完全交给运行环境，**现行为零变化**） | `tuned` = battle 启动早期在进程内设 GOGC=off 等价行为 + 内存软上限；`memory_limit` 只接受 `<正整数><KiB\|MiB\|GiB\|TiB>`（如 `3GiB`），未配取 **3GiB** 预设，下限 **512MiB**（过小即启动失败）；未开 `tuned` 却配 `memory_limit` 也失败。⚠️ **开启后每进程 RSS 约 +1.9GiB，内存 <16GB 的机器不建议开**（收益与代价见 §12） |
 | `battle.edge_endpoints` | 列表非空 + `transport` 非 `UNSPECIFIED` + 地址非空 + 面不重复 | **启动失败**（客户端拿到的接入层地址只有这一个来源） | 面枚举 `EDGE_TRANSPORT_{WS,KCP,UDP}`；**按面下发**、不要求三面齐全（只开 ws 也能启动） |
 | `battle.edge_instances` / `edge_endpoints` | 每个实例至少一面、面不重复、地址非空；**两者互斥** | **启动失败**（地址来源必须唯一） | 多实例：`edge_instances` 是「实例 → 面列表」列表，出票时按 `player_id` 哈希选其一（同一玩家恒定同一实例 ⇒ 数据报面粘性）；**单元素与 `edge_endpoints` 简写等价**（见 §7.11） |
 | `battle.frame_advertise_host` | 无（整项缺失 = 回落） | 整项缺失 ⇒ 回落 `edge_endpoints` 的主机（**仅适合同机部署**） | 只填主机（不含端口、IPv6 不带方括号）；空白串/带端口/带方括号即启动失败；跨机部署**必须**显式配置（语义见 §7） |
@@ -645,20 +646,50 @@ Redis 续租是高频写，**不等待同步复制**（不 WAIT）。切主时�
 样本 PID 断言「任一时刻至多一个节点自认属主」；演练拓扑的 `failover-timeout` 必须
 ≤ 声明的 `replication_lag`，否则演练本身就会红——那不是框架缺陷，而是配置没覆盖真实窗口。
 
-## 12. GC 调优：`GOMEMLIMIT`（battle / edge 的内存软上限）
+## 12. GC 调优：battle 进程内配置 vs edge 的 `GOMEMLIMIT` 环境变量
 
-**落法**：`GOMEMLIMIT` 是 Go 运行时的环境变量，不需要改业务代码——由部署启动脚本注入，
-见 `scripts/start-services.sh` 的 `BATTLE_GOMEMLIMIT` / `EDGE_GOMEMLIMIT`（留空 = 不注入）。
+### 12.1 battle：`battle.memory_mode`（**缺省关闭**，推荐显式配上限）
+
+| 配置项 | 缺省 | 语义 |
+|---|---|---|
+| `battle.memory_mode` | 不配置 / `off` = 关闭 | `tuned` = 开启：battle 启动早期在进程内调用 `debug.SetGCPercent(-1)`（等同 `GOGC=off`）+ `debug.SetMemoryLimit(...)`；未知档位启动失败 |
+| `battle.memory_limit` | `3GiB`（仅 tuned 时） | 进程内存软上限；只接受 `<正整数><KiB\|MiB\|GiB\|TiB>`（如 `3GiB`）；下限 512MiB；**推荐显式配置**（上限可预测）；未开启 tuned 却配它 = 启动失败 |
+
+- **缺省关闭**：不设置 GOGC/GOMEMLIMIT，**一次都不调用**两个运行时 API，现行为零变化（有专门的回归用例，用注入 setter 断言零调用）。
+- **为什么不用环境变量**：环境变量运行中改不了、也不好测；`runtime/debug` 的两个 API 是 Go 标准库能力，进程内即时生效。
+- **校验**：`tuned` 下 `memory_limit` 小于 512MiB、非法单位、裸数字、非正数、溢出、未知档位 ⇒ 启动失败（GOGC=off 又没给足内存余量，会被软上限反复触发 GC，延迟收益归零甚至反转）。
+- 生效点在 fx 依赖图的首个 invoke（早于 actor 运行时/传输层启动）。
+
+**内存代价（必读；同一二进制、4096 人局 ws 实测）**：
+
+| 指标 | 基线（默认 GC） | `tuned` + 3GiB |
+|---|---|---|
+| 六进程 CPU | 11.36 核 | 10.82 核（−4~5%） |
+| 探针 p99 | 55.30ms | 17.46 / 31.34ms（−43%~−68%） |
+| 帧失败 | 145 | 29 / 2（−80%~−99%） |
+| RSS / battle 进程 | 0.92–1.14GiB | **2.85GiB（+1.7~1.9GiB）** |
+
+> **一句话：开启后每进程 RSS 约 +1.9GiB；收益 p99 −50%、帧失败 −90%、CPU −5%；内存 <16GB 的机器不建议开**（双 battle + edge 叠加会逼近 OOM）。
+
+上限按**进程可用内存**给，不是越小越好：上限越紧 GC 越频繁，低于 512MiB 直接拒绝。
+
+### 12.2 edge：仍用 `GOMEMLIMIT` 环境变量
+
+`GOMEMLIMIT` 是 Go 运行时的环境变量，edge 侧不需要改业务代码——由部署启动脚本注入，
+见 `scripts/start-services.sh` 的 `EDGE_GOMEMLIMIT`（留空 = 不注入）。
 
 | 变量 | 适用服务 | 初值口径 | 4096 人局 | 5000 人局 |
 |---|---|---|---|---|
-| `BATTLE_GOMEMLIMIT` | battle（双进程同值） | 该规模稳态 RSS × 1.6 | 1.26GB → `2GiB` | 1.95GB → `3GiB` |
+| `BATTLE_GOMEMLIMIT` | battle（历史兼容口径） | 该规模稳态 RSS × 1.6 | 1.26GB → `2GiB` | 1.95GB → `3GiB` |
 | `EDGE_GOMEMLIMIT` | edge | 该规模稳态 RSS × 1.6 | 140MB → `224MiB` | 168MB → `288MiB` |
+
+> battle 侧新配置与 `battle.memory_mode` 同时存在时，进程内 `debug.SetMemoryLimit` 在启动早期覆盖
+> 环境变量，**以配置项为准**；`BATTLE_GOMEMLIMIT` 仅作历史兼容保留，不再推荐。
 
 **为什么不是写死 `GOGC=400`**：`GOGC` 是「相对上次存活堆的倍数」，堆越大周期越长，业务峰值一叠加
 就把堆线性放大，且没有上限；`GOMEMLIMIT` 是绝对软上限，逼近上限会自动收紧 GC，最坏只是变慢不会打爆。
 
-**实测（4096 人局 / 10 人一局 / tick=100ms / 同一批二进制）**：
+**历史实测（4096 人局 / 10 人一局 / tick=100ms / 同一批二进制，仅设上限）**：
 
 | 配置 | 六进程 CPU | 探针 p99 | 广播 p99（校正） | RSS 加总 |
 |---|---|---|---|---|
@@ -667,6 +698,6 @@ Redis 续租是高频写，**不等待同步复制**（不 WAIT）。切主时�
 
 **结论**：只设 `GOMEMLIMIT` 在 4096 规模**不产生 CPU 收益**（10.27→10.42 核，噪声内）。
 原因是默认 `GOGC=100` 的触发点（存活堆×2）仍低于上限，上限没有成为绑定约束；要复现 `GOGC=400`
-的 −9.4% CPU，必须同时放宽倍数触发（例如 `GOGC=off` 让上限成为唯一触发），本仓库不默认这么做——
-**上限只当安全阀**。上限取值低于「1.6 × 目标规模 RSS」时反而会成为绑定约束：5000 人局用 `2GiB`
-时 battle 堆顶到上限，GC 更频繁、探针 p99 由 79.9ms 劣化到 87.7ms。
+的 −9.4% CPU，必须同时放宽倍数触发——这正是 `battle.memory_mode: tuned` 做的（`SetGCPercent(-1)`
+让上限成为唯一触发），收益与内存代价见 §12.1。上限取值低于「1.6 × 目标规模 RSS」时反而会成为
+绑定约束：5000 人局用 `2GiB` 时 battle 堆顶到上限，GC 更频繁、探针 p99 由 79.9ms 劣化到 87.7ms。

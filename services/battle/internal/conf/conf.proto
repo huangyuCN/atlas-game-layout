@@ -118,6 +118,27 @@ message BattleConf {
   // 客户端侧：该值随出票回执 → 成局事件 → MatchStartedNotify.max_network_gap_ms 下发，
   // 客户端据此设置自己的空闲判定，不必再单独配置；显式设置的 SDK 选项仍优先（逃生阀）。
   string max_network_gap = 13;
+  // memory_mode 是**进程内 GC 调优档位**（不配置 = 关闭 = 现行为零变化）：
+  //   - 不配置 / 显式 "off"：**不调用** debug.SetGCPercent / debug.SetMemoryLimit，
+  //     GOGC 与 GOMEMLIMIT 完全交给运行环境（缺省必须保持这条，守回归）；
+  //   - 显式 "tuned"：battle 启动早期在进程内设置 GOGC=off 等价行为
+  //     （debug.SetGCPercent(-1)）+ 内存软上限（debug.SetMemoryLimit，值见 memory_limit）。
+  //     实测收益：探针 p99 55.30ms → 17.46/31.34ms（−43%~−68%）、帧失败 145 → 29/2、
+  //     六进程 CPU 11.36 核 → 10.82 核（−4%~−5%）；代价：**每进程 RSS 约 +1.9GiB**
+  //     （0.92–1.14GiB → 2.85GiB）。**内存 <16GB 的机器不建议开启**，
+  //     否则多进程 RSS 叠加会把机器推到 OOM 边缘。详见 docs/config.md §12。
+  // 为什么用进程内 API 而非环境变量：运行中改不了、也不好测；debug 两个 API 是
+  // Go 标准库能力，进程内即时生效，且可通过注入 setter 做「缺省零调用」的断言。
+  // 非法值（未知档位）即启动失败——「配了没生效」比启动失败更贵。
+  string memory_mode = 14;
+  // memory_limit 是 memory_mode=tuned 时的**进程内存软上限**（GOMEMLIMIT 等价物，
+  // 如 "3GiB"）：GC 只在逼近该上限时才跑，故它必须按**进程可用内存**给，而不是越小越好。
+  //   - 单位只接受二进制后缀 KiB/MiB/GiB/TiB（正整数，如 512MiB、3GiB；不接受 3GB/裸数字）；
+  //   - 不配置：取预设 3GiB（压测验证过的取值；**推荐显式配置**，上限可预测）；
+  //   - 下限 512MiB：更小的上限会让 GOGC=off 的进程被内存上限反复触发 GC，
+  //     延迟收益归零甚至反转，故配置面直接拒绝（启动失败）；
+  //   - memory_mode 未开启（缺省/off）时配置本项即启动失败（配了没生效属于误配）。
+  string memory_limit = 15;
 }
 
 // EdgeInstance 是一个接入层实例（多实例部署时按玩家哈希选其一）。
