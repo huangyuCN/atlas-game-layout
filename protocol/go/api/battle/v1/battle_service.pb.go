@@ -965,7 +965,12 @@ type FrameBroadcastDelta struct {
 	// removed_player_ids 是本帧不再出现的玩家：先删除、再按 set_inputs 覆盖/追加。
 	RemovedPlayerIds []string `protobuf:"bytes,6,rep,name=removed_player_ids,json=removedPlayerIds,proto3" json:"removed_player_ids,omitempty"`
 	// snapshot 在 changed 含 SNAPSHOT 时有效；**缺失 = 本帧无快照**（即「清空」的表达方式）。
-	Snapshot      *lockstep.SnapshotMeta `protobuf:"bytes,7,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Snapshot *lockstep.SnapshotMeta `protobuf:"bytes,7,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	// state_hash 是本帧（seq）的状态哈希：字段名与类型照抄全量帧的
+	// atlas.game.lockstep.LockstepFrame.state_hash（bytes），客户端按同一口径比对。
+	// **每帧必带**（与 seq 同级，不进 changed）：锁步靠它防失步——被增量覆盖的帧若拿不到
+	// 当帧 hash，客户端只能停在基线 hash 上，失步将无法发现。空 bytes 表示该帧未算哈希。
+	StateHash     []byte `protobuf:"bytes,8,opt,name=state_hash,json=stateHash,proto3" json:"state_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1045,6 +1050,13 @@ func (x *FrameBroadcastDelta) GetRemovedPlayerIds() []string {
 func (x *FrameBroadcastDelta) GetSnapshot() *lockstep.SnapshotMeta {
 	if x != nil {
 		return x.Snapshot
+	}
+	return nil
+}
+
+func (x *FrameBroadcastDelta) GetStateHash() []byte {
+	if x != nil {
+		return x.StateHash
 	}
 	return nil
 }
@@ -1262,7 +1274,7 @@ const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\tendpoints\x18\x01 \x03(\v2\x17.battle.v1.EdgeEndpointR\tendpoints\x126\n" +
 	"\atickets\x18\x02 \x03(\v2\x1c.battle.v1.BattleTicketEntryR\atickets\x12+\n" +
 	"\x12expires_at_unix_ms\x18\x03 \x01(\x03R\x0fexpiresAtUnixMs\x12+\n" +
-	"\x12max_network_gap_ms\x18\x04 \x01(\x03R\x0fmaxNetworkGapMs\"\xdb\x02\n" +
+	"\x12max_network_gap_ms\x18\x04 \x01(\x03R\x0fmaxNetworkGapMs\"\xfa\x02\n" +
 	"\x13FrameBroadcastDelta\x12\x19\n" +
 	"\bbase_seq\x18\x01 \x01(\x04R\abaseSeq\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x124\n" +
@@ -1271,7 +1283,9 @@ const file_api_battle_v1_battle_service_proto_rawDesc = "" +
 	"\n" +
 	"set_inputs\x18\x05 \x03(\v2\".atlas.game.lockstep.LockstepInputR\tsetInputs\x12,\n" +
 	"\x12removed_player_ids\x18\x06 \x03(\tR\x10removedPlayerIds\x12=\n" +
-	"\bsnapshot\x18\a \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\"m\n" +
+	"\bsnapshot\x18\a \x01(\v2!.atlas.game.lockstep.SnapshotMetaR\bsnapshot\x12\x1d\n" +
+	"\n" +
+	"state_hash\x18\b \x01(\fR\tstateHash\"m\n" +
 	"\x0eFrameBroadcast\x12\x1b\n" +
 	"\tbattle_id\x18\x01 \x01(\tR\bbattleId\x128\n" +
 	"\x05frame\x18\x02 \x01(\v2\".atlas.game.lockstep.LockstepFrameR\x05frame:\x04\xd8\xd5\"\x01\"^\n" +

@@ -116,8 +116,15 @@ func inputsByPlayer(inputs []*locksteppb.LockstepInput) map[string]*locksteppb.L
 
 // diffFrames 生成「prev → cur」的增量：字段顺序固定（SERVER_TIME、INPUTS、SNAPSHOT），
 // 未变化的字段不出现。prev 必须非空且 cur.frame_id = prev.frame_id + 1。
+//
+// state_hash 与 seq 同级：**每帧必带当帧值**（cur 的），不进 changed——锁步防失步靠它。
+// 这里只做**复制**，绝不在 diff 里重算哈希：hash 依赖全量状态，属于帧聚合的产物。
 func diffFrames(prev, cur *locksteppb.LockstepFrame) *battlev1.FrameBroadcastDelta {
-	d := &battlev1.FrameBroadcastDelta{BaseSeq: prev.GetFrameId(), Seq: cur.GetFrameId()}
+	d := &battlev1.FrameBroadcastDelta{
+		BaseSeq:   prev.GetFrameId(),
+		Seq:       cur.GetFrameId(),
+		StateHash: cur.GetStateHash(), // 当帧（不是基线）hash，直接复用聚合已算好的值
+	}
 
 	if !sameServerTime(prev.GetServerTime(), cur.GetServerTime()) {
 		d.Changed = append(d.Changed, battlev1.FrameDeltaField_FRAME_DELTA_FIELD_SERVER_TIME)

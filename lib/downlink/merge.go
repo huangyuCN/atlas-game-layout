@@ -29,16 +29,18 @@ const VersionDelta uint8 = 3
 //   - inputs：先按 removed_player_ids 删除，再按 player_id 用 set_inputs 整条覆盖/追加，
 //     未提及的保持基线，最后把全部 frame_id 改写为 seq（与全量帧语义一致）；
 //   - snapshot：changed 含 SNAPSHOT 时用本条替换（**本条缺失 = 本帧无快照**，即清空），
-//     否则沿用基线。
+//     否则沿用基线；
+//   - state_hash：**总是**用当帧（增量自带）的值覆盖，与全量帧同名同类型（bytes），
+//     绝不回退到基线——回退会让失步的客户端拿基线的 hash 自证「一致」。
 func Merge(base *battlev1.FrameBroadcast, d *battlev1.FrameBroadcastDelta) *battlev1.FrameBroadcast {
 	seq := d.GetSeq()
 	out := &battlev1.FrameBroadcast{BattleId: base.GetBattleId(), Frame: &locksteppb.LockstepFrame{
-		FrameId:  seq,
-		Inputs:   mergeInputs(base.GetFrame().GetInputs(), d),
-		Snapshot: mergeSnapshot(base.GetFrame().GetSnapshot(), d),
+		FrameId:   seq,
+		StateHash: d.GetStateHash(), // 当帧 hash（每帧必带）；空 = 本帧未算哈希，不沿用基线
+		Inputs:    mergeInputs(base.GetFrame().GetInputs(), d),
+		Snapshot:  mergeSnapshot(base.GetFrame().GetSnapshot(), d),
 	}}
 	cur := base.GetFrame()
-	out.Frame.StateHash = cur.GetStateHash() // 增量不携带 state_hash：沿用基线（见包注释与设计 §10 存疑项）
 	out.Frame.ServerTime = cur.GetServerTime()
 	if hasField(d, battlev1.FrameDeltaField_FRAME_DELTA_FIELD_SERVER_TIME) {
 		out.Frame.ServerTime = timestamppb.New(epochNanos(d.GetServerTimeUnixNano()))

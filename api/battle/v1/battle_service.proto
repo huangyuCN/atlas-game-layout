@@ -217,6 +217,11 @@ message FrameBroadcastDelta {
   repeated string removed_player_ids = 6;
   // snapshot 在 changed 含 SNAPSHOT 时有效；**缺失 = 本帧无快照**（即「清空」的表达方式）。
   atlas.game.lockstep.SnapshotMeta snapshot = 7;
+  // state_hash 是本帧（seq）的状态哈希：字段名与类型照抄全量帧的
+  // atlas.game.lockstep.LockstepFrame.state_hash（bytes），客户端按同一口径比对。
+  // **每帧必带**（与 seq 同级，不进 changed）：锁步靠它防失步——被增量覆盖的帧若拿不到
+  // 当帧 hash，客户端只能停在基线 hash 上，失步将无法发现。空 bytes 表示该帧未算哈希。
+  bytes state_hash = 8;
 }
 
 // FrameBroadcast 服务端推送：帧广播下行（op 为消息完整名）。

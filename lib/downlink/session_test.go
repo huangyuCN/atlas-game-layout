@@ -4,6 +4,7 @@
 package downlink
 
 import (
+	"bytes"
 	"testing"
 
 	battlev1 "github.com/huangyuCN/atlas-game-layout/api/battle/v1"
@@ -140,5 +141,26 @@ func TestSnapshotMissingClears(t *testing.T) {
 	clear, _, _ := dec.Apply(deltaPayload(t, 2, 3, []battlev1.FrameDeltaField{3}, nil), VersionDelta)
 	if clear.GetFrame().GetSnapshot() != nil {
 		t.Fatalf("声明 SNAPSHOT 但缺失 ⇒ 必须清空, got %v", clear.GetFrame().GetSnapshot())
+	}
+}
+
+// TestMergeOverridesStateHash 验证 Go 解码侧的覆盖语义：增量帧的 state_hash **覆盖**基线
+// （与全量帧同名同类型 bytes），空增量（changed 为空）同样覆盖——锁步靠当帧 hash 判失步。
+func TestMergeOverridesStateHash(t *testing.T) {
+	base := &battlev1.FrameBroadcast{BattleId: "b-1", Frame: &locksteppb.LockstepFrame{
+		FrameId:   7,
+		StateHash: []byte{0x01},
+	}}
+	want := []byte{0x02, 0x09}
+	for _, changed := range [][]battlev1.FrameDeltaField{nil, {battlev1.FrameDeltaField_FRAME_DELTA_FIELD_INPUTS}} {
+		d := &battlev1.FrameBroadcastDelta{BaseSeq: 7, Seq: 8, StateHash: want, Changed: changed}
+		got := Merge(base, d)
+		if !bytes.Equal(got.GetFrame().GetStateHash(), want) {
+			t.Fatalf("changed=%v 时 state_hash = %x, 期望当帧 %x（不得沿用基线）",
+				changed, got.GetFrame().GetStateHash(), want)
+		}
+		if !bytes.Equal(base.GetFrame().GetStateHash(), []byte{0x01}) {
+			t.Fatal("Merge 改写了基线（基线必须只读）")
+		}
 	}
 }

@@ -30,7 +30,7 @@
 | protobuf 二进制 | 2 | 465 B（≈1/3.5） | ≈1.7 µs/op、784 B/op、12 allocs/op |
 
 - 生产口径的链路占用：ws 面 41k pps × 1546 B ≈ **603 Mbps**（ver=1）；切 ver=2 后 ≈172 Mbps。
-- 本设计（ver=3）在 ver=2 基础上再降到**约 1/10**（§3.4），即 ≈20 Mbps 量级。
+- 本设计（ver=3）在 ver=2 基础上再降到**约 1/8**（≈13%，含每帧必带的 `state_hash`，§3.4），即 ≈22 Mbps 量级。
 
 ---
 
@@ -115,6 +115,7 @@ message FrameBroadcastDelta {
   repeated atlas.game.lockstep.LockstepInput set_inputs = 5; // 变化/新增的输入，按 player_id 整条替换
   repeated string removed_player_ids = 6;                    // 本帧不再出现的玩家
   atlas.game.lockstep.SnapshotMeta snapshot = 7;             // changed 含 SNAPSHOT 时有效
+  bytes state_hash = 8;  // 当帧（seq）状态哈希，**每帧必带**；与全量帧 LockstepFrame.state_hash 同名同类型
 }
 ```
 
@@ -127,6 +128,7 @@ message FrameBroadcastDelta {
 | `snapshot` | 沿用基线的 `snapshot`（通常两帧都为空） | 用本条替换；**本条缺失 = 本帧无快照**（这是「清空」的表达方式） |
 | `battle_id` | **增量永不携带** | —（由关键帧/会话绑定提供，客户端在关键帧处记住） |
 | `frame_id` | `= seq`（隐含，不单独传） | — |
+| `state_hash` | **每帧必带**（与 `seq` 同级，**从不进 `changed`**）：当帧（`seq`）的状态哈希，`bytes`，与全量帧 `LockstepFrame.state_hash` 同名同类型；合并时**覆盖**基线，绝不回退（回退会让失步客户端拿基线 hash 自证一致） | —（不参与 `changed` 判定） |
 
 **为什么 `changed` 用 `repeated enum` 而不是位图或 proto3 字段存在性**
 
@@ -143,26 +145,27 @@ message FrameBroadcastDelta {
 ```text
 base_seq=1023 seq=1024 changed=[SERVER_TIME, INPUTS]
 server_time_unix_nano=1762...500
+state_hash=<8B>          # 当帧（1024）的哈希，每帧必带（不因 changed 为空而省略）
 set_inputs=[{frame_id:1024, player_id:"p-7", payload:<32B>}]
 removed_player_ids=["p-9"]
 ```
 
-客户端合并：把基线里 `p-7` 的输入整条替换、删掉 `p-9`、其余 8 条原样保留，`frame_id` 全部改写为 1024（与今天全量帧的语义一致），`server_time` 替换，得到与全量帧**逐字段等价**的 `FrameBroadcast`。
+客户端合并：把基线里 `p-7` 的输入整条替换、删掉 `p-9`、其余 8 条原样保留，`frame_id` 全部改写为 1024（与今天全量帧的语义一致），`server_time` 替换，`state_hash` 用本条的当帧值覆盖，得到与全量帧**逐字段等价**的 `FrameBroadcast`。
 
 ### 3.4 字节账（预算，非实测）
 
-口径：一帧 10 条输入、payload 32 B、`player_id` 按 24 B 估（UUID 形态 36 B 另注）；`server_time` 绝对纳秒 varint ≈10 B；哈希/快照每 `SnapshotEvery` 帧一次（下面按 0 计）。
+口径：一帧 10 条输入、payload 32 B、`player_id` 按 24 B 估（UUID 形态 36 B 另注）；`server_time` 绝对纳秒 varint ≈10 B；`state_hash` **每帧必带**（8 B 值 + 2 B 头，已计入下表）；快照每 `SnapshotEvery` 帧一次（下面按 0 计）。
 
 | 场景 | ver=2 全量 | ver=3 增量 | 比例 |
 |---|---|---|---|
-| 0 条新输入（多数 tick） | 465 B | ≈18 B | **3.9%** |
-| 1 条新输入 | ≈530 B | ≈81 B | 15% |
-| 2 条新输入 | ≈595 B | ≈144 B | 24% |
+| 0 条新输入（多数 tick） | 465 B | ≈28 B | **6.0%** |
+| 1 条新输入 | ≈530 B | ≈91 B | 17% |
+| 2 条新输入 | ≈595 B | ≈154 B | 26% |
 | 关键帧（每 300 帧一次） | 465 B | 465 B（就是 ver=2 帧） | — |
 
 加权（假设 60% tick 无新输入、30% 一条、10% 两条，10 人局 2 人活跃）：
-`0.6×18 + 0.3×81 + 0.1×144 + 465/300 ≈ 51 B` ⇒ **约为 ver=2 的 8%**（相对 ver=1 的 1631 B 约 3%）。
-若**每 tick 都固定有 2 人输入**（最坏稳定态），比例升到 ≈24%（仍省 76%）；若 `player_id` 是 36 B UUID，每条输入多 24 B，比例上浮约 5–8 个百分点。
+`0.6×28 + 0.3×91 + 0.1×154 + 465/300 ≈ 61 B` ⇒ **约为 ver=2 的 13%**（相对 ver=1 的 1631 B 约 3.7%）。
+若**每 tick 都固定有 2 人输入**（最坏稳定态），比例升到 ≈26%（仍省 74%）；若 `player_id` 是 36 B UUID，每条输入多 24 B，比例上浮约 5–8 个百分点。
 
 > 历史实测「delta 省 96%」的口径与本表一致（相对 protojson、多数 tick 无新输入）。**不要**把它当成「相对 ver=2 也能省 96%」——ver=2 已经把 JSON 的字段名开销吃掉了一大半。
 
@@ -301,12 +304,13 @@ state: full（当前完整帧）, lastSeq（= full.frame_id）, pendingReq（是
 
 **不变量（每条都要有对应测试，缺一不算完成）**
 
-- **I1 增量合并 == 全量编码**：对同一 tick，`merge(基线, delta)` 与 `encodeFull(cur)` 解码结果**逐字段相等**（inputs 按 `player_id` 归一，`server_time` 精确到纳秒，`snapshot` 有/无都要覆盖）。
+- **I1 增量合并 == 全量编码**：对同一 tick，`merge(基线, delta)` 与 `encodeFull(cur)` 解码结果**逐字段相等**（inputs 按 `player_id` 归一，`server_time` 精确到纳秒，`state_hash` 必须相等，`snapshot` 有/无都要覆盖）。
 - **I2 链式等价**：从关键帧 K 起连续应用 N 个 delta，结果 == 该 tick 的全量帧（对随机 10–1000 步都成立）。
 - **I3 序号跳变必请求全量**：注入「丢一帧 / 乱序 / 重复 / `base_seq` 不符 / `seq` 回退」五类事件，客户端必须**一次**请求关键帧、且**不**交付任何错误状态。
 - **I4 跨版本矩阵**：`{客户端声明} × {服务端开关} × {连接 Kind}` 的所有组合，下发的 `ver` 与载荷必须自洽；**未声明 3 的连接永不见 ver=3**；udp 永不见 ver=3。
 - **I5 包数不变**：同一场景 ver=2 轮与 ver=3 轮的帧数/pps 相等（±0.1%）。这条是**验收断言**，不是收益指标。
 - **I6 良性输入**：任意随机字节（含截断、超大、错误 `changed`、`base_seq=0`）不得 panic、不得越界，只能报错或安全丢弃。
+- **I7 每个增量帧携带当帧 hash**：增量帧的 `state_hash` **恒等于本帧（`seq`）全量编码的 `LockstepFrame.state_hash`**，包括 `changed` 为空、只有帧号推进的**空增量**；合并时该值**覆盖**基线（服务端只复制聚合已算好的当帧 hash，不在 diff 里重算）。
 
 **测试设计**
 
@@ -331,8 +335,8 @@ state: full（当前完整帧）, lastSeq（= full.frame_id）, pendingReq（是
 
 | 指标 | ver=1 | ver=2 | ver=3（预期） |
 |---|---|---|---|
-| 每 tick 下行字节（10 人局，§3.4 口径） | 1631 B | 465 B | ≈51 B |
-| 链路占用（41k pps） | 603 Mbps | ≈172 Mbps | ≈20 Mbps |
+| 每 tick 下行字节（10 人局，§3.4 口径） | 1631 B | 465 B | ≈61 B |
+| 链路占用（41k pps） | 603 Mbps | ≈172 Mbps | ≈22 Mbps |
 | 帧数 / pps | 41k | 41k（❌ 不变） | 41k（❌ 不变） |
 | 编码 ns/op（10 目标基准） | ≈12 µs | ≈1.7 µs | 待测（**增量 diff 会吃掉一部分收益，可能落在 1.0–1.5 µs**） |
 | `broadcast_downlink_ms` p99 | 基线 | 略降 | 与 ver=2 同量级（codec 不是瓶颈） |
@@ -368,6 +372,7 @@ state: full（当前完整帧）, lastSeq（= full.frame_id）, pendingReq（是
 3. **`server_time` 用绝对纳秒还是相对基线的增量**：绝对值简单、可精确重建；增量省约 4 B。当前选绝对值，若字节账吃紧再改。
 4. **关键帧周期 `keyframeEvery` 的默认值**：建议 300（30 s）；需结合「客户端请求路径可靠性」与「单局 6000 帧」实测后定。
 5. **udp 面未来是否值得**：需先给数据报面加应用层回执/关键帧请求；本期明确不做。
+6. **帧级 `state_hash` 的产出频率**：协议上 `LockstepFrame.state_hash` 早已存在（`bytes`），但当前 `onFrameResult` 组装广播帧时**未填该字段**（只有快照帧的 `SnapshotMeta.StateHash` 有值），故线上全量帧的帧级 hash 目前为空。增量侧已按 I7 每帧转发「聚合时算好的当帧值」、**不在 diff 里重算**；要让锁步每帧都能比对，需要 session/聚合侧每帧产出 hash（属框架仓 `contrib/lockstep` 模拟步进 + 本仓 `onFrameResult` 的改动，独立评审）。
 
 ---
 
@@ -393,3 +398,4 @@ state: full（当前完整帧）, lastSeq（= full.frame_id）, pendingReq（是
 - 16:07 确认三端 SDK 现状（载荷不透明、补帧基准只认 ver=1）⇒ 协商必须先于下发。
 - 16:12 落笔：字段级格式、恢复状态机、不变量、人日与风险清单。
 - 16:20 自检：收益口径（带宽/序列化 vs 包数）写在 §0，包数不变在 §8 复述；无代码改动、未提交。
+- 16:54 补 `state_hash`（`bytes`，字段 8）：增量每帧携带当帧 hash（diff 只复制、不重算），`Merge` 覆盖基线；新增 I7，并在 §10.6 记录「帧级 hash 当前未在聚合时填充（只有快照帧的 `SnapshotMeta.StateHash` 有值）」的产出缺口。

@@ -215,6 +215,9 @@ public sealed class FrameBroadcastDelta
     [JsonPropertyName("snapshot")]
     public SnapshotMeta? Snapshot { get; set; }
 
+    [JsonPropertyName("stateHash")]
+    public byte[]? StateHash { get; set; }
+
 }
 
 /// <summary>FrameBroadcast DTO（protojson JSON 语义）。</summary>

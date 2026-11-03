@@ -78,6 +78,7 @@ export interface FrameBroadcastDelta {
   setInputs?: LockstepInput[]; // battle.v1.FrameBroadcastDelta.set_inputs
   removedPlayerIds?: string[]; // battle.v1.FrameBroadcastDelta.removed_player_ids
   snapshot?: SnapshotMeta; // battle.v1.FrameBroadcastDelta.snapshot
+  stateHash?: string // base64; // battle.v1.FrameBroadcastDelta.state_hash
 }
 
 export interface FrameBroadcast {

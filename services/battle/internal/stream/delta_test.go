@@ -5,6 +5,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand/v2"
@@ -36,10 +37,14 @@ func newDeltaRegistry(t *testing.T, cfg DeltaConfig) (*Registry, *fakePort, *fak
 // deltaBenchPlayers 是属性测试的玩家数（与生产 10 人局同量级）。
 const deltaBenchPlayers = 10
 
+// frameHash 返回第 seq 帧的**当帧**状态哈希（每帧都不同，便于断言「不是基线的 hash」）。
+func frameHash(seq uint64) []byte { return []byte{byte(seq >> 8), byte(seq), 0x5a} }
+
 // randomFrame 生成第 seq 帧的完整快照（10 人、每人 32 B payload）。
-func randomFrame(rng *rand.Rand, seq uint64, snap bool) *locksteppb.LockstepFrame {
+func randomFrame(_ *rand.Rand, seq uint64, snap bool) *locksteppb.LockstepFrame {
 	f := &locksteppb.LockstepFrame{
 		FrameId:    seq,
+		StateHash:  frameHash(seq),
 		ServerTime: timestamppb.New(time.Unix(1700000000, int64(seq)*1000)),
 	}
 	if snap {
@@ -87,6 +92,10 @@ func TestDeltaMergeEqualsFull(t *testing.T) {
 		if merged.GetFrame().GetFrameId() != cur.GetFrameId() {
 			t.Fatalf("第 %d 步 frame_id = %d, 期望 %d", step, merged.GetFrame().GetFrameId(), cur.GetFrameId())
 		}
+		if !bytes.Equal(merged.GetFrame().GetStateHash(), cur.GetStateHash()) {
+			t.Fatalf("第 %d 步 state_hash 停在基线（= %x），期望当帧 %x",
+				step, merged.GetFrame().GetStateHash(), cur.GetStateHash())
+		}
 		if !proto.Equal(merged.GetFrame().GetServerTime(), cur.GetServerTime()) {
 			t.Fatalf("第 %d 步 server_time 不等: %v vs %v", step, merged.GetFrame().GetServerTime(), cur.GetServerTime())
 		}
@@ -103,6 +112,58 @@ func TestDeltaMergeEqualsFull(t *testing.T) {
 		}
 		_ = want
 		prev = cur
+	}
+}
+
+// TestDeltaEmptyCarriesCurrentHash ②：**没有任何字段变化**的增量（changed 为空、只有帧号推进）
+// 也必须携带当帧 state_hash，合并后不得停在基线 hash 上。
+func TestDeltaEmptyCarriesCurrentHash(t *testing.T) {
+	rng := rand.New(rand.NewPCG(11, 12))
+	prev := randomFrame(rng, 1, true)
+	cur := proto.Clone(prev).(*locksteppb.LockstepFrame)
+	cur.FrameId = prev.GetFrameId() + 1
+	cur.StateHash = frameHash(cur.GetFrameId()) // 输入/时间/快照全同，只有帧号与 hash 变
+
+	delta := diffFrames(prev, cur)
+	if len(delta.GetChanged()) != 0 {
+		t.Fatalf("空增量的 changed = %v, 期望为空", delta.GetChanged())
+	}
+	if !bytes.Equal(delta.GetStateHash(), cur.GetStateHash()) {
+		t.Fatalf("空增量 state_hash = %x, 期望当帧 %x（不得缺省为基线）", delta.GetStateHash(), cur.GetStateHash())
+	}
+	merged := downlink.Merge(&battlev1.FrameBroadcast{BattleId: "b-1", Frame: prev}, delta)
+	if !bytes.Equal(merged.GetFrame().GetStateHash(), cur.GetStateHash()) {
+		t.Fatalf("空增量合并后 state_hash = %x, 期望当帧 %x", merged.GetFrame().GetStateHash(), cur.GetStateHash())
+	}
+}
+
+// TestDeltaWireCarriesCurrentHash ③：真走 wire（encodePlan → protobuf 编解码），
+// 第 2 帧的增量载荷解码后的 state_hash 必须等于当帧 hash（不是基线第 1 帧的）。
+func TestDeltaWireCarriesCurrentHash(t *testing.T) {
+	reg, port, _ := newDeltaRegistry(t, DeltaConfig{KeyframeEvery: 1000})
+	reg.Register("p-a", kcpConn(7, "b-1"))
+	reg.NegotiatePayloadVersion("p-a", []battlev1.FramePayloadVersion{3})
+	rng := rand.New(rand.NewPCG(13, 14))
+	prev := randomFrame(rng, 1, false)
+	var cur *locksteppb.LockstepFrame
+	for seq := uint64(1); seq <= 2; seq++ { // 第 1 帧必全量，第 2 帧才是增量
+		cur = nextFrame(rng, prev)
+		cur.FrameId = seq
+		if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, cur); err != nil {
+			t.Fatalf("PublishFrames: %v", err)
+		}
+		prev = cur
+	}
+	last := port.raw[len(port.raw)-1]
+	if last.version != VersionDelta {
+		t.Fatalf("第 2 帧 ver = %d, 期望 %d", last.version, VersionDelta)
+	}
+	var d battlev1.FrameBroadcastDelta
+	if err := proto.Unmarshal(last.payload, &d); err != nil {
+		t.Fatalf("增量载荷解码失败: %v", err)
+	}
+	if !bytes.Equal(d.GetStateHash(), cur.GetStateHash()) {
+		t.Fatalf("线上增量 state_hash = %x, 期望当帧 %x", d.GetStateHash(), cur.GetStateHash())
 	}
 }
 
