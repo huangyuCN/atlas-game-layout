@@ -8,15 +8,17 @@ package battlev1opclient
 
 // BattleServiceProtocolOps 是 BattleService 的会话 op 名（按 rpc 名索引）。
 var BattleServiceProtocolOps = struct {
-	JoinBattle     string
-	SendFrameInput string
-	SyncFrames     string
-	Ping           string
+	JoinBattle           string
+	SendFrameInput       string
+	SyncFrames           string
+	Ping                 string
+	RequestFrameKeyframe string
 }{
-	JoinBattle:     "/battle.v1.BattleService/JoinBattle",
-	SendFrameInput: "/battle.v1.BattleService/SendFrameInput",
-	SyncFrames:     "/battle.v1.BattleService/SyncFrames",
-	Ping:           "/battle.v1.BattleService/Ping",
+	JoinBattle:           "/battle.v1.BattleService/JoinBattle",
+	SendFrameInput:       "/battle.v1.BattleService/SendFrameInput",
+	SyncFrames:           "/battle.v1.BattleService/SyncFrames",
+	Ping:                 "/battle.v1.BattleService/Ping",
+	RequestFrameKeyframe: "/battle.v1.BattleService/RequestFrameKeyframe",
 }
 
 // BattleServicePushOps 是 api/battle/v1/battle_service.proto 声明的服务端推送 op（客户端按 op 分发）。
