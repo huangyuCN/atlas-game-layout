@@ -229,7 +229,7 @@ func (r *Registry) CloseBattle(battleID string) {
 			victims = append(victims, closedConn{playerID: playerID, conn: c})
 			delete(r.conns, playerID)
 			delete(r.endpoints, c.Endpoint())
-			r.resetState(playerID)
+			r.dropState(playerID)
 		}
 	}
 	r.mu.Unlock()

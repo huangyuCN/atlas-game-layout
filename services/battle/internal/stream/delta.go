@@ -269,9 +269,9 @@ func (r *Registry) NegotiatePayloadVersion(playerID string, accepted []battlev1.
 			best = battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_PROTOBUF
 		}
 	}
-	if best == battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_DELTA {
-		r.stateLocked(playerID).payloadVer = best
-	}
+	// 协商结果**每次都要写回**（不是只在拿到 ver=3 时写）：重新入局只声明更低版本时必须降级，
+	// 否则旧连接协商出的 ver=3 会一直沿用到新会话（客户端可能解不了）。
+	r.stateLocked(playerID).payloadVer = best
 	return best
 }
 
@@ -314,8 +314,20 @@ func (r *Registry) stateLocked(playerID string) *clientState {
 	return st
 }
 
-// resetState 丢弃该连接的发送基线（换连接/注销时必须重置：新连接没有基线，首帧必全量）。
-func (r *Registry) resetState(playerID string) { delete(r.states, playerID) }
+// resetState 重置该连接的发送基线（换连接/注销时）：lastSeq 与关键帧请求归零（新连接没有基线，
+// 首帧必全量），但**保留 payloadVer**——载荷版本是玩家会话（JoinBattle 协商）的属性，不是 socket
+// 的属性：传输层重连（接入层重拨、网络抖动）不等于重新入局，在这里丢掉它会让该玩家此后每一帧
+// 都被降级成全量（现场症状：协商到 ver=3，实发全是 ver=2）。
+func (r *Registry) resetState(playerID string) {
+	if st := r.states[playerID]; st != nil {
+		st.lastSeq = 0
+		st.keyframeRequested = false
+	}
+}
+
+// dropState 丢弃该玩家的会话级状态（对局结算/最终注销）：连 payloadVer 一并清除，
+// 避免注册表按玩家数长期堆积。
+func (r *Registry) dropState(playerID string) { delete(r.states, playerID) }
 
 // highestAllowed 返回「客户端声明 ∩ 服务端允许（≤ allowed）」的最高版本：
 // 缺省声明（空）只认 ver=1（老客户端行为零变化）；空交集回落 ver=1（有输出版本可解）。

@@ -334,3 +334,68 @@ func TestDeltaAtMostTwoEncodingsPerTick(t *testing.T) {
 		prev = cur
 	}
 }
+
+// TestDeltaStateSurvivesTransportReconnect ⑦：传输层重连（旧连接断开 + 同一玩家新连接登记）
+// **不等于重新入局**——玩家会话仍持有 JoinBattle 协商出的 payloadVer，不得因换 socket 被降级：
+// 重连后首帧因无基线必全量，其后仍必须回到增量（现场 v3=0 的根因即此处丢版本）。
+func TestDeltaStateSurvivesTransportReconnect(t *testing.T) {
+	reg, port, _ := newDeltaRegistry(t, DeltaConfig{KeyframeEvery: 1000})
+	reg.Register("p-a", kcpConn(7, "b-1"))
+	reg.NegotiatePayloadVersion("p-a", []battlev1.FramePayloadVersion{3})
+	rng := rand.New(rand.NewPCG(21, 22))
+	prev := randomFrame(rng, 1, false)
+	publish := func(seq uint64) {
+		cur := nextFrame(rng, prev)
+		cur.FrameId = seq
+		if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, cur); err != nil {
+			t.Fatalf("PublishFrames(seq=%d): %v", seq, err)
+		}
+		prev = cur
+	}
+	publish(1) // 无基线 ⇒ 全量
+	publish(2) // 增量
+	// 传输层重连：帧引擎回调断开事件，随后同一玩家的新连接验票登记；客户端不再入局。
+	reg.Disconnect(Endpoint{Kind: transport.KindKCP, ID: "7"})
+	reg.Register("p-a", kcpConn(8, "b-1"))
+	publish(3) // 无基线 ⇒ 必全量
+	publish(4) // 基线恢复 + 版本仍在 ⇒ 必增量
+	if got, want := port.raw[2].version, uint8(frame.Version2); got != want {
+		t.Fatalf("重连后首帧 ver = %d, 期望 %d（无基线必全量）", got, want)
+	}
+	if got, want := port.raw[3].version, VersionDelta; got != want {
+		t.Fatalf("重连后第二帧 ver = %d, 期望 %d（换 socket 不得丢掉会话协商出的 payloadVer）", got, want)
+	}
+}
+
+// TestDeltaRenegotiationDowngrades ⑧：重新入局只声明 ver=2 时，生效版本必须**改回** ver=2——
+// 协商结果每次都要写回（不是只在拿到 ver=3 时才写），否则旧连接的 ver=3 会一直沿用到新会话。
+func TestDeltaRenegotiationDowngrades(t *testing.T) {
+	reg, port, _ := newDeltaRegistry(t, DeltaConfig{KeyframeEvery: 1000})
+	reg.Register("p-a", kcpConn(7, "b-1"))
+	if got := reg.NegotiatePayloadVersion("p-a", []battlev1.FramePayloadVersion{3}); got != battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_DELTA {
+		t.Fatalf("首次协商 = %v, 期望 DELTA", got)
+	}
+	rng := rand.New(rand.NewPCG(23, 24))
+	prev := randomFrame(rng, 1, false)
+	for seq := uint64(1); seq <= 2; seq++ {
+		cur := nextFrame(rng, prev)
+		cur.FrameId = seq
+		if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, cur); err != nil {
+			t.Fatalf("PublishFrames(seq=%d): %v", seq, err)
+		}
+		prev = cur
+	}
+	// 重新入局只声明 ver=2：生效版本必须降回 2。
+	got := reg.NegotiatePayloadVersion("p-a", []battlev1.FramePayloadVersion{2})
+	if got != battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_PROTOBUF {
+		t.Fatalf("重新协商 = %v, 期望 PROTOBUF", got)
+	}
+	cur := nextFrame(rng, prev)
+	cur.FrameId = 3
+	if err := reg.PublishFrames(context.Background(), "b-1", []string{"p-a"}, cur); err != nil {
+		t.Fatalf("PublishFrames(seq=3): %v", err)
+	}
+	if v := port.raw[2].version; v != frame.Version2 {
+		t.Fatalf("重新协商为 ver=2 后帧头 ver = %d, 期望 %d", v, frame.Version2)
+	}
+}

@@ -20,6 +20,7 @@ import (
 	gamev1 "github.com/huangyuCN/atlas-game-layout/api/game/v1"
 	gamev1opclient "github.com/huangyuCN/atlas-game-layout/api/game/v1/opclient"
 	gatewayv1 "github.com/huangyuCN/atlas-game-layout/api/gateway/v1"
+	"github.com/huangyuCN/atlas-game-layout/lib/downlink"
 	"github.com/huangyuCN/atlas-game-layout/scripts/sdksession"
 	sdkclient "github.com/huangyuCN/atlas-sdk-go/client"
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
@@ -33,6 +34,18 @@ import (
 
 // frameErrCount 是帧面错误打印计数（临时诊断用）。
 var frameErrCount atomic.Int64
+
+// acceptVersions 是本驱动在 JoinBattle 里声明的「能解的帧广播载荷版本」。
+// 缺省 [1,2,3]：A/B 两组用同一份驱动与同一组参数，唯一变量是服务端 delta 开关。
+// 服务端按 min(配置, 声明) 取最高者，生效值以回执为准（见 loadPlayer.payloadVer）。
+var acceptVersions = []battlev1.FramePayloadVersion{
+	battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_PROTOJSON,
+	battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_PROTOBUF,
+	battlev1.FramePayloadVersion_FRAME_PAYLOAD_VERSION_DELTA,
+}
+
+// acceptPayloadVersions 返回本连接声明能解的版本集合（驱动始终声明全部三档）。
+func acceptPayloadVersions() []battlev1.FramePayloadVersion { return acceptVersions }
 
 // frameClient 是一条直连帧连接的统一接缝：WS 面与 UDP 面、经接入层与直连 battle 都在此收口。
 type frameClient interface {
@@ -96,16 +109,23 @@ type loadPlayer struct {
 	matchID  string // 本局匹配 ID（局数去重口径）
 	ticket   []byte
 
-	inputs     atomic.Int64  // 已发出的帧输入数（含失败）
-	broadcasts atomic.Int64  // 已收到的帧广播数
-	framesV1   atomic.Int64  // 帧广播中以 ver=1（protojson）到达的条数
-	framesV2   atomic.Int64  // 帧广播中以 ver=2（protobuf）到达的条数
-	decodeFail atomic.Int64  // 推送解码失败数（含未知版本与解码错误）
-	lastFrame  atomic.Uint64 // 已见到的最新帧号（补帧探针据此请求增量，避免回执无限增大）
-	firstFrame atomic.Uint64 // 首个见到的广播帧号（广播缺口的分母起点）
-	srvFrame   atomic.Uint64 // 服务端权威帧号（探针回执的 current_frame 最大值）
-	outs       atomic.Int64  // 出局通知数（压测中必须为 0：不误判掉线）
-	failures   atomic.Int64  // 帧链路失败次数（连接失败/调用失败）
+	inputs     atomic.Int64      // 已发出的帧输入数（含失败）
+	broadcasts atomic.Int64      // 已收到的帧广播数
+	framesV1   atomic.Int64      // 帧广播中以 ver=1（protojson）到达的条数
+	framesV2   atomic.Int64      // 帧广播中以 ver=2（protobuf 全量）到达的条数
+	framesV3   atomic.Int64      // 帧广播中以 ver=3（protobuf 增量）到达的条数
+	rxBytes    atomic.Int64      // 帧广播下行字节合计（载荷 + 16 B 帧头，含 v1/v2/v3）
+	rxPayload  atomic.Int64      // 帧广播下行载荷字节合计（不含帧头，A/B 对比口径）
+	deltaDrops atomic.Int64      // ver=3 增量因失步被丢弃的条数
+	keyReqs    atomic.Int64      // 发出去重后的关键帧请求次数
+	payloadVer atomic.Int64      // 本连接协商到的载荷版本（JoinBattleReply.payload_version）
+	decodeFail atomic.Int64      // 推送解码失败数（含未知版本与解码错误）
+	lastFrame  atomic.Uint64     // 已见到的最新帧号（补帧探针据此请求增量，避免回执无限增大）
+	firstFrame atomic.Uint64     // 首个见到的广播帧号（广播缺口的分母起点）
+	srvFrame   atomic.Uint64     // 服务端权威帧号（探针回执的 current_frame 最大值）
+	outs       atomic.Int64      // 出局通知数（压测中必须为 0：不误判掉线）
+	failures   atomic.Int64      // 帧链路失败次数（连接失败/调用失败）
+	dec        *downlink.Decoder // 下行帧广播解码状态机（ver=1/2/3 统一入口）
 
 	handshake *samples  // 入局（JoinBattle）往返
 	probe     *probeSet // SyncFrames 探针：结果分类 + 两套分位（probe.go）
@@ -133,6 +153,8 @@ func newLoadPlayer(ctx context.Context, gatewayTCP, tag string) (*loadPlayer, er
 		started:   make(chan *gamev1.MatchStartedNotify, 4),
 		handshake: &samples{}, probe: newProbeSet(true), downlink: &samples{}, queue: &samples{},
 	}
+	// 增量失步时按设计 §4.3 请求关键帧：驱动只统计次数，不重试放大。
+	p.dec = downlink.NewDecoder(func(lastSeq uint64) error { return p.requestKeyframe(lastSeq) })
 	cli.On(gamev1opclient.PlayerServicePushOps.MatchStartedNotify, p.watch)
 	if err := p.registerLogin(ctx); err != nil {
 		_ = cli.Close()
@@ -271,19 +293,33 @@ func dialFrameByOpts(ctx context.Context, o dialOpts, slot string, ticket []byte
 }
 
 // join 入局（JoinBattle 有回执，故计入握手往返样本）并做一次补帧调用。
+// 入局请求显式声明本连接能解的载荷版本（缺省 [1,2,3]）；生效版本以回执为准，记录到 payloadVer。
 func (p *loadPlayer) join(ctx context.Context) error {
 	start := time.Now()
 	var join battlev1.JoinBattleReply
 	if err := p.frame.Invoke(ctx, battlev1opclient.BattleServiceProtocolOps.JoinBattle,
-		&battlev1.JoinBattleReq{BattleId: p.battleID}, &join); err != nil {
+		&battlev1.JoinBattleReq{BattleId: p.battleID, AcceptPayloadVersions: acceptPayloadVersions()}, &join); err != nil {
 		p.failures.Add(1)
 		return fmt.Errorf("%s 入局失败: %w", p.tag, err)
 	}
 	p.handshake.add(time.Since(start))
+	p.payloadVer.Store(int64(join.GetPayloadVersion()))
 	if join.GetMeta().GetSessionId() != p.battleID {
 		return fmt.Errorf("%s 入局回执不符: %+v", p.tag, join.GetMeta())
 	}
 	return p.probeOnce(ctx)
+}
+
+// requestKeyframe 发一次关键帧请求（去重由 downlink.Decoder 负责，这里只计数与投递）。
+func (p *loadPlayer) requestKeyframe(lastSeq uint64) error {
+	if p.frame == nil {
+		return nil
+	}
+	p.keyReqs.Add(1)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultFrameCallTimeout)
+	defer cancel()
+	return p.frame.Invoke(ctx, battlev1opclient.BattleServiceProtocolOps.RequestFrameKeyframe,
+		&battlev1.RequestFrameKeyframeReq{BattleId: p.battleID, LastSeq: lastSeq}, nil)
 }
 
 // onNotify 兼容不提供帧头版本的载体：等价于按 ver=1（protojson）分派。
@@ -292,21 +328,33 @@ func (p *loadPlayer) onNotify(operation string, payload []byte) {
 }
 
 // onNotifyVersion 分发帧面推送：帧广播计入下行样本，出局通知单独计数（压测中应为 0）。
-// 统计口径不变（帧号/pps/失败），另按帧头 ver 分别计数（frames_v1/v2）以证明开关真的生效。
+// 统计口径不变（帧号/pps/失败），另按帧头 ver 分别计数（frames_v1/v2/v3）并累计下行字节，
+// 以证明开关真的生效、且 A/B 两组的下行字节可直接对照。
 func (p *loadPlayer) onNotifyVersion(ver uint8, operation string, payload []byte) {
 	switch operation {
 	case battlev1opclient.BattleServicePushOps.FrameBroadcast:
-		var fb battlev1.FrameBroadcast
-		if decodeByVersion(ver, payload, &fb) != nil {
+		// 字节口径：载荷 + 16 B 帧头（与历史 465 B/帧的 payload 口径分开报）。
+		p.rxPayload.Add(int64(len(payload)))
+		p.rxBytes.Add(int64(len(payload) + frame.HeaderSize))
+		p.broadcasts.Add(1)
+		fb, ok, err := p.dec.Apply(payload, ver)
+		if err != nil {
 			p.decodeFail.Add(1)
 			return
 		}
-		if ver == frame.Version2 {
-			p.framesV2.Add(1)
-		} else {
+		switch ver {
+		case 1:
 			p.framesV1.Add(1)
+		case frame.Version2:
+			p.framesV2.Add(1)
+		case downlink.VersionDelta:
+			p.framesV3.Add(1)
 		}
-		p.broadcasts.Add(1)
+		if !ok {
+			// 增量失步被丢弃（已按去重请求关键帧）：不计入已交付帧，避免把坏基线当进展。
+			p.deltaDrops.Add(1)
+			return
+		}
 		// 用广播帧号推进「已见到的最新帧」：否则探针的 last_seen_frame 停滞，
 		// 回执会携带大量历史帧（数据报面 >16KiB 即被拒），探针被误计为帧失败。
 		if f := fb.GetFrame(); f != nil {

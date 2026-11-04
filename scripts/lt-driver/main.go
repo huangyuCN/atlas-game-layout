@@ -50,6 +50,18 @@ type report struct {
 	Failures       int64   `json:"frame_failures"`
 	OutNotifies    int64   `json:"player_out_notifies"`
 
+	// 下行版本与字节口径（ver=3 验收用；A/B 两组同一份驱动、同一组参数）。
+	FramesV1              int64         `json:"broadcast_frames_ver1"`
+	FramesV2              int64         `json:"broadcast_frames_ver2"`
+	FramesV3              int64         `json:"broadcast_frames_ver3"`
+	DownlinkBytes         int64         `json:"downlink_bytes_total"`
+	DownlinkPayloadBytes  int64         `json:"downlink_payload_bytes_total"`
+	DownlinkBytesPerFrame float64       `json:"downlink_bytes_per_frame"`
+	NegotiatedVersions    map[int32]int `json:"negotiated_payload_versions"`
+	DeltaDrops            int64         `json:"delta_drops"`
+	KeyframeRequests      int64         `json:"keyframe_requests"`
+	DecodeFailures        int64         `json:"decode_failures"`
+
 	Rates []ratePoint `json:"rate_samples"`
 
 	Handshake latency `json:"handshake_rtt_ms"`
@@ -445,6 +457,18 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 		hs.merge(p.handshake)
 		pr.merge(p.probe)
 		dl.merge(p.downlink)
+		rep.FramesV1 += p.framesV1.Load()
+		rep.FramesV2 += p.framesV2.Load()
+		rep.FramesV3 += p.framesV3.Load()
+		rep.DownlinkBytes += p.rxBytes.Load()
+		rep.DownlinkPayloadBytes += p.rxPayload.Load()
+		rep.DeltaDrops += p.deltaDrops.Load()
+		rep.KeyframeRequests += p.keyReqs.Load()
+		rep.DecodeFailures += p.decodeFail.Load()
+		if rep.NegotiatedVersions == nil {
+			rep.NegotiatedVersions = make(map[int32]int, 4)
+		}
+		rep.NegotiatedVersions[int32(p.payloadVer.Load())]++
 		// 广播成功率：分母取服务端权威帧号（探针回执的 current_frame），分子取实收条数。
 		if first := p.firstFrame.Load(); first > 0 {
 			want, missing := broadcastGap(first, p.srvFrame.Load(), uint64(p.broadcasts.Load()))
@@ -475,6 +499,9 @@ func collect(ps []*loadPlayer, cfg loadRun, battles, failed int, elapsed time.Du
 	rep.SteadyProbe = summarize(pr.okWindow(steadyFrom, win.pumpEnd))
 	rep.SteadyDown = summarize(dl.window(steadyFrom, win.pumpEnd))
 	rep.PerBattleReal = perBattleActual(rep.PlayersMatched, battles)
+	if frames := rep.FramesV1 + rep.FramesV2 + rep.FramesV3; frames > 0 {
+		rep.DownlinkBytesPerFrame = float64(rep.DownlinkBytes) / float64(frames)
+	}
 	rep.ClockSource, rep.ClockSSH = clk.Source, cfg.clockSSH
 	rep.ClockOffsetStartMS, rep.ClockOffsetEndMS = clk.DeltaStart, clk.DeltaEnd
 	rep.ClockOffsetDriftMS, rep.ClockOffsetUsedMS = clk.Drift, clk.Used
@@ -518,6 +545,12 @@ func printReport(r *report) {
 		r.ProbeAllLatency.Count, r.ProbeTimeoutMS.P50, r.ProbeTimeoutMS.Max)
 	fmt.Printf("      广播：实收 %d / 应到 %d，成功率 %.2f%%，缺口 %d 帧（分母=服务端 current_frame）\n",
 		r.BroadcastReceived, r.BroadcastExpect, r.BroadcastSuccessPct, r.BroadcastMissing)
+	// 下行字节口径（ver=3 验收）：含帧头与仅载荷分开报；帧数按 ver 分列，证明协商真的生效。
+	fmt.Printf("      下行字节：含帧头 %d B、仅载荷 %d B，每帧 %.1f B（v1=%d v2=%d v3=%d）；协商版本 %v\n",
+		r.DownlinkBytes, r.DownlinkPayloadBytes, r.DownlinkBytesPerFrame,
+		r.FramesV1, r.FramesV2, r.FramesV3, r.NegotiatedVersions)
+	fmt.Printf("      增量：失步丢弃 %d、关键帧请求 %d、解码失败 %d\n",
+		r.DeltaDrops, r.KeyframeRequests, r.DecodeFailures)
 	fmt.Printf("      帧广播下行（未校正）p50=%.2f p95=%.2f p99=%.2f（n=%d）\n",
 		r.Downlink.P50, r.Downlink.P95, r.Downlink.P99, r.Downlink.Count)
 	fmt.Printf("      帧广播下行（校正 Δ=%+.2fms，漂移 %.2fms，不确定度 ±%.2fms）p50=%.2f p95=%.2f p99=%.2f；轮次可用=%v\n",
