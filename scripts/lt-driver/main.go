@@ -216,6 +216,8 @@ func parseFlags() loadRun {
 	probeLog := flag.String("probe-log", "",
 		"逐条探针记录落盘路径（NDJSON：发出/收到时刻、结果分类、err 类型）；空 = 不落盘")
 	probeLogEveryFlag := flag.Int("probe-log-every", 1, "逐条探针记录的抽样间隔（每 N 条落 1 条）")
+	pprofAddr := flag.String("pprof", "",
+		"压测端自身的 pprof 端点（host:port；空 = 关闭）：服务端 profile 不饱和时，尾巴只能从压测端看")
 	flag.Parse()
 	// 探针落盘开关必须在建连接前就位（loadPlayer 创建时据此决定是否保留逐条记录）。
 	probeLogPath = *probeLog
@@ -225,6 +227,12 @@ func parseFlags() loadRun {
 	}
 	if *via != "edge" && *via != "direct" {
 		fatalf("未知 -via %q（edge|direct）", *via)
+	}
+	if addr, _, err := startPprof(*pprofAddr); err != nil {
+		fatalf("-pprof %q 启动失败: %v", *pprofAddr, err)
+	} else if addr != "" {
+		fmt.Printf("[pprof] 压测端剖析端点已监听 %s（CPU 用 /debug/pprof/profile?seconds=30，"+
+			"调度延迟用 /debug/pprof/trace?seconds=5 再 go tool trace -pprof=sched）\n", addr)
 	}
 	if *perBattle != 2 {
 		fmt.Fprintf(os.Stderr, "[提示] -per-battle=%d 仅记录：真实每局人数由成局通知的 match_id 统计\n", *perBattle)
