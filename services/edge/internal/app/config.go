@@ -57,7 +57,7 @@ func proxyConfig(cfg *conf.Bootstrap, res edge.Resolver, collector metrics.Colle
 		// socket_recv_buffer 是数据报面监听 socket 的接收缓冲字节数（0 = 框架缺省 1 MiB）：
 		// 内核缺省只有 208 KiB 量级，高 pps 下读循环一被调度延迟就静默丢包（docs/config.md §7.9）。
 		SocketRecvBuffer: int(ec.GetSocketRecvBuffer()),
-		// ingress_workers 是数据报面的转发工作协程数（0/1 = 单协程，缺省不改行为）：
+		// ingress_workers 是数据报面的转发工作协程数（0 = 按 CPU 自动，1 = 单协程）：
 		// 单协程在 4,096 流 KCP 时会在 ~13.5 万 pps 顶满一核，积压留在监听 socket 收队列里
 		// （2026-11-04 定位报告：探针 p99 96 ms）。并行只改并发度，不改任何线格式。
 		IngressWorkers: int(ec.GetIngressWorkers()),
