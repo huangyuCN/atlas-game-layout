@@ -176,8 +176,17 @@ type Edge struct {
 	// 申请失败只告警、不阻断启动（见 docs/config.md §7.9）。不建议超过 2 MiB：更大的缓冲
 	// 会把丢包换成排队积压。
 	SocketRecvBuffer int32 `protobuf:"varint,13,opt,name=socket_recv_buffer,json=socketRecvBuffer,proto3" json:"socket_recv_buffer,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// ingress_workers 是**每个数据报面**的转发工作协程数；0 或 1 = 单协程（缺省，旧行为）。
+	// 为什么需要 >1：整面只有一条协程时，入口上限是「1 核 ÷ 每包约 7 µs ≈ 14 万 pps」，
+	// 4,096 流 KCP 的约 13.5 万 pps 会顶满该协程，积压留在监听 socket 收队列里（中位 10.5 MiB），
+	// 上行整体被推迟、探针 p99 96 ms（2026-11-04 定位报告）。读循环保持单条（Go 对同一 fd 的读
+	// 是排他锁），逐包 sendto 的开销（约 63%）由这些工作协程并行承担。
+	// **缺省不动**：2026-11-05 的干净 A/B 显示 4 条工作协程会把 p50 减半、入口积压清零，
+	// 但 p95/p99 与下行广播 p99 反而变差（压力被推到下行），详见框架仓
+	// docs/superpowers/benchmarks/接入层与热路径性能.md 第 ⑧ 节。
+	IngressWorkers int32 `protobuf:"varint,14,opt,name=ingress_workers,json=ingressWorkers,proto3" json:"ingress_workers,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Edge) Reset() {
@@ -297,6 +306,13 @@ func (x *Edge) GetNewConnBurst() int32 {
 func (x *Edge) GetSocketRecvBuffer() int32 {
 	if x != nil {
 		return x.SocketRecvBuffer
+	}
+	return 0
+}
+
+func (x *Edge) GetIngressWorkers() int32 {
+	if x != nil {
+		return x.IngressWorkers
 	}
 	return 0
 }
@@ -476,7 +492,7 @@ var File_services_edge_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1cprotobuf/configs/actor.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xbb\x06\n" +
+	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1cprotobuf/configs/actor.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xe4\x06\n" +
 	"\x04Edge\x126\n" +
 	"\tlisteners\x18\x01 \x03(\v2\x18.edge.conf.Edge.ListenerR\tlisteners\x12\x1d\n" +
 	"\n" +
@@ -495,7 +511,8 @@ const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"probeAfter\x12#\n" +
 	"\rprobe_timeout\x18\v \x01(\tR\fprobeTimeout\x12$\n" +
 	"\x0enew_conn_burst\x18\f \x01(\x05R\fnewConnBurst\x12,\n" +
-	"\x12socket_recv_buffer\x18\r \x01(\x05R\x10socketRecvBuffer\x1a\x98\x01\n" +
+	"\x12socket_recv_buffer\x18\r \x01(\x05R\x10socketRecvBuffer\x12'\n" +
+	"\x0fingress_workers\x18\x0e \x01(\x05R\x0eingressWorkers\x1a\x98\x01\n" +
 	"\bListener\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x121\n" +
 	"\anetwork\x18\x02 \x01(\x0e2\x17.edge.conf.Edge.NetworkR\anetwork\x12\x12\n" +
