@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"runtime"
 	"time"
 )
 
@@ -25,6 +26,11 @@ func startPprof(addr string) (string, func(), error) {
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	// 采样阻塞事件（万分之一）与锁竞争（百分之一）：/debug/pprof/block 才能看到协程在等什么
+	// （信道 / 锁 / 网络），这正是「两端都不忙却有 145 ms 尾巴」需要的证据。只在开启时生效。
+	runtime.SetBlockProfileRate(10_000)
+	runtime.SetMutexProfileFraction(100)
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
