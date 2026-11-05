@@ -41,6 +41,7 @@ func validEdgeConfig() *conf.Bootstrap {
 			MaxStreams:   32, IdleTimeout: "45s", NewConnRate: 7, NewConnBurst: 4, MaxPerIp: 3,
 			SocketRecvBuffer: 1 << 20,
 			IngressWorkers:   3,
+			DatagramSockets:  4,
 			DialTimeout:      "2s", ProbeAfter: "10s", ProbeTimeout: "3s",
 		},
 	}
@@ -79,6 +80,9 @@ func TestProxyConfigMapsEdgeSection(t *testing.T) {
 	}
 	if cfg.IngressWorkers != 3 {
 		t.Fatalf("ingress_workers 应映射为 3，实际 %d", cfg.IngressWorkers)
+	}
+	if cfg.DatagramSockets != 4 {
+		t.Fatalf("datagram_sockets 应映射为 4，实际 %d", cfg.DatagramSockets)
 	}
 	if cfg.IdleTimeout != 45*time.Second || cfg.DialTimeout != 2*time.Second {
 		t.Fatalf("时长映射不对: idle=%v dial=%v", cfg.IdleTimeout, cfg.DialTimeout)

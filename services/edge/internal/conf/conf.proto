@@ -100,6 +100,12 @@ message Edge {
   // 两者都上：p99 62.59 ms、上行 80,640 pps（98% 目标）、帧失败 153。
   // 故框架缺省改为「按 CPU 自动」，详见框架仓 docs/superpowers/benchmarks/接入层与热路径性能.md。
   int32 ingress_workers = 14;
+  // datagram_sockets 是**每个数据报面**在同一地址端口上绑定的 socket 数（SO_REUSEPORT）；
+  // 0/1 = 单 socket（缺省，旧行为），>1 = 收发路径按 socket 并行（框架侧上界 16）。
+  // 为什么需要：单个 UDP socket 的发送在内核里按 socket 串行，sendmmsg 约 5 µs/包（≈20 万 pps）；
+  // 4,096 流 KCP 的下行约 13 万 pps，5,000 流时越线 ⇒ 后端 socket 积压 2.4 MB、下行 p50 50 ms。
+  // 多 socket 让收发并行，客户端看到的源端口仍是同一个（全部绑同一端口），线格式零改动。
+  int32 datagram_sockets = 15;
 }
 
 // Bootstrap 是 edge 服务的启动配置。

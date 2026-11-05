@@ -188,8 +188,14 @@ type Edge struct {
 	// 两者都上：p99 62.59 ms、上行 80,640 pps（98% 目标）、帧失败 153。
 	// 故框架缺省改为「按 CPU 自动」，详见框架仓 docs/superpowers/benchmarks/接入层与热路径性能.md。
 	IngressWorkers int32 `protobuf:"varint,14,opt,name=ingress_workers,json=ingressWorkers,proto3" json:"ingress_workers,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// datagram_sockets 是**每个数据报面**在同一地址端口上绑定的 socket 数（SO_REUSEPORT）；
+	// 0/1 = 单 socket（缺省，旧行为），>1 = 收发路径按 socket 并行（框架侧上界 16）。
+	// 为什么需要：单个 UDP socket 的发送在内核里按 socket 串行，sendmmsg 约 5 µs/包（≈20 万 pps）；
+	// 4,096 流 KCP 的下行约 13 万 pps，5,000 流时越线 ⇒ 后端 socket 积压 2.4 MB、下行 p50 50 ms。
+	// 多 socket 让收发并行，客户端看到的源端口仍是同一个（全部绑同一端口），线格式零改动。
+	DatagramSockets int32 `protobuf:"varint,15,opt,name=datagram_sockets,json=datagramSockets,proto3" json:"datagram_sockets,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Edge) Reset() {
@@ -316,6 +322,13 @@ func (x *Edge) GetSocketRecvBuffer() int32 {
 func (x *Edge) GetIngressWorkers() int32 {
 	if x != nil {
 		return x.IngressWorkers
+	}
+	return 0
+}
+
+func (x *Edge) GetDatagramSockets() int32 {
+	if x != nil {
+		return x.DatagramSockets
 	}
 	return 0
 }
@@ -495,7 +508,7 @@ var File_services_edge_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1cprotobuf/configs/actor.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\xe4\x06\n" +
+	"&services/edge/internal/conf/conf.proto\x12\tedge.conf\x1a\x1cprotobuf/configs/actor.proto\x1a\x1eprotobuf/configs/runtime.proto\x1a\x1fprotobuf/configs/registry.proto\x1a\x1dprotobuf/configs/server.proto\x1a\x1aprotobuf/configs/log.proto\x1a$protobuf/configs/observability.proto\"\x8f\a\n" +
 	"\x04Edge\x126\n" +
 	"\tlisteners\x18\x01 \x03(\v2\x18.edge.conf.Edge.ListenerR\tlisteners\x12\x1d\n" +
 	"\n" +
@@ -515,7 +528,8 @@ const file_services_edge_internal_conf_conf_proto_rawDesc = "" +
 	"\rprobe_timeout\x18\v \x01(\tR\fprobeTimeout\x12$\n" +
 	"\x0enew_conn_burst\x18\f \x01(\x05R\fnewConnBurst\x12,\n" +
 	"\x12socket_recv_buffer\x18\r \x01(\x05R\x10socketRecvBuffer\x12'\n" +
-	"\x0fingress_workers\x18\x0e \x01(\x05R\x0eingressWorkers\x1a\x98\x01\n" +
+	"\x0fingress_workers\x18\x0e \x01(\x05R\x0eingressWorkers\x12)\n" +
+	"\x10datagram_sockets\x18\x0f \x01(\x05R\x0fdatagramSockets\x1a\x98\x01\n" +
 	"\bListener\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x121\n" +
 	"\anetwork\x18\x02 \x01(\x0e2\x17.edge.conf.Edge.NetworkR\anetwork\x12\x12\n" +
