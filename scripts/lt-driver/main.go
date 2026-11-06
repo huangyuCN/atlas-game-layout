@@ -187,6 +187,10 @@ func parseFlags() loadRun {
 	via := flag.String("via", "edge", "驱动路径：edge（经接入层）| direct（直连 battle 帧端口）")
 	pps := flag.Int("pps", 20, "每连接每秒帧输入数（上行包速率）")
 	probe := flag.Duration("probe", time.Second, "每连接 SyncFrames 探针间隔（往返延迟样本来源）")
+	callTimeout := flag.Duration("call-timeout", 2*time.Second,
+		"单次帧调用的预算：sendInput/probe 都是同步调用，预算越大约束越松、但一旦单次耗时超过发送间隔，"+
+			"ticker 会丢拍、每连接退化成「每预算发一次」（4096 连接 × 2s ≈ 2k pps 的平台），"+
+			"长跑看似『崩塌』实为驱动自限速；测真实容量时调小到 100-250ms")
 	duration := flag.Duration("duration", 20*time.Second, "稳定负载时长（到点自动停止发送并打印 SUMMARY，无需人工 kill）")
 	steady := flag.Duration("steady-window", 5*time.Second, "稳态窗口长度")
 	probeJitter := flag.Bool("probe-jitter", false, "探针相位抖动（诊断用）")
@@ -249,7 +253,7 @@ func parseFlags() loadRun {
 		battleWS: *battleWS, battleUDP: *battleUDP,
 		queue:    qc,
 		clockSSH: *clockSSH,
-		pump:     pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter},
+		pump:     pumpCfg{pps: *pps, probe: *probe, duration: *duration, jitter: *probeJitter, callTimeout: *callTimeout},
 		hello: helloPolicy{
 			timeout: *helloTimeout, attempts: *helloAttempts, backoff: *helloBackoff,
 			unavailableBackoff: *helloUnavail,
