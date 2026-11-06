@@ -146,6 +146,15 @@ log:
 
 # 直连出票配置（阶段 3 批次 2）：battle 与接入层共持同一把票据密钥。
 battle:
+  # memory_mode / memory_limit 是 **GC 调优开关**（实现与口径见 docs/config.md §12）：
+  #   tuned = 启动早期在进程内把 GOGC 关掉（等价 GOGC=off）+ 设内存软上限，让「上限」成为唯一
+  #   GC 触发条件；不配置 = 完全不动运行时（现行为零变化）。
+  # 为什么开（2026-11-06，4,096 流 KCP，两组各 3 轮、每组前整套重启）：
+  #   p99 77.4→68.4（−12%）、p50 3.81→2.88（−24%）、吞吐不变（80.1k→80.5k pps）；
+  #   代价是每个 battle 进程 RSS 约 +250MB（上限 2GiB 时实测 1.5GB）。
+  # 内存 <16GB 的机器不建议开（docs/config.md §12）。
+  memory_mode: tuned
+  memory_limit: 2GiB
   # ticket_key 是入场票据的 AEAD 密钥（base64 的 32 字节）；**缺失/长度不符即启动失败**
   #（不提供默认值）。生产经配置中心注入，且必须与 services/edge 的 edge.ticket_key 同值；
   # 下面这串仅供本地开发（字节 0x01..0x20）。
