@@ -342,6 +342,7 @@ func (b *BattleActor) OnStart(ctx core.ActorContext) error {
 		TickInterval:   time.Duration(b.cfg.TickInterval),
 		MaxPlayers:     b.cfg.MaxPlayers,
 		SnapshotEvery:  lockstep.FrameID(b.cfg.SnapshotEvery),
+		InputRetention: inputRetentionFrames(b.cfg.OfflineTimeout, b.cfg.TickInterval),
 		EnableRollback: false,
 		// 恢复失败即启动失败（fail-closed）：迁移恢复的唯一依据是快照，
 		// 静默从第 0 帧重开会让「迁移后帧号一致」变成无声的状态丢失。
@@ -378,4 +379,25 @@ func lockstepType(battleID string) string {
 func (b *BattleActor) OnStop(ctx core.ActorContext, _ types.ExitReason) error {
 	_ = b.rt.Stop(ctx.Context(), b.sessionPID)
 	return nil
+}
+
+// inputRetentionFrames 返回帧输入日志的保留帧数：覆盖「玩家还能重连的时长」再留一倍余量。
+//
+// 依据（2026-11-09 实测）：日志整局保留时，10 人局 × 30 Hz 每帧约 1.1KB、20000 帧/局约 22MiB；
+// 410 局并发约 9GB，battle 单进程 RSS 涨到 8.4GB 仍在涨，GC 烧到 10 核仍跟不上，30 Hz 长跑
+// 在 100–200 秒整体崩塌。而超过 offline_timeout 未回来的玩家已被判出局、不会再要帧——
+// 窗口只需覆盖该时长（×2 余量），内存随之与「并发局数」成正比、与对局时长无关。
+func inputRetentionFrames(offline time.Duration, tick int64) lockstep.FrameID {
+	const minRetention = 600 // 下限：未配 offline_timeout 的测试场景也不无限增长
+	if tick <= 0 {
+		return 0
+	}
+	frames := lockstep.FrameID(0)
+	if offline > 0 {
+		frames = lockstep.FrameID(2 * offline.Nanoseconds() / tick)
+	}
+	if frames < minRetention {
+		frames = minRetention
+	}
+	return frames
 }

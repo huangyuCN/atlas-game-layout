@@ -11,6 +11,7 @@ import (
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	atlasjson "github.com/huangyuCN/atlas/encoding/json"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
+	atlasframe "github.com/huangyuCN/atlas/transport/frame"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -20,7 +21,7 @@ func TestClipSyncReplyKeepsMaximalPrefix(t *testing.T) {
 	base := fakeSyncReply(200)
 	const kept = 57
 	budget := encodedPayloadSize(t, syncCandidate(base, kept))
-	got, err := clipSyncReply(base, budget)
+	got, err := clipSyncReply(base, budget, atlasframe.Version)
 	if err != nil {
 		t.Fatalf("预算恰好装下 %d 帧却报错: %v", kept, err)
 	}
@@ -45,7 +46,7 @@ func TestClipSyncReplyKeepsMaximalPrefix(t *testing.T) {
 // TestClipSyncReplyRejectsUnfittableFrame 验证「连一个帧组都装不下」时明确拒绝：
 // 绝不下发必然被整包丢弃的超包回执，reason 与超包口径一致（客户端可判定）。
 func TestClipSyncReplyRejectsUnfittableFrame(t *testing.T) {
-	got, err := clipSyncReply(fakeSyncReply(3), 16)
+	got, err := clipSyncReply(fakeSyncReply(3), 16, atlasframe.Version)
 	if got != nil {
 		t.Fatal("装不下时不得返回回执（超包必然被丢弃）")
 	}
@@ -57,7 +58,7 @@ func TestClipSyncReplyRejectsUnfittableFrame(t *testing.T) {
 // TestClipSyncReplyCaughtUp 验证没有缺失帧时直接给出「已追平」的续传点
 // （next_frame = current_frame + 1、has_more = false）：客户端据此收手，不靠猜。
 func TestClipSyncReplyCaughtUp(t *testing.T) {
-	got, err := clipSyncReply(&battlev1.SyncFramesReply{CurrentFrame: 7}, framelimit.ReplyBudget)
+	got, err := clipSyncReply(&battlev1.SyncFramesReply{CurrentFrame: 7}, framelimit.ReplyBudget, atlasframe.Version)
 	if err != nil {
 		t.Fatalf("无缺失帧不该报错: %v", err)
 	}
@@ -92,4 +93,74 @@ func encodedPayloadSize(t *testing.T, reply *battlev1.SyncFramesReply) int {
 		t.Fatalf("protojson 编码失败: %v", err)
 	}
 	return max(len(jsonBytes), proto.Size(reply))
+}
+
+// TestSyncFitsBudgetSkipsJSONForProtobuf 钉住热路径：protobuf 客户端（ver=2）**一次 JSON 编码都不做**。
+//
+// 为什么关键：这段判定跑在单线程的 actor cell 里，原实现无条件把回执整包 protojson 编码一遍，
+// 又被二分查找反复调用；30 Hz 下 4,096 个探针/秒把它放大成 battle 55% 的 CPU（profile 实测），
+// 最终拖垮 cell 导致整段崩塌。而实测 4,990/5,000 个客户端协商的都是 ver=2。
+func TestSyncFitsBudgetSkipsJSONForProtobuf(t *testing.T) {
+	reply := fakeSyncReply(200)
+	budget := proto.Size(reply) // 只够二进制：JSON 一定超
+	jsonBytes, err := atlasjson.MarshalOptions.Marshal(reply)
+	if err != nil {
+		t.Fatalf("protojson 编码失败: %v", err)
+	}
+	if len(jsonBytes) <= budget {
+		t.Fatalf("用例前提不成立：JSON(%d) 应大于预算(%d)", len(jsonBytes), budget)
+	}
+
+	orig := marshalJSONFn
+	calls := 0
+	marshalJSONFn = func(m proto.Message) ([]byte, error) {
+		calls++
+		return orig(m)
+	}
+	t.Cleanup(func() { marshalJSONFn = orig })
+
+	if !syncFitsBudget(reply, budget, atlasframe.Version2) {
+		t.Fatal("protobuf 客户端：二进制装得下就应通过")
+	}
+	if calls != 0 {
+		t.Fatalf("protobuf 客户端不该做 JSON 编码，实际调用 %d 次", calls)
+	}
+}
+
+// TestSyncFitsBudgetChecksJSONForProtojson 钉住正确性：ver=1 与「版本未知」都必须按 JSON 判定
+// （未知时取最保守口径，与旧行为一致——宁可少发帧，也不下发必然被整包丢弃的超包回执）。
+func TestSyncFitsBudgetChecksJSONForProtojson(t *testing.T) {
+	reply := fakeSyncReply(200)
+	budget := proto.Size(reply) // 二进制装得下、JSON 装不下
+	if syncFitsBudget(reply, budget, atlasframe.Version) {
+		t.Fatal("protojson 客户端：JSON 超预算必须判不合格")
+	}
+	if syncFitsBudget(reply, budget, 0) {
+		t.Fatal("版本未知时必须取最保守口径（JSON 也要检查）")
+	}
+}
+
+// TestClipSyncReplyKeepsMoreForProtobuf 钉住收益：同样的预算下，protobuf 客户端能一次拿到
+// 全部帧（JSON 口径会裁掉大半）——这正是按版本分流要拿到的效果。
+func TestClipSyncReplyKeepsMoreForProtobuf(t *testing.T) {
+	base := fakeSyncReply(200)
+	budget := proto.Size(syncCandidate(base, 200)) // 二进制全量刚好装下（含续传字段）
+
+	jsonGot, err := clipSyncReply(base, budget, atlasframe.Version)
+	if err != nil {
+		t.Fatalf("protojson 裁剪报错: %v", err)
+	}
+	binGot, err := clipSyncReply(base, budget, atlasframe.Version2)
+	if err != nil {
+		t.Fatalf("protobuf 裁剪报错: %v", err)
+	}
+	if n := len(binGot.GetMissed()); n != 200 {
+		t.Fatalf("protobuf 客户端应一次拿到全部 200 帧，实际 %d", n)
+	}
+	if n := len(jsonGot.GetMissed()); n >= 200 {
+		t.Fatalf("protojson 口径应因 JSON 更大而裁剪，实际未裁（%d）", n)
+	}
+	if binGot.GetHasMore() {
+		t.Fatal("protobuf 客户端拿全了帧，has_more 应为 false")
+	}
 }

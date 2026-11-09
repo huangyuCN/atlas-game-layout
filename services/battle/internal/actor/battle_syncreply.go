@@ -11,6 +11,7 @@ import (
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	atlasjson "github.com/huangyuCN/atlas/encoding/json"
 	atlaserrors "github.com/huangyuCN/atlas/errors"
+	atlasframe "github.com/huangyuCN/atlas/transport/frame"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -20,16 +21,16 @@ import (
 //   - 未截断时 next_frame = current_frame + 1、has_more = false（已追平，客户端收手）。
 //
 // 连一个帧组都装不下时返回可判定拒绝：宁可明确失败，也不下发必然被丢弃的超包回执。
-func clipSyncReply(reply *battlev1.SyncFramesReply, budget int) (*battlev1.SyncFramesReply, error) {
+func clipSyncReply(reply *battlev1.SyncFramesReply, budget int, ver uint8) (*battlev1.SyncFramesReply, error) {
 	if len(reply.GetMissed()) == 0 {
 		return withContinuation(reply, reply.GetCurrentFrame()+1, false), nil
 	}
-	kept := fitSyncGroups(reply, budget)
+	kept := fitSyncGroups(reply, budget, ver)
 	if kept == 0 {
 		return nil, syncOversizeErr(reply, budget)
 	}
 	out := syncCandidate(reply, kept)
-	if !syncFitsBudget(out, budget) { // 防御：候选与最终产物同一组装口径，正常不会失败
+	if !syncFitsBudget(out, budget, ver) { // 防御：候选与最终产物同一组装口径，正常不会失败
 		return nil, syncOversizeErr(reply, budget)
 	}
 	return out, nil
@@ -59,31 +60,49 @@ func syncCandidate(base *battlev1.SyncFramesReply, k int) *battlev1.SyncFramesRe
 // fitSyncGroups 二分出能装进预算的最大帧组数（0 = 连一个帧组都装不下）。
 // 帧组按帧号连续排列，回执大小随帧组数单调增（repeated 字段只增不减），故可二分；
 // 末尾再线性收敛一次，兜住「续传点位数变化」这类一两个字节的微扰。
-func fitSyncGroups(base *battlev1.SyncFramesReply, budget int) int {
+func fitSyncGroups(base *battlev1.SyncFramesReply, budget int, ver uint8) int {
 	lo, hi := 0, len(base.GetMissed())
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
-		if syncFitsBudget(syncCandidate(base, mid), budget) {
+		if syncFitsBudget(syncCandidate(base, mid), budget, ver) {
 			lo = mid
 		} else {
 			hi = mid - 1
 		}
 	}
-	for lo > 0 && !syncFitsBudget(syncCandidate(base, lo), budget) {
+	for lo > 0 && !syncFitsBudget(syncCandidate(base, lo), budget, ver) {
 		lo--
 	}
 	return lo
 }
 
-// syncFitsBudget 判断回执在**两种载荷编码**下都装得进预算：ver=1 走 protojson
-// （EmitUnpopulated，回执最大的形态）、ver=2 走 protobuf 二进制。两者都算一遍，
-// 「无论客户端用哪种编码」都不会超包——不靠「JSON 一定比二进制大」这类经验假设。
-func syncFitsBudget(reply *battlev1.SyncFramesReply, budget int) bool {
-	jsonBytes, err := atlasjson.MarshalOptions.Marshal(reply)
+// marshalJSONFn 是「量回执 JSON 尺寸」的接缝：生产恒为 protojson（EmitUnpopulated，最大形态），
+// 仅供测试注入计数，用来钉住「protobuf 客户端不再触发整包 JSON 编码」。
+var marshalJSONFn = atlasjson.MarshalOptions.Marshal
+
+// syncFitsBudget 判断回执在**客户端实际使用的载荷编码**下装得进预算。
+//
+// 两种编码的判据不同，且只有一种会真正落包（handler 的 enc 已按请求帧的 ver 分派）：
+//   - ver=2（protobuf）：只看 proto.Size，**不做 JSON 编码**；
+//   - ver=1（protojson）或未知（0）：JSON 与二进制都算——未知时取最保守口径，与旧行为一致。
+//
+// 为什么要按版本分流（2026-11-09 实测）：原实现无条件把两种编码各算一遍，而这段计算发生在
+// **单线程的 actor cell 里**，又被 fitSyncGroups 的二分反复调用（每次 SyncFrames 要整包 JSON
+// 编码 5–10 遍）。30 Hz 下 4,096 个探针/秒把它放大成 battle 55% 的 CPU（profile 实测：
+// protojson.MarshalOptions.marshal cum 55.42%），cell 被拖垮后帧处理全面积压、最终整段崩塌。
+// 而实测 4,990/5,000 个客户端协商的是 ver=2 —— 这些 JSON 编码一次都不需要。
+func syncFitsBudget(reply *battlev1.SyncFramesReply, budget int, ver uint8) bool {
+	if proto.Size(reply) > budget {
+		return false
+	}
+	if ver == atlasframe.Version2 {
+		return true
+	}
+	jsonBytes, err := marshalJSONFn(reply)
 	if err != nil {
 		return false
 	}
-	return len(jsonBytes) <= budget && proto.Size(reply) <= budget
+	return len(jsonBytes) <= budget
 }
 
 // frameOfGroup 返回帧组的帧号：优先帧组自带的 frame_id，缺失时回落到组内首个输入的

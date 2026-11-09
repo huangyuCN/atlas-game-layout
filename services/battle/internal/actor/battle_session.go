@@ -12,6 +12,7 @@ import (
 	locksteppb "github.com/huangyuCN/atlas/api/lockstep"
 	"github.com/huangyuCN/atlas/contrib/actor/core"
 	"github.com/huangyuCN/atlas/lockstep"
+	atlasframe "github.com/huangyuCN/atlas/transport/frame"
 )
 
 // Create 实现 battlev1actor.BattleService：仅登记参战名单（管理面/测试与既有契约保留）。
@@ -72,7 +73,9 @@ func (b *BattleActor) SyncFrames(ctx core.ActorContext, req *battlev1.SyncFrames
 	if err != nil {
 		return nil, err
 	}
-	return clipSyncReply(reconnect, framelimit.ReplyBudget)
+	// 按客户端实际协商的载荷编码裁剪：ver=2（protobuf）不必再算一遍 protojson。
+	ver, _ := atlasframe.PayloadVersionFromContext(ctx.Context())
+	return clipSyncReply(reconnect, framelimit.ReplyBudget, ver)
 }
 
 // GetState 实现 battlev1actor.BattleService：状态查询（grpc 管理接口转发）。
